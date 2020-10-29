@@ -33,6 +33,7 @@ app.UseWebSocketRoute(app.ApplicationServices);
 3. Mark WebSocket Endpoints
     - Go to Controller -> Action
     - Add attribute [WebSocket]  
+> [WebSocket] -> "method" parameter ignore case
     
 Example Code:
 ```C#
@@ -53,9 +54,11 @@ public IEnumerable<WeatherForecast> Get()
 
 ## Request and Response
 
-> Scheme namespace  
+> Scheme namespace 👇  
 > Request Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme  
 > Response Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme  
+
+> Request target ignore case
 
 > Request scheme  
 1. Nonparametric method request
