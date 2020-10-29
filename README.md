@@ -4,7 +4,7 @@
 # QuickStart
 
 1. Install library
-    - Install-Package Cyaim.WebSocketServer -Version 1.0.0
+> Install-Package Cyaim.WebSocketServer -Version 1.0.0
 2. Configure middleware
 - Configure websocket route
 ```C#
@@ -36,14 +36,13 @@ app.UseWebSocketRoute(app.ApplicationServices);
     
 Example Code:
 ```C#
-
 // mark WebSocket 
 [WebSocket()]
 [HttpGet]
 public IEnumerable<WeatherForecast> Get()
 {
     var rng = new Random();
-    return Enumerable.Range(1, 5).Select(index => new WeatherForecast
+    return Enumerable.Range(1, 2).Select(index => new WeatherForecast
     {
          Date = DateTime.Now.AddDays(index),
          TemperatureC = rng.Next(-20, 55),
@@ -54,11 +53,11 @@ public IEnumerable<WeatherForecast> Get()
 
 ## Request and Response
 
-> Scheme namespace
-> Request Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme
-> Response Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme
+> Scheme namespace  
+> Request Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme  
+> Response Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme  
 
-> Request scheme
+> Request scheme  
 1. Nonparametric method request
 ```json
 {
@@ -68,7 +67,7 @@ public IEnumerable<WeatherForecast> Get()
 ```
 This request will be located at "WeatherForecastController" -> "Get" Method.  
 
-> Response to this request
+> Response to this request  
 ```json
 {
 	"Status": 0,
@@ -85,25 +84,67 @@ This request will be located at "WeatherForecastController" -> "Get" Method.
 		"TemperatureC": 1,
 		"TemperatureF": 33,
 		"Summary": "Chilly"
-	}, {
-		"Date": "2020-11-01T13:50:38.2133373+08:00",
-		"TemperatureC": 0,
-		"TemperatureF": 32,
-		"Summary": "Cool"
-	}, {
-		"Date": "2020-11-02T13:50:38.2133374+08:00",
-		"TemperatureC": -2,
-		"TemperatureF": 29,
-		"Summary": "Hot"
-	}, {
-		"Date": "2020-11-03T13:50:38.2133376+08:00",
-		"TemperatureC": 43,
-		"TemperatureF": 109,
-		"Summary": "Hot"
 	}]
 }
 ```
 Forward invoke method return content will write MvcResponseScheme.Body.  
 
-2. Request with parameters
+2. Request with parameters  
+Example Code:
+1. Change method code to:
+```C#
+[WebSocket]
+[HttpGet]
+public IEnumerable<WeatherForecast> Get(Test a)
+{
+    var rng = new Random();
+    return Enumerable.Range(1, 2).Select(index => new WeatherForecast
+    {
+         TemperatureC = a.PreTemperatureC + rng.Next(-20, 55),
+         Summary = a.PreSummary + Summaries[rng.Next(Summaries.Length)]
+    }).ToArray();
+}
+```
 
+2. Define parameter class
+```C#
+public class Test
+{
+    public string PreSummary { get; set; }
+    public int PreTemperatureC { get; set; }
+}
+```
+
+> Request parameter  
+```json
+{
+	"target": "WeatherForecast.Get",
+	"body": {
+	    "PreSummary":"Cyaim_",
+	    "PreTemperatureC":233
+	}
+}
+```
+Request body will write invoke method parameter.
+  
+  
+> Response to this request  
+```json
+{
+	"Status": 0,
+	"Msg": null,
+	"RequestTime": 0,
+	"ComplateTime": 637395922139434966,
+	"Body": [{
+		"Date": "0001-01-01T00:00:00",
+		"TemperatureC": 282,
+		"TemperatureF": 539,
+		"Summary": "Cyaim_Warm"
+	}, {
+		"Date": "0001-01-01T00:00:00",
+		"TemperatureC": 285,
+		"TemperatureF": 544,
+		"Summary": "Cyaim_Sweltering"
+	}]
+}
+```
