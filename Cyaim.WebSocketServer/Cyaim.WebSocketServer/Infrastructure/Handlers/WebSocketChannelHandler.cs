@@ -146,7 +146,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                     MvcResponseScheme mvcResponse = new MvcResponseScheme()
                     {
                         Status = 1,
-                        ReauestTime = requestTime,
+                        RequestTime = requestTime,
                         ComplateTime = DateTime.Now.Ticks,
                         Msg = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> \r\n {ex.Message}\r\n{ex.StackTrace}",
                     };
@@ -163,7 +163,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                 try
                 {
                     result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-
+                    requestTime = DateTime.Now.Ticks;
 
                     json = json.Append(Encoding.UTF8.GetString(buffer[..result.Count]));
                     //json += Encoding.UTF8.GetString(buffer[..result.Count]);
@@ -188,7 +188,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                     MvcResponseScheme mvcResponse = new MvcResponseScheme()
                     {
                         Status = 1,
-                        ReauestTime = requestTime,
+                        RequestTime = requestTime,
                         ComplateTime = DateTime.Now.Ticks,
                         Msg = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> \r\n {ex.Message}\r\n{ex.StackTrace}",
                     };
@@ -199,7 +199,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                     MvcResponseScheme mvcResponse = new MvcResponseScheme()
                     {
                         Status = 1,
-                        ReauestTime = requestTime,
+                        RequestTime = requestTime,
                         ComplateTime = DateTime.Now.Ticks,
                         Msg = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 请求解析错误\r\n {ex.Message}\r\n{ex.StackTrace}",
                     };
@@ -360,10 +360,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             }
             catch (Exception ex)
             {
-                return new MvcResponseScheme() { Status = 1, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath}\r\n{ex.Message}\r\n{ex.StackTrace}", ReauestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
+                return new MvcResponseScheme() { Status = 1, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath}\r\n{ex.Message}\r\n{ex.StackTrace}", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
             }
 
-            NotFound: return new MvcResponseScheme() { Status = 2, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath} not found", ReauestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
+            NotFound: return new MvcResponseScheme() { Status = 2, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath} not found", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
         }
 
         /// <summary>

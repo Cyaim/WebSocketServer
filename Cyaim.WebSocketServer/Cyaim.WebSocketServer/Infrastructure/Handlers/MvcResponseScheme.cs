@@ -23,7 +23,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <summary>
         /// Request time tick
         /// </summary>
-        public long ReauestTime { get; set; }
+        public long RequestTime { get; set; }
 
         /// <summary>
         /// Handle complate time tick
