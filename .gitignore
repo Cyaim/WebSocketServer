@@ -6,3 +6,5 @@
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer/bin/Debug/netstandard2.1
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer/obj
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example/obj
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example/bin/Release/netcoreapp3.1
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example/Properties/PublishProfiles
