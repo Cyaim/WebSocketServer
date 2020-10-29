@@ -32,5 +32,22 @@ app.UseWebSocketRoute(app.ApplicationServices);
 
 3. Mark WebSocket Endpoints
     - Go to Controller -> Action
-    - Add attribute [WebSocket]
+    - Add attribute [WebSocket]  
+    
+Example Code:
+```C#
+
+// mark WebSocket 
+[WebSocket()]
+[HttpGet]
+public IEnumerable<WeatherForecast> Get()
+{
+    var rng = new Random();
+    return Enumerable.Range(1, 5).Select(index => new WeatherForecast
+    {
+         Date = DateTime.Now.AddDays(index),
+         TemperatureC = rng.Next(-20, 55),
+         Summary = Summaries[rng.Next(Summaries.Length)]
+    }).ToArray();
+}
 ```
