@@ -12,9 +12,16 @@ using System.Text;
 
 namespace Cyaim.WebSocketServer.Infrastructure
 {
+    /// <summary>
+    /// WebSocket Route service extensions
+    /// </summary>
     public static class WebSocketRouteServiceCollectionExtensions
     {
-
+        /// <summary>
+        /// Configure WebSocketRoute Middleware
+        /// </summary>
+        /// <param name="services"></param>
+        /// <param name="setupAction"></param>
         public static void ConfigureWebSocketRoute(this IServiceCollection services, Action<WebSocketRouteOption> setupAction)
         {
 
@@ -76,11 +83,11 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     if (string.IsNullOrEmpty(parmItem.Methods.FirstOrDefault()))
                     {
                         parmItem.Methods = new string[] { parmItem.Action };
-                        parmItem.Class = item;
                     }
 
-
-                    parmItem.MethodPath = $"{parmItem.Controller}.{parmItem.Action}";
+                    //not supported 
+                    parmItem.MethodPath = $"{parmItem.Controller.Replace("Controller", "")}.{parmItem.Methods.FirstOrDefault()}";
+                    parmItem.Class = item;
                     Console.WriteLine($"加载成功 -> { parmItem.MethodPath}");
                 }
 
@@ -156,7 +163,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
 
 
         /// <summary>
-        /// 获取程序集Controller中的WebSocket节点
+        /// Get assembly controller "WebSocket" EndPoint
         /// </summary>
         /// <typeparam name="T"></typeparam>
         /// <returns></returns>
@@ -167,7 +174,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
         }
 
         /// <summary>
-        /// 获取程序集Controller中的WebSocket节点
+        /// Get assembly controller "WebSocket" EndPoint
         /// </summary>
         /// <param name="type"></param>
         /// <returns></returns>

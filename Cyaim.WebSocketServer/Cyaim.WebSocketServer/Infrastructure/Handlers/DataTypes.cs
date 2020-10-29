@@ -23,6 +23,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         public const string Type_Decimal = "System.Decimal";
         public const string Type_String = "System.String";
 
+        /// <summary>
+        /// object to real type
+        /// </summary>
+        /// <param name="type"></param>
+        /// <param name="value"></param>
+        /// <returns></returns>
         public static object ConvertTo(this Type type, object value)
         {
             switch (type.FullName)
@@ -62,6 +68,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             }
         }
 
+        /// <summary>
+        /// Check type is C# define type
+        /// </summary>
+        /// <param name="type"></param>
+        /// <returns></returns>
         public static bool IsBasicType(this Type type)
         {
             switch (type.FullName)

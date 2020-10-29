@@ -10,44 +10,48 @@ using System.Threading.Tasks;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Configures
 {
+    /// <summary>
+    /// WebSocketRoute run parameter
+    /// </summary>
     public class WebSocketRouteOption
     {
         /// <summary>
-        /// 依赖注入
+        /// Dependency injection container
         /// </summary>
         public static IServiceProvider ApplicationServices { get; set; }
 
         /// <summary>
-        /// 注入的HttpContext属性名,注入类型：HttpContext
+        /// Injection HttpContext property name,Injection property type: HttpContext
         /// </summary>
         public string InjectionHttpContextPropertyName { get; set; } = "WebSocketHttpContext";
 
         /// <summary>
-        /// 注入的WebSocket属性名,注入类型：WebSocket
+        /// Injection WebSocket property name,Injection property type: WebSocket
         /// </summary>
         public string InjectionWebSocketClientPropertyName { get; set; } = "WebSocketClient";
 
         /// <summary>
-        /// 频道处理程序
+        /// Channel handlers
         /// </summary>
         public Dictionary<string, WebSocketChannelHandler> WebSocketChannels { get; set; }
 
         /// <summary>
-        /// 监听程序集上下文
+        /// Watch assembly context
         /// </summary>
         public WatchAssemblyContext WatchAssemblyContext { get; set; }
 
         /// <summary>
-        /// 监听程序集路径
+        /// watch assembly path
         /// </summary>
         public string WatchAssemblyPath { get; set; }
 
         /// <summary>
-        /// 频道处理程序
+        /// Channel handler
         /// </summary>
-        /// <param name="context">Http上下文</param>
-        /// <param name="webSocketManager">Http请求中WebSocket</param>
-        /// <param name="logger">日志</param>
+        /// <param name="context">Http context</param>
+        /// <param name="webSocketManager">Http request WebSocket</param>
+        /// <param name="logger">logger</param>
+        /// <param name="webSocketOptions">WebSocket configure option</param>
         /// <returns></returns>
 
         public delegate Task WebSocketChannelHandler(HttpContext context, WebSocketManager webSocketManager, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions);

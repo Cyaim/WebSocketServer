@@ -7,45 +7,51 @@ using System.Text;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Configures
 {
+    /// <summary>
+    /// Watch assembly context
+    /// </summary>
     public class WatchAssemblyContext
     {
         /// <summary>
-        /// 监听程序集路径
+        /// assembly path
         /// </summary>
         public string WatchAssemblyPath { get; set; }
 
         /// <summary>
-        /// 监听程序集
+        /// Type in assemblys
         /// </summary>
         public List<Type> WatchAssemblyTypes { get; set; }
 
         /// <summary>
-        /// 监听的访问节点
+        /// Assembly in WebSocketAttributes
         /// </summary>
         public WebSocketEndPoint[] WatchEndPoint { get; set; }
 
         /// <summary>
-        /// 监听的访问节点与对应函数
+        /// K WebSocket "MethodPath",V "MethodInfo"
         /// </summary>
         public ConcurrentDictionary<string, MethodInfo> WatchMethods { get; set; } = new ConcurrentDictionary<string, MethodInfo>();
 
         /// <summary>
-        /// 程序集的构造函数
+        /// Constructor in assembly type
         /// </summary>
         public Dictionary<Type, ConstructorInfo[]> AssemblyConstructors { get; set; }
 
         /// <summary>
-        /// 程序集构造函数的参数列表
+        /// Constructor parameter list
+        /// K class type,V class constructor parameter list
         /// </summary>
         public Dictionary<Type, ConstructorParameter[]> CoustructorParameters { get; set; }
 
         /// <summary>
-        /// 程序集中构造函数参数最多的函数
+        /// Constructor most parameter in class
+        /// K Class type,V Constructor parameter
         /// </summary>
         public Dictionary<Type, ConstructorParameter> MaxCoustructorParameters { get; set; }
 
         /// <summary>
-        /// 程序集中公开函数的参数列表
+        /// Method parameter list in class public method
+        /// K MethodInfo,V ParameterInfo
         /// </summary>
         public Dictionary<MethodInfo, ParameterInfo[]> MethodParameters { get; set; }
     }

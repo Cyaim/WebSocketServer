@@ -5,36 +5,38 @@ using System.Text;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Configures
 {
+    /// <summary>
+    /// WebSocket endpoint
+    /// </summary>
     public class WebSocketEndPoint
     {
         /// <summary>
-        /// 控制器名称
+        /// Controller Name
         /// </summary>
         public string Controller { get; set; }
 
         /// <summary>
-        /// 控制器方法
+        /// Action of controller
         /// </summary>
         public string Action { get; set; }
 
         /// <summary>
-        /// 访问路径
+        /// WebSocket request target
         /// </summary>
         public string MethodPath { get; set; }
 
         /// <summary>
-        /// 访问方法
-        /// 特性标记的Name
+        /// WebSocket Attribute method name
         /// </summary>
         public string[] Methods { get; set; }
 
         /// <summary>
-        /// 方法
+        /// Method of action
         /// </summary>
         public MethodInfo MethodInfo { get; set; }
 
         /// <summary>
-        /// 类
+        /// Endpoint where class
         /// </summary>
         public Type Class { get; set; }
 

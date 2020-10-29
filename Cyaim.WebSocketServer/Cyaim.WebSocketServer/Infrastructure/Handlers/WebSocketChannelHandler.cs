@@ -21,14 +21,24 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 {
     public class WebSocketChannelHandler
     {
-
+        /// <summary>
+        /// Connected clients
+        /// </summary>
         public static ConcurrentDictionary<string, WebSocket> Clients { get; set; } = new ConcurrentDictionary<string, WebSocket>();
 
-        public HttpContext context;
-        public ILogger<WebSocketRouteMiddleware> logger;
-        public WebSocketRouteOption webSocketOption;
-        public WebSocket webSocket;
+        private HttpContext context;
+        private ILogger<WebSocketRouteMiddleware> logger;
+        private WebSocketRouteOption webSocketOption;
+        private WebSocket webSocket;
 
+        /// <summary>
+        /// Mvc Channel entry
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="webSocketManager"></param>
+        /// <param name="logger"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <returns></returns>
         public async Task MvcChannelHandler(HttpContext context, WebSocketManager webSocketManager, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions)
         {
             this.context = context;
@@ -69,14 +79,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             }
             finally
             {
-                OnDisConnected(context, logger);
+                OnDisConnected(context, this.webSocket, logger);
             }
 
         }
 
 
         /// <summary>
-        /// 根据WebSocket数据类型转发
+        /// Forward by WebSocket transfer type
         /// </summary>
         /// <param name="context"></param>
         /// <param name="webSocket"></param>
@@ -96,11 +106,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             }
 
             //链接断开
-            await webSocket.CloseAsync(result.CloseStatus.Value, result.CloseStatusDescription, CancellationToken.None);
+            await webSocket.CloseAsync(webSocket.CloseStatus.Value, result.CloseStatusDescription, CancellationToken.None);
         }
 
         /// <summary>
-        /// 文本请求转发
+        /// Type by Text transfer
         /// </summary>
         /// <param name="result"></param>
         /// <param name="buffer"></param>
@@ -216,17 +226,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         }
 
         /// <summary>
-        /// 使用并发安全的字段类型缓存请求Path与处理请求函数
-        /// </summary>
-        private static ConcurrentDictionary<string, MethodInfo> ExecuteMethods = new ConcurrentDictionary<string, MethodInfo>();
-
-        /// <summary>
-        /// 转发请求
+        /// Forward request to endpoint method
         /// </summary>
         /// <param name="webSocketOptions"></param>
         /// <param name="context"></param>
         /// <param name="webSocket"></param>
         /// <param name="request"></param>
+        /// <param name="logger"></param>
         /// <returns></returns>
         public static async Task<object> DistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, MvcRequestScheme request, ILogger<WebSocketRouteMiddleware> logger)
         {
@@ -246,7 +252,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                     {
                         //找不到访问目标
 
-                        return null;
+                        goto NotFound;
                     }
 
                     #region 注入Socket的HttpContext和WebSocket客户端
@@ -354,22 +360,58 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             }
             catch (Exception ex)
             {
-                return new MvcResponseScheme() { Status = 1, Msg = $@"Target:{requestPath}\r\n{ex.Message}\r\n{ex.StackTrace}", ReauestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
+                return new MvcResponseScheme() { Status = 1, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath}\r\n{ex.Message}\r\n{ex.StackTrace}", ReauestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
             }
 
-
-            return null;
+            NotFound: return new MvcResponseScheme() { Status = 2, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath} not found", ReauestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
         }
 
         /// <summary>
-        /// 客户端断开链接
+        /// Client close connection
         /// </summary>
         /// <param name="context"></param>
+        /// <param name="webSocket"></param>
         /// <param name="logger"></param>
-        /// <returns></returns>
-        private void OnDisConnected(HttpContext context, ILogger<WebSocketRouteMiddleware> logger)
+        private void OnDisConnected(HttpContext context, WebSocket webSocket, ILogger<WebSocketRouteMiddleware> logger)
         {
-            logger.LogWarning($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已断开({context.Connection.Id})");
+            string msg = string.Empty;
+            switch (webSocket.CloseStatus.Value)
+            {
+                case WebSocketCloseStatus.Empty:
+                    msg = "No error specified.";
+                    break;
+                case WebSocketCloseStatus.EndpointUnavailable:
+                    msg = "Indicates an endpoint is being removed. Either the server or client will become unavailable.";
+                    break;
+                case WebSocketCloseStatus.InternalServerError:
+                    msg = "The connection will be closed by the server because of an error on the server.";
+                    break;
+                case WebSocketCloseStatus.InvalidMessageType:
+                    msg = "The client or server is terminating the connection because it cannot accept the data type it received.";
+                    break;
+                case WebSocketCloseStatus.InvalidPayloadData:
+                    msg = "The client or server is terminating the connection because it has received data inconsistent with the message type.";
+                    break;
+                case WebSocketCloseStatus.MandatoryExtension:
+                    msg = "The client is terminating the connection because it expected the server to negotiate an extension.";
+                    break;
+                case WebSocketCloseStatus.MessageTooBig:
+                    msg = "Reserved for future use.";
+                    break;
+                case WebSocketCloseStatus.NormalClosure:
+                    msg = "The connection has closed after the request was fulfilled.";
+                    break;
+                case WebSocketCloseStatus.PolicyViolation:
+                    msg = "The connection will be closed because an endpoint has received a messagethat violates its policy.";
+                    break;
+                case WebSocketCloseStatus.ProtocolError:
+                    msg = "The client or server is terminating the connection because of a protocol error.";
+                    break;
+                default:
+                    break;
+            }
+
+            logger.LogWarning($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已断开({context.Connection.Id})\r\nStatus:{webSocket.CloseStatus}\r\n{msg}");
 
             bool wsExists = Clients.ContainsKey(context.Connection.Id);
             if (wsExists)

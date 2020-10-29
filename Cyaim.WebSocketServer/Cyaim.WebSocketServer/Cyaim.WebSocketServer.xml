@@ -1,0 +1,321 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Cyaim.WebSocketServer</name>
+    </assembly>
+    <members>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.ConstructorParameter">
+            <summary>
+            Constructor parameter
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.ConstructorParameter.ConstructorInfo">
+            <summary>
+            Constructor info
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.ConstructorParameter.ParameterInfos">
+            <summary>
+            Parameter in constructor
+            </summary>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.WatchAssemblyContext">
+            <summary>
+            Watch assembly context
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WatchAssemblyContext.WatchAssemblyPath">
+            <summary>
+            assembly path
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WatchAssemblyContext.WatchAssemblyTypes">
+            <summary>
+            Type in assemblys
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WatchAssemblyContext.WatchEndPoint">
+            <summary>
+            Assembly in WebSocketAttributes
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WatchAssemblyContext.WatchMethods">
+            <summary>
+            K WebSocket "MethodPath",V "MethodInfo"
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WatchAssemblyContext.AssemblyConstructors">
+            <summary>
+            Constructor in assembly type
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WatchAssemblyContext.CoustructorParameters">
+            <summary>
+            Constructor parameter list
+            K class type,V class constructor parameter list
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WatchAssemblyContext.MaxCoustructorParameters">
+            <summary>
+            Constructor most parameter in class
+            K Class type,V Constructor parameter
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WatchAssemblyContext.MethodParameters">
+            <summary>
+            Method parameter list in class public method
+            K MethodInfo,V ParameterInfo
+            </summary>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketEndPoint">
+            <summary>
+            WebSocket endpoint
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketEndPoint.Controller">
+            <summary>
+            Controller Name
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketEndPoint.Action">
+            <summary>
+            Action of controller
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketEndPoint.MethodPath">
+            <summary>
+            WebSocket request target
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketEndPoint.Methods">
+            <summary>
+            WebSocket Attribute method name
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketEndPoint.MethodInfo">
+            <summary>
+            Method of action
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketEndPoint.Class">
+            <summary>
+            Endpoint where class
+            </summary>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption">
+            <summary>
+            WebSocketRoute run parameter
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.ApplicationServices">
+            <summary>
+            Dependency injection container
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.InjectionHttpContextPropertyName">
+            <summary>
+            Injection HttpContext property name,Injection property type: HttpContext
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.InjectionWebSocketClientPropertyName">
+            <summary>
+            Injection WebSocket property name,Injection property type: WebSocket
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.WebSocketChannels">
+            <summary>
+            Channel handlers
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.WatchAssemblyContext">
+            <summary>
+            Watch assembly context
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.WatchAssemblyPath">
+            <summary>
+            watch assembly path
+            </summary>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.WebSocketChannelHandler">
+            <summary>
+            Channel handler
+            </summary>
+            <param name="context">Http context</param>
+            <param name="webSocketManager">Http request WebSocket</param>
+            <param name="logger">logger</param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.DataTypes.ConvertTo(System.Type,System.Object)">
+            <summary>
+            object to real type
+            </summary>
+            <param name="type"></param>
+            <param name="value"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.DataTypes.IsBasicType(System.Type)">
+            <summary>
+            Check type is C# define type
+            </summary>
+            <param name="type"></param>
+            <returns></returns>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme">
+            <summary>
+            WebSocket communication scheme
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme.Target">
+            <summary>
+            Request target
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme.Body">
+            <summary>
+            Request context
+            </summary>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme">
+            <summary>
+            WebSocket communication response scheme
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.Status">
+            <summary>
+            Response status.
+            Success:0,Application Error:1,NotFoundTarget:2
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.Msg">
+            <summary>
+            Response message
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.ReauestTime">
+            <summary>
+            Request time tick
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.ComplateTime">
+            <summary>
+            Handle complate time tick
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.Body">
+            <summary>
+            Response body
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.Clients">
+            <summary>
+            Connected clients
+            </summary>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.MvcChannelHandler(Microsoft.AspNetCore.Http.HttpContext,Microsoft.AspNetCore.Http.WebSocketManager,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware},Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption)">
+            <summary>
+            Mvc Channel entry
+            </summary>
+            <param name="context"></param>
+            <param name="webSocketManager"></param>
+            <param name="logger"></param>
+            <param name="webSocketOptions"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.Forward(Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocket)">
+            <summary>
+            Forward by WebSocket transfer type
+            </summary>
+            <param name="context"></param>
+            <param name="webSocket"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.TextForward(System.Net.WebSockets.WebSocketReceiveResult,System.Byte[])">
+            <summary>
+            Type by Text transfer
+            </summary>
+            <param name="result"></param>
+            <param name="buffer"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.DistributeAsync(Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption,Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocket,Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
+            <summary>
+            Forward request to endpoint method
+            </summary>
+            <param name="webSocketOptions"></param>
+            <param name="context"></param>
+            <param name="webSocket"></param>
+            <param name="request"></param>
+            <param name="logger"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.OnDisConnected(Microsoft.AspNetCore.Http.HttpContext,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
+            <summary>
+            Client close connection
+            </summary>
+            <param name="context"></param>
+            <param name="logger"></param>
+            <returns></returns>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.WebSocketRouteServiceCollectionExtensions">
+            <summary>
+            WebSocket Route service extensions
+            </summary>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketRouteServiceCollectionExtensions.ConfigureWebSocketRoute(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption})">
+            <summary>
+            Configure WebSocketRoute Middleware
+            </summary>
+            <param name="services"></param>
+            <param name="setupAction"></param>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketRouteServiceCollectionExtensions.GetClassAccessParm``1">
+            <summary>
+            Get assembly controller "WebSocket" EndPoint
+            </summary>
+            <typeparam name="T"></typeparam>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketRouteServiceCollectionExtensions.GetClassAccessParm(System.Type)">
+            <summary>
+            Get assembly controller "WebSocket" EndPoint
+            </summary>
+            <param name="type"></param>
+            <returns></returns>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware">
+            <summary>
+            WebSocket Route Middleware
+            </summary>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware.#ctor(Microsoft.AspNetCore.Http.RequestDelegate,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware},Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption)">
+            <summary>
+            WebSocketRoute Middleware
+            </summary>
+            <param name="next"></param>
+            <param name="logger"></param>
+            <param name="webSocketOptions"></param>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware.Invoke(Microsoft.AspNetCore.Http.HttpContext)">
+            <summary>
+            Middleware call
+            </summary>
+            <param name="context"></param>
+            <returns></returns>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddlewareExtensions">
+            <summary>
+            WebSocketRouteMiddleware Extensions
+            </summary>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddlewareExtensions.UseWebSocketRoute(Microsoft.AspNetCore.Builder.IApplicationBuilder,System.IServiceProvider)">
+            <summary>
+            Add Cyaim.WebSocketServer.Infrastructure.Middlewares.WebSocketRouteMiddleware Middleware.
+            The websocket request will execute the with relation endpoint methods.
+            </summary>
+            <param name="app"></param>
+            <param name="serviceProvider"></param>
+            <returns></returns>
+        </member>
+    </members>
+</doc>

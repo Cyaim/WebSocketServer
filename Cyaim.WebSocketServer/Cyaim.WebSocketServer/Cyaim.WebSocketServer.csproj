@@ -2,6 +2,15 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <Authors>Psyche</Authors>
+    <Company>Cyaim Studio</Company>
+    <PackageProjectUrl>https://github.com/Cyaim/WebSocketServer</PackageProjectUrl>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DocumentationFile>E:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Cyaim.WebSocketServer\Cyaim.WebSocketServer.xml</DocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
