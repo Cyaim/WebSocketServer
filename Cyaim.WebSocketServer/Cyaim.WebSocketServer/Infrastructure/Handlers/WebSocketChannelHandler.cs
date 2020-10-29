@@ -53,7 +53,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                     {
                         this.webSocket = webSocket;
 
-                        logger.LogWarning($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已建立({context.Connection.Id})");
+                        logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已建立({context.Connection.Id})");
                         bool succ = Clients.TryAdd(context.Connection.Id, webSocket);
                         if (succ)
                         {
@@ -411,7 +411,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                     break;
             }
 
-            logger.LogWarning($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已断开({context.Connection.Id})\r\nStatus:{webSocket.CloseStatus}\r\n{msg}");
+            logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已断开({context.Connection.Id})\r\nStatus:{webSocket.CloseStatus}\r\n{msg}");
 
             bool wsExists = Clients.ContainsKey(context.Connection.Id);
             if (wsExists)
