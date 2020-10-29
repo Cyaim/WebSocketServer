@@ -21,12 +21,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         public static IServiceProvider ApplicationServices { get; set; }
 
         /// <summary>
-        /// Injection HttpContext property name,Injection property type: HttpContext
+        /// Injection HttpContext property name.
+        /// Default property name: WebSocketHttpContext.
+        /// Injection property type: HttpContext
         /// </summary>
         public string InjectionHttpContextPropertyName { get; set; } = "WebSocketHttpContext";
 
         /// <summary>
-        /// Injection WebSocket property name,Injection property type: WebSocket
+        /// Injection WebSocket property name.
+        /// Default property name: WebSocketClient.
+        /// Injection property type: WebSocket
         /// </summary>
         public string InjectionWebSocketClientPropertyName { get; set; } = "WebSocketClient";
 
@@ -41,7 +45,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         public WatchAssemblyContext WatchAssemblyContext { get; set; }
 
         /// <summary>
-        /// watch assembly path
+        /// Watch assembly path
         /// </summary>
         public string WatchAssemblyPath { get; set; }
 
@@ -56,6 +60,34 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
 
         public delegate Task WebSocketChannelHandler(HttpContext context, WebSocketManager webSocketManager, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions);
 
+        /// <summary>
+        /// Before establish connection handler
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="channel"></param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
+        public delegate Task BeforeConnectionHandler(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger);
 
+        /// <summary>
+        /// Before establish connection call
+        /// </summary>
+        public event BeforeConnectionHandler BeforeConnection;
+
+        /// <summary>
+        /// Close connectioned handler
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="channel"></param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
+        public delegate Task DisConnectionedHandler(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger);
+
+        /// <summary>
+        /// Close connectioned call
+        /// </summary>
+        public event DisConnectionedHandler DisConnectioned;
     }
 }

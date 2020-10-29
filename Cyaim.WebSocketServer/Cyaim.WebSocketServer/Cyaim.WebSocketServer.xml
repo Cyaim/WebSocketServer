@@ -4,6 +4,84 @@
         <name>Cyaim.WebSocketServer</name>
     </assembly>
     <members>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Attributes.WebSocketAttribute">
+            <summary>
+            WebSocket Endpoint mark
+            </summary>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Attributes.WebSocketAttribute.#ctor">
+            <summary>
+            Mark action use action name
+            </summary>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Attributes.WebSocketAttribute.#ctor(System.String)">
+            <summary>
+            Mark action use method value
+            </summary>
+            <param name="method"></param>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Attributes.WebSocketAttribute.Method">
+            <summary>
+            Endpoint method name
+            </summary>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Cluster.GlobalClusterCenter">
+            <summary>
+            Global cluster status center
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Cluster.GlobalClusterCenter.ClusterContext">
+            <summary>
+            Cluster context
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Cluster.GlobalClusterCenter.Nodes">
+            <summary>
+            All nodes 
+            </summary>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.ClusterOption">
+            <summary>
+            Cluster configure
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.ClusterOption.ChannelName">
+            <summary>
+            Cluster channel name
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.ClusterOption.Nodes">
+            <summary>
+            Node connection link
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.ClusterOption.NodeLevel">
+            <summary>
+            Service level
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.ClusterOption.IsEnableCurrentService">
+            <summary>
+            Instruct the current node enable services.
+            If set false current node will forward request to other node.
+            Only NodeLevel are valid for Master.
+            </summary>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.ServiceLevel">
+            <summary>
+            Service node
+            </summary>
+        </member>
+        <member name="F:Cyaim.WebSocketServer.Infrastructure.Configures.ServiceLevel.Master">
+            <summary>
+            Master node
+            </summary>
+        </member>
+        <member name="F:Cyaim.WebSocketServer.Infrastructure.Configures.ServiceLevel.Slave">
+            <summary>
+            Slave node
+            </summary>
+        </member>
         <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.ConstructorParameter">
             <summary>
             Constructor parameter
@@ -114,12 +192,16 @@
         </member>
         <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.InjectionHttpContextPropertyName">
             <summary>
-            Injection HttpContext property name,Injection property type: HttpContext
+            Injection HttpContext property name.
+            Default property name: WebSocketHttpContext.
+            Injection property type: HttpContext
             </summary>
         </member>
         <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.InjectionWebSocketClientPropertyName">
             <summary>
-            Injection WebSocket property name,Injection property type: WebSocket
+            Injection WebSocket property name.
+            Default property name: WebSocketClient.
+            Injection property type: WebSocket
             </summary>
         </member>
         <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.WebSocketChannels">
@@ -134,7 +216,7 @@
         </member>
         <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.WatchAssemblyPath">
             <summary>
-            watch assembly path
+            Watch assembly path
             </summary>
         </member>
         <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.WebSocketChannelHandler">
@@ -144,7 +226,38 @@
             <param name="context">Http context</param>
             <param name="webSocketManager">Http request WebSocket</param>
             <param name="logger">logger</param>
+            <param name="webSocketOptions">WebSocket configure option</param>
             <returns></returns>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.BeforeConnectionHandler">
+            <summary>
+            Before establish connection handler
+            </summary>
+            <param name="context"></param>
+            <param name="webSocketOptions"></param>
+            <param name="channel"></param>
+            <param name="logger"></param>
+            <returns></returns>
+        </member>
+        <member name="E:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.BeforeConnection">
+            <summary>
+            Before establish connection call
+            </summary>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.DisConnectionedHandler">
+            <summary>
+            Close connectioned handler
+            </summary>
+            <param name="context"></param>
+            <param name="webSocketOptions"></param>
+            <param name="channel"></param>
+            <param name="logger"></param>
+            <returns></returns>
+        </member>
+        <member name="E:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.DisConnectioned">
+            <summary>
+            Close connectioned call
+            </summary>
         </member>
         <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.DataTypes.ConvertTo(System.Type,System.Object)">
             <summary>
@@ -192,7 +305,7 @@
             Response message
             </summary>
         </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.ReauestTime">
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.RequestTime">
             <summary>
             Request time tick
             </summary>
@@ -249,13 +362,13 @@
             <param name="logger"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.OnDisConnected(Microsoft.AspNetCore.Http.HttpContext,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.OnDisConnected(Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocket,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
             <summary>
             Client close connection
             </summary>
             <param name="context"></param>
+            <param name="webSocket"></param>
             <param name="logger"></param>
-            <returns></returns>
         </member>
         <member name="T:Cyaim.WebSocketServer.Infrastructure.WebSocketRouteServiceCollectionExtensions">
             <summary>
@@ -315,6 +428,16 @@
             </summary>
             <param name="app"></param>
             <param name="serviceProvider"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddlewareExtensions.UseWebSocketRoute(Microsoft.AspNetCore.Builder.IApplicationBuilder,System.IServiceProvider,System.Action{Cyaim.WebSocketServer.Infrastructure.Configures.ClusterOption})">
+            <summary>
+            Add Cyaim.WebSocketServer.Infrastructure.Middlewares.WebSocketRouteMiddleware Middleware.
+            The websocket request will execute the with relation endpoint methods.
+            </summary>
+            <param name="app"></param>
+            <param name="serviceProvider"></param>
+            <param name="clusterOption"></param>
             <returns></returns>
         </member>
     </members>

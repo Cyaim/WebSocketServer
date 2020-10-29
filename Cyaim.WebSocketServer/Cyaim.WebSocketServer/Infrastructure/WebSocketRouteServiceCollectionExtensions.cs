@@ -43,6 +43,11 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 wsrOptions = new WebSocketRouteOption();
             }
 
+            if (wsrOptions.WebSocketChannels == null || wsrOptions.WebSocketChannels.Count < 1)
+            {
+                Console.WriteLine("WebSocket -> 没有定义WebSocket数据处理通道");
+            }
+
 
             Assembly assembly = null;
             if (string.IsNullOrEmpty(wsrOptions?.WatchAssemblyPath))
@@ -86,9 +91,9 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     }
 
                     //not supported 
-                    parmItem.MethodPath = $"{parmItem.Controller.Replace("Controller", "")}.{parmItem.Methods.FirstOrDefault()}";
+                    parmItem.MethodPath = $"{parmItem.Controller.Replace("Controller", "")}.{parmItem.Methods.FirstOrDefault()}".ToLower();
                     parmItem.Class = item;
-                    Console.WriteLine($"加载成功 -> { parmItem.MethodPath}");
+                    Console.WriteLine($"WebSocket加载成功 -> { parmItem.Controller.Replace("Controller", "")}.{parmItem.Methods.FirstOrDefault()}");
                 }
 
                 points.AddRange(accessParm);

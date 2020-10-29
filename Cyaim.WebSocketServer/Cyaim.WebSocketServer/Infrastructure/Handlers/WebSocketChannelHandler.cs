@@ -237,7 +237,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         public static async Task<object> DistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, MvcRequestScheme request, ILogger<WebSocketRouteMiddleware> logger)
         {
             long requestTime = DateTime.Now.Ticks;
-            string requestPath = request.Target;
+            string requestPath = request.Target.ToLower();
             JObject requestBody = request.Body as JObject;
 
             try
@@ -283,8 +283,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                     #endregion
 
                     #region 注入调用方法参数
-                    Stopwatch stopwatch1 = new Stopwatch();
-                    stopwatch1.Start();
                     MvcResponseScheme mvcResponse = new MvcResponseScheme() { Status = 0 };
                     object invokeResult = default;
                     if (requestBody == null)

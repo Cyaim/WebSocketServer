@@ -25,7 +25,7 @@ namespace Cyaim.WebSocketServer.Example.Controllers
         }
 
 
-        // mark WebSocket 
+        // mark WebSocket attribute
         [WebSocket()]
         [HttpGet]
         public IEnumerable<WeatherForecast> Get()
@@ -41,7 +41,7 @@ namespace Cyaim.WebSocketServer.Example.Controllers
         }
 
         [WebSocket("EndPoint")]
-        [HttpGet]
+        [HttpGet("Get1")]
         public IEnumerable<WeatherForecast> Get1()
         {
             var rng = new Random();

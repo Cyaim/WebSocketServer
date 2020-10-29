@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Infrastructure;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
@@ -45,6 +46,10 @@ namespace Cyaim.WebSocketServer.Example
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            Console.OutputEncoding = Encoding.GetEncoding("GB2312");
+            Console.InputEncoding = Encoding.GetEncoding("GB2312");
+
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
