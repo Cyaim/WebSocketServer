@@ -2,6 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Cyaim.WebSocketServer.Infrastructure;
+using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Cyaim.WebSocketServer.Infrastructure.Handlers;
+using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpsPolicy;
@@ -27,15 +31,15 @@ namespace Cyaim.WebSocketServer.Example
         {
             services.AddControllers();
 
-            //services.ConfigureWebSocketRoute(x =>
-            //{
-            //    //Define channels
-            //    x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
-            //    {
-            //        { "/ws",new WebSocketChannelHandler().MvcChannelHandler}
-            //    };
+            services.ConfigureWebSocketRoute(x =>
+            {
+                //Define channels
+                x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
+                {
+                    { "/ws",new WebSocketChannelHandler().MvcChannelHandler}
+                };
 
-            //});
+            });
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -67,7 +71,7 @@ namespace Cyaim.WebSocketServer.Example
 
 
             app.UseWebSockets(webSocketOptions);
-            //app.UseWebSocketRoute(app.ApplicationServices);
+            app.UseWebSocketRoute(app.ApplicationServices);
             //---------------------END---------------------
         }
     }
