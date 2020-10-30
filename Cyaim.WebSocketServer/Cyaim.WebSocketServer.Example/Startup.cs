@@ -66,10 +66,9 @@ namespace Cyaim.WebSocketServer.Example
             //---------------------START---------------------
             var webSocketOptions = new WebSocketOptions()
             {
-                KeepAliveInterval = TimeSpan.FromSeconds(120),
+                KeepAliveInterval = TimeSpan.FromSeconds(15),
                 ReceiveBufferSize = 4 * 1024
             };
-
 
             app.UseWebSockets(webSocketOptions);
             app.UseWebSocketRoute(app.ApplicationServices);
