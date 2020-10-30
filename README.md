@@ -1,7 +1,7 @@
 # WebSocketServer
-| Version | NuGet |
-|--|--|
-[![](https://img.shields.io/badge/.NET%20Standard-2.1-violet.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)|[![](https://img.shields.io/nuget/v/Cyaim.WebSocketServer.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)
+| Version | NuGet | Build |
+|--|--|--|
+[![](https://img.shields.io/badge/.NET%20Standard-2.1-violet.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)|[![](https://img.shields.io/nuget/v/Cyaim.WebSocketServer.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)|[![](https://github.com/Cyaim/WebSocketServer/workflows/.NET%20Core/badge.svg)](https://github.com/Cyaim/WebSocketServer)
 
 > WebSocketServer is lightweight and high performance WebSocket library.support route, full duplex communication.
 
