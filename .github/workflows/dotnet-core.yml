@@ -22,8 +22,8 @@ jobs:
     - name: cd
       run: cd /home/runner/work/WebSocketServer/WebSocketServer/Cyaim.WebSocketServer
     - name: Install dependencies
-      run: dotnet restore
+      run: dotnet restore /home/runner/work/WebSocketServer/WebSocketServer/Cyaim.WebSocketServer
     - name: Build
-      run: dotnet build --configuration Release --no-restore
+      run: dotnet build /home/runner/work/WebSocketServer/WebSocketServer/Cyaim.WebSocketServer --configuration Release --no-restore
     - name: Test
-      run: dotnet test --no-restore --verbosity normal
+      run: dotnet test /home/runner/work/WebSocketServer/WebSocketServer/Cyaim.WebSocketServer --no-restore --verbosity normal
