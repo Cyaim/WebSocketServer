@@ -17,8 +17,10 @@ jobs:
       uses: actions/setup-dotnet@v1
       with:
         dotnet-version: 3.1.301
-    - name: cd
+    - name: ls
       run: ls /home/runner/work/WebSocketServer/WebSocketServer
+    - name: cd
+      run: cd /home/runner/work/WebSocketServer/WebSocketServer/Cyaim.WebSocketServer
     - name: Install dependencies
       run: dotnet restore
     - name: Build
