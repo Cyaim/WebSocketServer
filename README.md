@@ -1,4 +1,9 @@
 # WebSocketServer
+| Version | NuGet |
+|--|--|
+[![](https://img.shields.io/badge/.NET-Standard%202.1+-green.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)
+[![](https://img.shields.io/nuget/v/Cyaim.WebSocketServer.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)
+
 > WebSocketServer is lightweight and high performance WebSocket library.support route, full duplex communication.
 
 # QuickStart
