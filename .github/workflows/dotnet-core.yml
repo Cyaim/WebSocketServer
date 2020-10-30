@@ -1,0 +1,29 @@
+name: .NET Core
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 3.1.301
+    - name: ls
+      run: ls /home/runner/work/WebSocketServer/WebSocketServer
+    - name: cd
+      run: cd /home/runner/work/WebSocketServer/WebSocketServer/Cyaim.WebSocketServer
+    - name: Install dependencies
+      run: dotnet restore /home/runner/work/WebSocketServer/WebSocketServer/Cyaim.WebSocketServer
+    - name: Build
+      run: dotnet build /home/runner/work/WebSocketServer/WebSocketServer/Cyaim.WebSocketServer --configuration Release --no-restore
+    - name: Test
+      run: dotnet test /home/runner/work/WebSocketServer/WebSocketServer/Cyaim.WebSocketServer --no-restore --verbosity normal
