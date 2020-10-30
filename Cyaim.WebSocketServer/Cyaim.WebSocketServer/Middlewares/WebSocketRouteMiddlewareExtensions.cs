@@ -39,8 +39,10 @@ namespace Cyaim.WebSocketServer.Middlewares
         /// <param name="serviceProvider"></param>
         /// <param name="clusterOption"></param>
         /// <returns></returns>
-        public static IApplicationBuilder UseWebSocketRoute(this IApplicationBuilder app, IServiceProvider serviceProvider, Action<ClusterOption> clusterOption)
+        public static IApplicationBuilder UseWebSocketServer(this IApplicationBuilder app, IServiceProvider serviceProvider, Action<ClusterOption> clusterOption)
         {
+            throw new NotImplementedException();
+
             if (app == null)
             {
                 throw new ArgumentNullException(nameof(app));
@@ -74,33 +76,32 @@ namespace Cyaim.WebSocketServer.Middlewares
             Console.WriteLine($"WebSocket集群 -> {(cluster.NodeLevel == ServiceLevel.Master ? "主节点" : "从节点")}");
 
             GlobalClusterCenter.ClusterContext = cluster;
-            foreach (var item in GlobalClusterCenter.ClusterContext.Nodes)
-            {
-                // 节点鉴权！
-                var exitEvent = new ManualResetEvent(false);
-                var url = new Uri($"ws://{item}/{cluster.ChannelName}");
-                var factory = new Func<ClientWebSocket>(() => new ClientWebSocket
-                {
-                    Options =
-                        {
-                            KeepAliveInterval = TimeSpan.FromSeconds(5),
-                            //ClientCertificates = ...
-                        }
-                });
-                using (var client = new WebsocketClient(url, factory))
-                {
-                    client.ReconnectTimeout = TimeSpan.FromSeconds(10);
+            //foreach (var item in GlobalClusterCenter.ClusterContext.Nodes)
+            //{
+            //    var exitEvent = new ManualResetEvent(false);
+            //    var url = new Uri($"ws://{item}/{cluster.ChannelName}");
+            //    var factory = new Func<ClientWebSocket>(() => new ClientWebSocket
+            //    {
+            //        Options =
+            //            {
+            //                KeepAliveInterval = TimeSpan.FromSeconds(5),
+            //                //ClientCertificates = ...
+            //            }
+            //    });
+            //    using (var client = new WebsocketClient(url, factory))
+            //    {
+            //        client.ReconnectTimeout = TimeSpan.FromSeconds(10);
 
-                    client.ReconnectionHappened.Subscribe(info => Console.WriteLine($"Reconnection happened, type: {info.Type}"));
+            //        client.ReconnectionHappened.Subscribe(info => Console.WriteLine($"Reconnection happened, type: {info.Type}"));
 
-                    client.MessageReceived.Subscribe(msg => Console.WriteLine($"Message received: {msg}"));
-                    client.Start();
+            //        client.MessageReceived.Subscribe(msg => Console.WriteLine($"Message received: {msg}"));
+            //        client.Start();
 
-                    Task.Run(() => client.Send("{ message }"));
+            //        Task.Run(() => client.Send("{ message }"));
 
-                    exitEvent.WaitOne();
-                }
-            }
+            //        exitEvent.WaitOne();
+            //    }
+            //}
 
 
 

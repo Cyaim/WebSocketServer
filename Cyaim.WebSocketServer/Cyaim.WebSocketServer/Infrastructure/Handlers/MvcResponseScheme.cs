@@ -10,6 +10,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
     public class MvcResponseScheme
     {
         /// <summary>
+        /// Response Id with request consistent 
+        /// </summary>
+        public string Id { get; set; }
+
+        /// <summary>
         /// Response status.
         /// Success:0,Application Error:1,NotFoundTarget:2
         /// </summary>

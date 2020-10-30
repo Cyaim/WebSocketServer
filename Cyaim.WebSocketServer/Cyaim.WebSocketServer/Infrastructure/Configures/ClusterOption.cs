@@ -29,7 +29,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// If set false current node will forward request to other node.
         /// Only NodeLevel are valid for Master.
         /// </summary>
-        public bool IsEnableCurrentService { get; set; }
+        public bool IsEnableLoadBalance { get; set; }
 
     }
 

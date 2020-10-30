@@ -67,13 +67,31 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <param name="webSocketOptions"></param>
         /// <param name="channel"></param>
         /// <param name="logger"></param>
-        /// <returns></returns>
-        public delegate Task BeforeConnectionHandler(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger);
+        /// <returns>true allow connection,false deny connection</returns>
+        public delegate Task<bool> BeforeConnectionHandler(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger);
 
         /// <summary>
         /// Before establish connection call
         /// </summary>
-        public event BeforeConnectionHandler BeforeConnection;
+        public event BeforeConnectionHandler BeforeConnectionEvent;
+
+        /// <summary>
+        /// BeforeConnectionEvent entry
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="channel"></param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
+        public virtual Task<bool> OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        {
+            if (BeforeConnectionEvent != null)
+            {
+                return BeforeConnectionEvent(context, webSocketOptions, channel, logger);
+            }
+            return Task.FromResult(true);
+        }
+
 
         /// <summary>
         /// Close connectioned handler
@@ -88,6 +106,23 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <summary>
         /// Close connectioned call
         /// </summary>
-        public event DisConnectionedHandler DisConnectioned;
+        public event DisConnectionedHandler DisConnectionedEvent;
+
+        /// <summary>
+        /// DisConnectionedEvent entry
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="channel"></param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
+        public virtual Task OnDisConnectioned(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        {
+            if (DisConnectionedEvent != null)
+            {
+                return DisConnectionedEvent(context, webSocketOptions, channel, logger);
+            }
+            return Task.CompletedTask;
+        }
     }
 }

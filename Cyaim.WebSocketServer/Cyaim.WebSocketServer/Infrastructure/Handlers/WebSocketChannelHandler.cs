@@ -24,7 +24,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <summary>
         /// Connected clients
         /// </summary>
-        public static ConcurrentDictionary<string, WebSocket> Clients { get; set; } = new ConcurrentDictionary<string, WebSocket>();
+        public static ConcurrentDictionary<string, WebSocketClient> Clients { get; set; } = new ConcurrentDictionary<string, WebSocketClient>();
 
         private HttpContext context;
         private ILogger<WebSocketRouteMiddleware> logger;
@@ -49,12 +49,19 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             {
                 if (webSocketManager.IsWebSocketRequest)
                 {
+                    // Event instructions whether connection
+                    bool ifContinue = await webSocketOptions.OnBeforeConnection(context, webSocketOptions, context.Request.Path, logger);
+                    if (!ifContinue)
+                    {
+                        return;
+                    }
+
                     using (WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync())
                     {
                         this.webSocket = webSocket;
 
                         logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已建立({context.Connection.Id})");
-                        bool succ = Clients.TryAdd(context.Connection.Id, webSocket);
+                        bool succ = Clients.TryAdd(context.Connection.Id, new WebSocketClient() { WebSocket = webSocket, Channel = context.Request.Path });
                         if (succ)
                         {
                             await Forward(context, webSocket);
@@ -79,7 +86,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             }
             finally
             {
-                OnDisConnected(context, this.webSocket, logger);
+                await OnDisConnected(context, this.webSocket, webSocketOptions, logger);
             }
 
         }
@@ -120,41 +127,26 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 
             long requestTime = DateTime.Now.Ticks;
             StringBuilder json = new StringBuilder();
-            //string json = string.Empty;
 
             //处理第一次返回的数据
             json = json.Append(Encoding.UTF8.GetString(buffer[..result.Count]));
-            //json += Encoding.UTF8.GetString(buffer[..result.Count]);
 
             //第一次接受已经接受完数据了
             if (result.EndOfMessage)
             {
                 try
                 {
-
-                    MvcRequestScheme request = JsonConvert.DeserializeObject<MvcRequestScheme>(json.ToString());
-                    //按请求节点转发
-                    object invokeResult = await DistributeAsync(webSocketOption, context, webSocket, request, logger);
-                    string serialJson = JsonConvert.SerializeObject(invokeResult ?? string.Empty);
-
-                    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
+                    await TextForwardSendData(result, json, requestTime);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, ex.Message);
+                }
+                finally
+                {
                     //json = string.Empty;
                     json = json.Clear();
                 }
-                catch (JsonSerializationException ex)
-                {
-                    MvcResponseScheme mvcResponse = new MvcResponseScheme()
-                    {
-                        Status = 1,
-                        RequestTime = requestTime,
-                        ComplateTime = DateTime.Now.Ticks,
-                        Msg = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> \r\n {ex.Message}\r\n{ex.StackTrace}",
-                    };
-
-                    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(mvcResponse))), result.MessageType, result.EndOfMessage, CancellationToken.None);
-                }
-
-
             }
 
             //等待客户端发送数据，第二次接受数据
@@ -166,44 +158,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                     requestTime = DateTime.Now.Ticks;
 
                     json = json.Append(Encoding.UTF8.GetString(buffer[..result.Count]));
-                    //json += Encoding.UTF8.GetString(buffer[..result.Count]);
 
                     if (!result.EndOfMessage || result.CloseStatus.HasValue)
                     {
                         continue;
                     }
 
-                    MvcRequestScheme request = JsonConvert.DeserializeObject<MvcRequestScheme>(json.ToString());
+                    await TextForwardSendData(result, json, requestTime);
 
-                    //按节点请求转发
-                    object invokeResult = await DistributeAsync(webSocketOption, context, webSocket, request, logger);
-
-                    string serialJson = JsonConvert.SerializeObject(invokeResult ?? string.Empty);
-
-                    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
-
-                }
-                catch (JsonSerializationException ex)
-                {
-                    MvcResponseScheme mvcResponse = new MvcResponseScheme()
-                    {
-                        Status = 1,
-                        RequestTime = requestTime,
-                        ComplateTime = DateTime.Now.Ticks,
-                        Msg = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> \r\n {ex.Message}\r\n{ex.StackTrace}",
-                    };
-                    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(mvcResponse))), result.MessageType, result.EndOfMessage, CancellationToken.None);
-                }
-                catch (JsonReaderException ex)
-                {
-                    MvcResponseScheme mvcResponse = new MvcResponseScheme()
-                    {
-                        Status = 1,
-                        RequestTime = requestTime,
-                        ComplateTime = DateTime.Now.Ticks,
-                        Msg = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 请求解析错误\r\n {ex.Message}\r\n{ex.StackTrace}",
-                    };
-                    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(mvcResponse))), result.MessageType, result.EndOfMessage, CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
@@ -211,10 +173,66 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                 }
                 finally
                 {
-                    //json = string.Empty;
                     json = json.Clear();
                 }
 
+            }
+
+
+        }
+
+        private async Task TextForwardSendData(WebSocketReceiveResult result, StringBuilder json, long requsetTicks)
+        {
+            try
+            {
+                MvcRequestScheme request = JsonConvert.DeserializeObject<MvcRequestScheme>(json.ToString());
+
+                //按节点请求转发
+                object invokeResult = await DistributeAsync(webSocketOption, context, webSocket, request, logger);
+                string serialJson = null;
+                if (string.IsNullOrEmpty(request.Id))
+                {
+                    //如果客户端请求不包含Id，响应内容则移除Id
+                    JObject jo = JObject.FromObject(invokeResult ?? string.Empty);
+                    jo.Remove("Id");
+
+                    serialJson = JsonConvert.SerializeObject(jo);
+                }
+                else
+                {
+                    serialJson = JsonConvert.SerializeObject(invokeResult);
+                }
+
+
+                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
+
+            }
+            catch (JsonSerializationException ex)
+            {
+                MvcResponseScheme mvcResponse = new MvcResponseScheme()
+                {
+                    Status = 1,
+                    RequestTime = requsetTicks,
+                    ComplateTime = DateTime.Now.Ticks,
+                    Msg = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> \r\n {ex.Message}\r\n{ex.StackTrace}",
+                };
+                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(mvcResponse))), result.MessageType, result.EndOfMessage, CancellationToken.None);
+            }
+            catch (JsonReaderException ex)
+            {
+                MvcResponseScheme mvcResponse = new MvcResponseScheme()
+                {
+                    Status = 1,
+                    RequestTime = requsetTicks,
+                    ComplateTime = DateTime.Now.Ticks,
+                    Msg = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 请求解析错误\r\n {ex.Message}\r\n{ex.StackTrace}",
+                };
+                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(mvcResponse))), result.MessageType, result.EndOfMessage, CancellationToken.None);
+            }
+            catch (Exception)
+            {
+
+                throw;
             }
 
 
@@ -234,7 +252,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <param name="request"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public static async Task<object> DistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, MvcRequestScheme request, ILogger<WebSocketRouteMiddleware> logger)
+        public static async Task<MvcResponseScheme> DistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, MvcRequestScheme request, ILogger<WebSocketRouteMiddleware> logger)
         {
             long requestTime = DateTime.Now.Ticks;
             string requestPath = request.Target.ToLower();
@@ -351,6 +369,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                     }
                     #endregion
 
+                    mvcResponse.Id = request.Id;
                     mvcResponse.Body = invokeResult;
                     mvcResponse.ComplateTime = DateTime.Now.Ticks;
                     return mvcResponse;
@@ -358,10 +377,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             }
             catch (Exception ex)
             {
-                return new MvcResponseScheme() { Status = 1, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath}\r\n{ex.Message}\r\n{ex.StackTrace}", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
+                return new MvcResponseScheme() { Id = request.Id, Status = 1, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath}\r\n{ex.Message}\r\n{ex.StackTrace}", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
             }
 
-            NotFound: return new MvcResponseScheme() { Status = 2, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath} not found", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
+            NotFound: return new MvcResponseScheme() { Id = request.Id, Status = 2, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath} not found", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
         }
 
         /// <summary>
@@ -369,8 +388,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// </summary>
         /// <param name="context"></param>
         /// <param name="webSocket"></param>
+        /// <param name="webSocketOptions"></param>
         /// <param name="logger"></param>
-        private void OnDisConnected(HttpContext context, WebSocket webSocket, ILogger<WebSocketRouteMiddleware> logger)
+        private async Task OnDisConnected(HttpContext context, WebSocket webSocket, WebSocketRouteOption webSocketOptions, ILogger<WebSocketRouteMiddleware> logger)
         {
             string msg = string.Empty;
             switch (webSocket.CloseStatus.Value)
@@ -411,14 +431,19 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 
             logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已断开({context.Connection.Id})\r\nStatus:{webSocket.CloseStatus}\r\n{msg}");
 
-            bool wsExists = Clients.ContainsKey(context.Connection.Id);
-            if (wsExists)
+            try
             {
-                Clients.TryRemove(context.Connection.Id, out WebSocket ws);
+                await webSocketOptions.OnDisConnectioned(context, webSocketOptions, context.Request.Path, logger);
             }
-
+            finally
+            {
+                bool wsExists = Clients.ContainsKey(context.Connection.Id);
+                if (wsExists)
+                {
+                    Clients.TryRemove(context.Connection.Id, out var ws);
+                }
+            }
         }
-
 
     }
 }
