@@ -10,6 +10,13 @@
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
     <Copyright>Copyright © Cyaim Studio</Copyright>
+    <Version>1.5.0</Version>
+    <PackageReleaseNotes>1.Support multiplex.
+2.Add assembly cache
+3.Add WebSocket clients channel
+4.Add connection event
+5.Fix some problems</PackageReleaseNotes>
+    <PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
@@ -26,6 +33,10 @@
 
   <ItemGroup>
     <None Include="..\..\LICENSE">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+    </None>
+    <None Include="C:\Users\lbhdr\Desktop\WebSocketRepository_Logo.png">
       <Pack>True</Pack>
       <PackagePath></PackagePath>
     </None>
