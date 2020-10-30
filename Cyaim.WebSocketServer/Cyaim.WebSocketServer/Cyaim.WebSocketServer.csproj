@@ -17,6 +17,7 @@
 4.Add connection event
 5.Fix some problems</PackageReleaseNotes>
     <PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
+    <Description>WebSocketServer is lightweight and high performance WebSocket library.support route, full duplex communication.</Description>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
