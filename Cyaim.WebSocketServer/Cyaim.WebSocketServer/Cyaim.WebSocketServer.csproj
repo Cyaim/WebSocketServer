@@ -37,7 +37,7 @@
       <Pack>True</Pack>
       <PackagePath></PackagePath>
     </None>
-    <None Include="C:\Users\lbhdr\Desktop\WebSocketRepository_Logo.png">
+    <None Include="WebSocketRepository_Logo.png">
       <Pack>True</Pack>
       <PackagePath></PackagePath>
     </None>
