@@ -18,7 +18,7 @@ jobs:
       with:
         dotnet-version: 3.1.301
     - name: cd
-      run: cd /home/runner/work/WebSocketServer/WebSocketServer/WebSocketServer
+      run: ls /home/runner/work/WebSocketServer/WebSocketServer
     - name: Install dependencies
       run: dotnet restore
     - name: Build
