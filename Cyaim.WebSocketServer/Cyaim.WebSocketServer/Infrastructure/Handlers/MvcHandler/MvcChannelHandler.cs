@@ -36,6 +36,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         private WebSocket webSocket;
 
         /// <summary>
+        /// Get instance
+        /// </summary>
+        /// <param name="receiveBufferSize"></param>
+        public MvcChannelHandler(int receiveBufferSize = 4 * 1024)
+        {
+            ReceiveBufferSize = receiveBufferSize;
+        }
+
+        /// <summary>
         /// Receive message buffer
         /// </summary>
         public int ReceiveBufferSize { get; set; } = 1024 * 4;
@@ -260,7 +269,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
         private async Task MvcBinaryForward(HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
         {
-
+            await Task.CompletedTask;
         }
 
         /// <summary>

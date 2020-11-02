@@ -24,7 +24,7 @@ namespace Cyaim.WebSocketServer.Middlewares
         /// <param name="app"></param>
         /// <param name="serviceProvider"></param>
         /// <returns></returns>
-        public static IApplicationBuilder UseWebSocketRoute(this IApplicationBuilder app, IServiceProvider serviceProvider)
+        public static IApplicationBuilder UseWebSocketServer(this IApplicationBuilder app, IServiceProvider serviceProvider)
         {
             app.UseMiddleware<WebSocketRouteMiddleware>();
             WebSocketRouteOption.ApplicationServices = serviceProvider;

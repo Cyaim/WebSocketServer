@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Cyaim.WebSocketServer.Example.Common.Redis;
 using Cyaim.WebSocketServer.Infrastructure;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Infrastructure.Handlers;
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -30,6 +32,13 @@ namespace Cyaim.WebSocketServer.Example
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
+            //×¢ÈëRedis
+            var redisConn = Configuration["RedisConfigs:Hosts:0"];
+            services.AddSingleton(x => new AuthRedisHelper(redisConn));
+            services.AddSingleton(x => new ChatRedisHelper(redisConn));
+            services.AddSingleton(x => new FriendRedisHelper(redisConn));
+
+
             services.AddControllers();
 
             services.ConfigureWebSocketRoute(x =>
@@ -37,7 +46,7 @@ namespace Cyaim.WebSocketServer.Example
                 //Define channels
                 x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
                 {
-                    { "/ws",new WebSocketChannelHandler().MvcChannelHandler}
+                    { "/im",new MvcChannelHandler(4*1024).MvcChannel_Handler}
                 };
 
             });
@@ -71,7 +80,7 @@ namespace Cyaim.WebSocketServer.Example
             };
 
             app.UseWebSockets(webSocketOptions);
-            app.UseWebSocketRoute(app.ApplicationServices);
+            app.UseWebSocketServer(app.ApplicationServices);
             //---------------------END---------------------
         }
     }

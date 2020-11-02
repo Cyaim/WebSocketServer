@@ -294,79 +294,28 @@
             <param name="type"></param>
             <returns></returns>
         </member>
-        <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme">
-            <summary>
-            WebSocket communication scheme
-            </summary>
-        </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme.Id">
-            <summary>
-            Request Id
-            In Multiplex, you need to keep the id of uniqueness
-            </summary>
-        </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme.Target">
-            <summary>
-            Request target
-            </summary>
-        </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme.Body">
-            <summary>
-            Request context
-            </summary>
-        </member>
-        <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme">
-            <summary>
-            WebSocket communication response scheme
-            </summary>
-        </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.Id">
-            <summary>
-            Response Id with request consistent 
-            </summary>
-        </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.Status">
-            <summary>
-            Response status.
-            Success:0,Application Error:1,NotFoundTarget:2
-            </summary>
-        </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.Msg">
-            <summary>
-            Response message
-            </summary>
-        </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.RequestTime">
-            <summary>
-            Request time tick
-            </summary>
-        </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.ComplateTime">
-            <summary>
-            Handle complate time tick
-            </summary>
-        </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcResponseScheme.Body">
-            <summary>
-            Response body
-            </summary>
-        </member>
-        <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler">
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler">
             <summary>
             Provide MVC forwarding handler
             </summary>
         </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.Clients">
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.Clients">
             <summary>
-            Connected clients
+            Connected clients by mvc channel
             </summary>
         </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.ReceiveBufferSize">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.#ctor(System.Int32)">
+            <summary>
+            Get instance
+            </summary>
+            <param name="receiveBufferSize"></param>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.ReceiveBufferSize">
             <summary>
             Receive message buffer
             </summary>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.MvcChannelHandler(Microsoft.AspNetCore.Http.HttpContext,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware},Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption)">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcChannel_Handler(Microsoft.AspNetCore.Http.HttpContext,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware},Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption)">
             <summary>
             Mvc Channel entry
             </summary>
@@ -375,7 +324,7 @@
             <param name="webSocketOptions"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.Forward(Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocket)">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcForward(Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocket)">
             <summary>
             Forward by WebSocket transfer type
             </summary>
@@ -383,7 +332,7 @@
             <param name="webSocket"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.TextForward(System.Net.WebSockets.WebSocketReceiveResult,System.Byte[])">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcTextForward(System.Net.WebSockets.WebSocketReceiveResult,System.Byte[])">
             <summary>
             Type by Text transfer
             </summary>
@@ -391,7 +340,16 @@
             <param name="buffer"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.DistributeAsync(Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption,Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocket,Cyaim.WebSocketServer.Infrastructure.Handlers.MvcRequestScheme,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcTextForwardSendData(System.Net.WebSockets.WebSocketReceiveResult,System.Text.StringBuilder,System.Int64)">
+            <summary>
+            MvcChannel text forward data
+            </summary>
+            <param name="result"></param>
+            <param name="json"></param>
+            <param name="requsetTicks"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcDistributeAsync(Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption,Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocket,Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcRequestScheme,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
             <summary>
             Forward request to endpoint method
             </summary>
@@ -402,7 +360,7 @@
             <param name="logger"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.OnDisConnected(Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocket,Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcChannel_OnDisConnected(Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocket,Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
             <summary>
             Client close connection
             </summary>
@@ -411,7 +369,7 @@
             <param name="webSocketOptions"></param>
             <param name="logger"></param>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.OnBeforeConnection(Microsoft.AspNetCore.Http.HttpContext,Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption,System.String,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcChannel_OnBeforeConnection(Microsoft.AspNetCore.Http.HttpContext,Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption,System.String,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
             <summary>
             Mvc channel before connection
             </summary>
@@ -421,7 +379,7 @@
             <param name="logger"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.OnDisConnectioned(Microsoft.AspNetCore.Http.HttpContext,Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption,System.String,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcChannel_OnDisConnectioned(Microsoft.AspNetCore.Http.HttpContext,Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption,System.String,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
             <summary>
             Mvc channel DisConnectionedEvent entry
             </summary>
@@ -431,19 +389,61 @@
             <param name="logger"></param>
             <returns></returns>
         </member>
-        <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketClient">
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcRequestScheme">
             <summary>
-            Web Socket client
+            WebSocket communication scheme
             </summary>
         </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketClient.Channel">
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcRequestScheme.Id">
             <summary>
-            Channel name
+            Request Id
+            In Multiplex, you need to keep the id of uniqueness
             </summary>
         </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketClient.WebSocket">
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcRequestScheme.Target">
             <summary>
-            WebSocket
+            Request target
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcRequestScheme.Body">
+            <summary>
+            Request context
+            </summary>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseScheme">
+            <summary>
+            WebSocket communication response scheme
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseScheme.Id">
+            <summary>
+            Response Id with request consistent 
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseScheme.Status">
+            <summary>
+            Response status.
+            Success:0,Application Error:1,NotFoundTarget:2
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseScheme.Msg">
+            <summary>
+            Response message
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseScheme.RequestTime">
+            <summary>
+            Request time tick
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseScheme.ComplateTime">
+            <summary>
+            Handle complate time tick
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseScheme.Body">
+            <summary>
+            Response body
             </summary>
         </member>
         <member name="T:Cyaim.WebSocketServer.Infrastructure.WebSocketRouteServiceCollectionExtensions">
@@ -497,7 +497,7 @@
             WebSocketRouteMiddleware Extensions
             </summary>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddlewareExtensions.UseWebSocketRoute(Microsoft.AspNetCore.Builder.IApplicationBuilder,System.IServiceProvider)">
+        <member name="M:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddlewareExtensions.UseWebSocketServer(Microsoft.AspNetCore.Builder.IApplicationBuilder,System.IServiceProvider)">
             <summary>
             Add Cyaim.WebSocketServer.Infrastructure.Middlewares.WebSocketRouteMiddleware Middleware.
             The websocket request will execute the with relation endpoint methods.

@@ -25,6 +25,8 @@ namespace Cyaim.WebSocketServer.Example.Controllers
         }
 
 
+
+
         // mark WebSocket attribute
         [WebSocket()]
         [HttpGet]
