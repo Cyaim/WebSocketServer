@@ -17,17 +17,18 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Transactions;
 
-namespace Cyaim.WebSocketServer.Infrastructure.Handlers
+namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 {
     /// <summary>
     /// Provide MVC forwarding handler
     /// </summary>
-    public class WebSocketChannelHandler
+    public class MvcChannelHandler
     {
         /// <summary>
-        /// Connected clients
+        /// Connected clients by mvc channel
         /// </summary>
-        public static ConcurrentDictionary<string, WebSocketClient> Clients { get; set; } = new ConcurrentDictionary<string, WebSocketClient>();
+        public static ConcurrentDictionary<string, WebSocket> Clients { get; set; } = new ConcurrentDictionary<string, WebSocket>();
+
 
         private HttpContext context;
         private ILogger<WebSocketRouteMiddleware> logger;
@@ -40,7 +41,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         public int ReceiveBufferSize { get; set; } = 1024 * 4;
 
 
-
         /// <summary>
         /// Mvc Channel entry
         /// </summary>
@@ -48,7 +48,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <param name="logger"></param>
         /// <param name="webSocketOptions"></param>
         /// <returns></returns>
-        public async Task MvcChannelHandler(HttpContext context, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions)
+        public async Task MvcChannel_Handler(HttpContext context, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions)
         {
             this.context = context;
             this.logger = logger;
@@ -59,7 +59,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                 if (context.WebSockets.IsWebSocketRequest)
                 {
                     // Event instructions whether connection
-                    bool ifThisContinue = await OnBeforeConnection(context, webSocketOptions, context.Request.Path, logger);
+                    bool ifThisContinue = await MvcChannel_OnBeforeConnection(context, webSocketOptions, context.Request.Path, logger);
                     if (!ifThisContinue)
                     {
                         return;
@@ -75,10 +75,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                         this.webSocket = webSocket;
 
                         logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已建立({context.Connection.Id})");
-                        bool succ = Clients.TryAdd(context.Connection.Id, new WebSocketClient() { WebSocket = webSocket, Channel = context.Request.Path });
+                        bool succ = Clients.TryAdd(context.Connection.Id, webSocket);
                         if (succ)
                         {
-                            await Forward(context, webSocket);
+                            await MvcForward(context, webSocket);
                         }
                         else
                         {
@@ -100,11 +100,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             }
             finally
             {
-                await OnDisConnected(context, this.webSocket, webSocketOptions, logger);
+                await MvcChannel_OnDisConnected(context, this.webSocket, webSocketOptions, logger);
             }
 
         }
-
 
         /// <summary>
         /// Forward by WebSocket transfer type
@@ -112,17 +111,17 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <param name="context"></param>
         /// <param name="webSocket"></param>
         /// <returns></returns>
-        private async Task Forward(HttpContext context, WebSocket webSocket)
+        private async Task MvcForward(HttpContext context, WebSocket webSocket)
         {
             var buffer = new byte[ReceiveBufferSize];
             WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
             switch (result.MessageType)
             {
                 case WebSocketMessageType.Binary:
-                    await BinaryForward(context, webSocket, result, buffer);
+                    await MvcBinaryForward(context, webSocket, result, buffer);
                     break;
                 case WebSocketMessageType.Text:
-                    await TextForward(result, buffer);
+                    await MvcTextForward(result, buffer);
                     break;
             }
 
@@ -136,7 +135,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <param name="result"></param>
         /// <param name="buffer"></param>
         /// <returns></returns>
-        private async Task TextForward(WebSocketReceiveResult result, byte[] buffer)
+        private async Task MvcTextForward(WebSocketReceiveResult result, byte[] buffer)
         {
 
             long requestTime = DateTime.Now.Ticks;
@@ -150,7 +149,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             {
                 try
                 {
-                    await TextForwardSendData(result, json, requestTime);
+                    await MvcTextForwardSendData(result, json, requestTime);
                 }
                 catch (Exception ex)
                 {
@@ -178,7 +177,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                         continue;
                     }
 
-                    await TextForwardSendData(result, json, requestTime);
+                    await MvcTextForwardSendData(result, json, requestTime);
 
                 }
                 catch (Exception ex)
@@ -195,14 +194,21 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 
         }
 
-        private async Task TextForwardSendData(WebSocketReceiveResult result, StringBuilder json, long requsetTicks)
+        /// <summary>
+        /// MvcChannel text forward data
+        /// </summary>
+        /// <param name="result"></param>
+        /// <param name="json"></param>
+        /// <param name="requsetTicks"></param>
+        /// <returns></returns>
+        private async Task MvcTextForwardSendData(WebSocketReceiveResult result, StringBuilder json, long requsetTicks)
         {
             try
             {
                 MvcRequestScheme request = JsonConvert.DeserializeObject<MvcRequestScheme>(json.ToString());
 
                 //按节点请求转发
-                object invokeResult = await DistributeAsync(webSocketOption, context, webSocket, request, logger);
+                object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, logger);
                 string serialJson = null;
                 if (string.IsNullOrEmpty(request.Id))
                 {
@@ -252,7 +258,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 
         }
 
-        private async Task BinaryForward(HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
+        private async Task MvcBinaryForward(HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
         {
 
         }
@@ -266,7 +272,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <param name="request"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public static async Task<MvcResponseScheme> DistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, MvcRequestScheme request, ILogger<WebSocketRouteMiddleware> logger)
+        public static async Task<MvcResponseScheme> MvcDistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, MvcRequestScheme request, ILogger<WebSocketRouteMiddleware> logger)
         {
             long requestTime = DateTime.Now.Ticks;
             string requestPath = request.Target.ToLower();
@@ -404,7 +410,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <param name="webSocket"></param>
         /// <param name="webSocketOptions"></param>
         /// <param name="logger"></param>
-        private async Task OnDisConnected(HttpContext context, WebSocket webSocket, WebSocketRouteOption webSocketOptions, ILogger<WebSocketRouteMiddleware> logger)
+        private async Task MvcChannel_OnDisConnected(HttpContext context, WebSocket webSocket, WebSocketRouteOption webSocketOptions, ILogger<WebSocketRouteMiddleware> logger)
         {
             string msg = string.Empty;
             switch (webSocket.CloseStatus.Value)
@@ -447,7 +453,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 
             try
             {
-                await OnDisConnectioned(context, webSocketOptions, context.Request.Path, logger);
+                await MvcChannel_OnDisConnectioned(context, webSocketOptions, context.Request.Path, logger);
 
                 await webSocketOptions.OnDisConnectioned(context, webSocketOptions, context.Request.Path, logger);
             }
@@ -469,7 +475,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public virtual Task<bool> OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        public virtual Task<bool> MvcChannel_OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
             return Task.FromResult(true);
         }
@@ -482,7 +488,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public virtual Task OnDisConnectioned(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        public virtual Task MvcChannel_OnDisConnectioned(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
             return Task.CompletedTask;
         }

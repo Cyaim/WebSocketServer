@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Cyaim.WebSocketServer.Infrastructure.Handlers
+namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 {
     /// <summary>
     /// WebSocket communication scheme
