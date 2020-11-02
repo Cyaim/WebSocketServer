@@ -65,7 +65,7 @@ public IEnumerable<WeatherForecast> Get()
 > Request target ignore case
 
 > Request scheme  
-1. Nonparametric method request
+### 1. Nonparametric method request
 ```json
 {
 	"target": "WeatherForecast.Get",
@@ -96,7 +96,7 @@ This request will be located at "WeatherForecastController" -> "Get" Method.
 ```
 Forward invoke method return content will write MvcResponseScheme.Body.  
 
-2. Request with parameters  
+### 2. Request with parameters  
 Example Code:
 1. Change method code to:
 ```C#
