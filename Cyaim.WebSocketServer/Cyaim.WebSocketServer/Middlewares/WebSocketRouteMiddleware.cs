@@ -45,7 +45,7 @@ namespace Cyaim.WebSocketServer.Middlewares
             bool hasHandler = _webSocketOptions.WebSocketChannels.TryGetValue(context.Request.Path, out var handler);
             if (hasHandler)
             {
-                await handler(context, context?.WebSockets, Logger, _webSocketOptions);
+                await handler(context, Logger, _webSocketOptions);
                 return;
             }
             await _next(context);

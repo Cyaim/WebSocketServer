@@ -58,7 +58,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <param name="webSocketOptions">WebSocket configure option</param>
         /// <returns></returns>
 
-        public delegate Task WebSocketChannelHandler(HttpContext context, WebSocketManager webSocketManager, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions);
+        public delegate Task WebSocketChannelHandler(HttpContext context, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions);
 
         /// <summary>
         /// Before establish connection handler

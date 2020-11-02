@@ -19,6 +19,9 @@ using System.Transactions;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 {
+    /// <summary>
+    /// Provide MVC forwarding handler
+    /// </summary>
     public class WebSocketChannelHandler
     {
         /// <summary>
@@ -32,14 +35,20 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         private WebSocket webSocket;
 
         /// <summary>
+        /// Receive message buffer
+        /// </summary>
+        public int ReceiveBufferSize { get; set; } = 1024 * 4;
+
+
+
+        /// <summary>
         /// Mvc Channel entry
         /// </summary>
         /// <param name="context"></param>
-        /// <param name="webSocketManager"></param>
         /// <param name="logger"></param>
         /// <param name="webSocketOptions"></param>
         /// <returns></returns>
-        public async Task MvcChannelHandler(HttpContext context, WebSocketManager webSocketManager, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions)
+        public async Task MvcChannelHandler(HttpContext context, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions)
         {
             this.context = context;
             this.logger = logger;
@@ -47,9 +56,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 
             try
             {
-                if (webSocketManager.IsWebSocketRequest)
+                if (context.WebSockets.IsWebSocketRequest)
                 {
                     // Event instructions whether connection
+                    bool ifThisContinue = await OnBeforeConnection(context, webSocketOptions, context.Request.Path, logger);
+                    if (!ifThisContinue)
+                    {
+                        return;
+                    }
                     bool ifContinue = await webSocketOptions.OnBeforeConnection(context, webSocketOptions, context.Request.Path, logger);
                     if (!ifContinue)
                     {
@@ -100,7 +114,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <returns></returns>
         private async Task Forward(HttpContext context, WebSocket webSocket)
         {
-            var buffer = new byte[1024 * 4];
+            var buffer = new byte[ReceiveBufferSize];
             WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
             switch (result.MessageType)
             {
@@ -433,6 +447,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 
             try
             {
+                await OnDisConnectioned(context, webSocketOptions, context.Request.Path, logger);
+
                 await webSocketOptions.OnDisConnectioned(context, webSocketOptions, context.Request.Path, logger);
             }
             finally
@@ -445,5 +461,30 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             }
         }
 
+        /// <summary>
+        /// Mvc channel before connection
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="channel"></param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
+        public virtual Task<bool> OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        {
+            return Task.FromResult(true);
+        }
+
+        /// <summary>
+        /// Mvc channel DisConnectionedEvent entry
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="channel"></param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
+        public virtual Task OnDisConnectioned(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        {
+            return Task.CompletedTask;
+        }
     }
 }

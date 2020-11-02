@@ -351,17 +351,26 @@
             Response body
             </summary>
         </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler">
+            <summary>
+            Provide MVC forwarding handler
+            </summary>
+        </member>
         <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.Clients">
             <summary>
             Connected clients
             </summary>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.MvcChannelHandler(Microsoft.AspNetCore.Http.HttpContext,Microsoft.AspNetCore.Http.WebSocketManager,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware},Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption)">
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.ReceiveBufferSize">
+            <summary>
+            Receive message buffer
+            </summary>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.MvcChannelHandler(Microsoft.AspNetCore.Http.HttpContext,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware},Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption)">
             <summary>
             Mvc Channel entry
             </summary>
             <param name="context"></param>
-            <param name="webSocketManager"></param>
             <param name="logger"></param>
             <param name="webSocketOptions"></param>
             <returns></returns>
@@ -401,6 +410,26 @@
             <param name="webSocket"></param>
             <param name="webSocketOptions"></param>
             <param name="logger"></param>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.OnBeforeConnection(Microsoft.AspNetCore.Http.HttpContext,Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption,System.String,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
+            <summary>
+            Mvc channel before connection
+            </summary>
+            <param name="context"></param>
+            <param name="webSocketOptions"></param>
+            <param name="channel"></param>
+            <param name="logger"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketChannelHandler.OnDisConnectioned(Microsoft.AspNetCore.Http.HttpContext,Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption,System.String,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware})">
+            <summary>
+            Mvc channel DisConnectionedEvent entry
+            </summary>
+            <param name="context"></param>
+            <param name="webSocketOptions"></param>
+            <param name="channel"></param>
+            <param name="logger"></param>
+            <returns></returns>
         </member>
         <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketClient">
             <summary>
