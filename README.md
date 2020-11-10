@@ -1,7 +1,7 @@
 # WebSocketServer
-| Version | NuGet | Build |
-|--|--|--|
-[![](https://img.shields.io/badge/.NET%20Standard-2.1-violet.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)|[![](https://img.shields.io/nuget/v/Cyaim.WebSocketServer.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)|[![](https://github.com/Cyaim/WebSocketServer/workflows/.NET%20Core/badge.svg)](https://github.com/Cyaim/WebSocketServer)
+| Version | NuGet | Build | Code Size | License |
+|--|--|--|--|--|
+[![](https://img.shields.io/badge/.NET%20Standard-2.1-violet.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)|[![](https://img.shields.io/nuget/v/Cyaim.WebSocketServer.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)|[![](https://github.com/Cyaim/WebSocketServer/workflows/.NET%20Core/badge.svg)](https://github.com/Cyaim/WebSocketServer)|[![Code size](https://img.shields.io/github/languages/code-size/Cyaim/WebSocketServer?logo=github&logoColor=white)](https://github.com/Cyaim/WebSocketServer)|[![License](https://img.shields.io/github/license/Cyaim/WebSocketServer?logo=open-source-initiative&logoColor=green)](https://github.com/Cyaim/WebSocketServer/blob/master/LICENSE)
 
 > WebSocketServer is lightweight and high performance WebSocket library.support route, full duplex communication.
 
