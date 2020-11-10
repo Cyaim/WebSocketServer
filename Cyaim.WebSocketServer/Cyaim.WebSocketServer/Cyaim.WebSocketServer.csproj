@@ -10,12 +10,8 @@
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
     <Copyright>Copyright © Cyaim Studio</Copyright>
-    <Version>1.5.1</Version>
-    <PackageReleaseNotes>1.Support multiplex.
-2.Add assembly cache
-3.Add WebSocket clients channel
-4.Add connection event
-5.Fix some problems</PackageReleaseNotes>
+    <Version>1.5.2</Version>
+    <PackageReleaseNotes>1.Fix some problems</PackageReleaseNotes>
     <PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
     <Description>WebSocketServer is lightweight and high performance WebSocket library.support route, full duplex communication.</Description>
   </PropertyGroup>
