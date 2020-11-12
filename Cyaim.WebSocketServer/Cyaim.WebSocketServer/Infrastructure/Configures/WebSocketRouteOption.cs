@@ -1,5 +1,6 @@
 ﻿using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -16,9 +17,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
     public class WebSocketRouteOption
     {
         /// <summary>
-        /// Dependency injection container
+        /// Dependency injection container provider
         /// </summary>
         public static IServiceProvider ApplicationServices { get; set; }
+
+        /// <summary>
+        /// Dependency injection container
+        /// </summary>
+        public IServiceCollection ApplicationServiceCollection { get; set; }
 
         /// <summary>
         /// Injection HttpContext property name.

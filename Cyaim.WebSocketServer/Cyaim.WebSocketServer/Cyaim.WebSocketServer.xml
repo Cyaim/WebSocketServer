@@ -187,6 +187,11 @@
         </member>
         <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.ApplicationServices">
             <summary>
+            Dependency injection container provider
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.ApplicationServiceCollection">
+            <summary>
             Dependency injection container
             </summary>
         </member>
@@ -471,6 +476,16 @@
             </summary>
             <param name="type"></param>
             <returns></returns>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.IWebSocketSession.WebSocketHttpContext">
+            <summary>
+            Current request http context
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.IWebSocketSession.WebSocketClient">
+            <summary>
+            Current session web socket client
+            </summary>
         </member>
         <member name="T:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware">
             <summary>

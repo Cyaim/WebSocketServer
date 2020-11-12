@@ -2,6 +2,7 @@
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -218,6 +219,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                 //按节点请求转发
                 object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, logger);
+
                 string serialJson = null;
                 if (string.IsNullOrEmpty(request.Id))
                 {
@@ -309,12 +311,23 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     webSocketOptions.WatchAssemblyContext.MaxCoustructorParameters.TryGetValue(clss, out ConstructorParameter constructorParameter);
 
                     object[] instanceParmas = new object[constructorParameter.ParameterInfos.Length];
-
+                    // Scope 
+                    var serviceScopeFactory = WebSocketRouteOption.ApplicationServices.GetService<IServiceScopeFactory>();
+                    var serviceScope = serviceScopeFactory.CreateScope();
+                    var scopeIoc = serviceScope.ServiceProvider;
                     for (int i = 0; i < constructorParameter.ParameterInfos.Length; i++)
                     {
                         ParameterInfo item = constructorParameter.ParameterInfos[i];
 
-                        instanceParmas[i] = WebSocketRouteOption.ApplicationServices.GetService(item.ParameterType);
+                        ServiceDescriptor nonSingleton = webSocketOptions.ApplicationServiceCollection.FirstOrDefault(x => x.ServiceType == item.ParameterType);
+                        if (nonSingleton == null || nonSingleton.Lifetime == ServiceLifetime.Singleton)
+                        {
+                            instanceParmas[i] = WebSocketRouteOption.ApplicationServices.GetService(item.ParameterType);
+                        }
+                        else
+                        {
+                            instanceParmas[i] = scopeIoc.GetService(item.ParameterType);
+                        }
                     }
 
                     object inst = Activator.CreateInstance(clss, instanceParmas);
@@ -361,7 +374,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                         bool hasVal = requestBody.TryGetValue(item.Name, out JToken jToken);
                                         if (hasVal)
                                         {
-                                            parmVal = jToken.ToObject(methodParmType);
+                                            try
+                                            {
+                                                parmVal = jToken.ToObject(methodParmType);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                // containue format error.
+                                                logger.LogWarning($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> {requestPath} 请求的方法参数数据格式化异常\r\n{ex.Message}\r\n{ex.StackTrace}");
+                                            }
                                         }
                                         else
                                         {
@@ -371,8 +392,25 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                     else
                                     {
                                         //自定义类，反序列化
-                                        var classParmVal = JsonConvert.DeserializeObject(requestBody.ToString(), methodParmType);
+                                        bool hasItemValue = requestBody.TryGetValue(item.Name, out JToken jToken);
+                                        object classParmVal = null;
+                                        if (hasItemValue)
+                                        {
+                                            try
+                                            {
+                                                classParmVal = jToken.ToObject(methodParmType);
+                                            }
+                                            catch (ArgumentException)
+                                            {
+                                                // Try use param name get value failure.
+                                                //throw;
+                                            }
+                                        }
 
+                                        if (classParmVal == null)
+                                        {
+                                            classParmVal = JsonConvert.DeserializeObject(requestBody.ToString(), methodParmType);
+                                        }
                                         parmVal = classParmVal;
                                     }
                                 }
@@ -395,12 +433,25 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         invoke.Start();
 
                         invokeResult = await invoke;
+
+                        //async api support
+                        if (invokeResult is Task<object>)
+                        {
+                            invokeResult = await (invokeResult as Task<object>);
+                        }
+
                     }
+
+
                     #endregion
+
+                    // dispose ioc scope
+                    serviceScope?.Dispose();
 
                     mvcResponse.Id = request.Id;
                     mvcResponse.Body = invokeResult;
                     mvcResponse.ComplateTime = DateTime.Now.Ticks;
+
                     return mvcResponse;
                 }
             }
