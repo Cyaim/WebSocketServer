@@ -8,7 +8,7 @@
 # QuickStart
 
 1. Install library
-> Install-Package Cyaim.WebSocketServer -Version 1.5.2
+> Install-Package Cyaim.WebSocketServer -Version 1.5.4
 2. Configure middleware
 - Configure websocket route
 ```C#
