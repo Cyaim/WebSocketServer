@@ -10,7 +10,7 @@
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
     <Copyright>Copyright © Cyaim Studio</Copyright>
-    <Version>1.5.3</Version>
+    <Version>1.5.4</Version>
     <PackageReleaseNotes>1.Add SessionContext
 2.Fix some problems</PackageReleaseNotes>
     <PackageIcon>WebSocketRepository_Logo.png</PackageIcon>

@@ -14,7 +14,7 @@ namespace Cyaim.WebSocketServer.Example.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class IMController : ControllerBase, SessionContext
+    public class IMController : ControllerBase, IWebSocketSession
     {
 
         private readonly ILogger<IMController> _logger;
