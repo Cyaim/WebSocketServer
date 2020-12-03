@@ -1,6 +1,7 @@
 ﻿using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Generic;
 using System.Net.WebSockets;
@@ -28,6 +29,17 @@ namespace Cyaim.WebSocketServer.Middlewares
         {
             app.UseMiddleware<WebSocketRouteMiddleware>();
             WebSocketRouteOption.ApplicationServices = serviceProvider;
+
+            // debug ui
+            app.Map("/cyaim/wsdebug", (appbuilder) =>
+            {
+                appbuilder.Run(async context =>
+                {
+
+                    await context.Response.WriteAsync("<h1>2333333</h1/");
+                });
+            });
+
             return app;
         }
 
