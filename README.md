@@ -19,7 +19,7 @@ services.ConfigureWebSocketRoute(x =>
     {
         { "/ws",new MvcChannelHandler(4*1024).MvcChannel_Handler}
     };
-
+    x.ApplicationServiceCollection = services;
 });
 ```
 
