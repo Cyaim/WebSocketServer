@@ -48,7 +48,7 @@ namespace Cyaim.WebSocketServer.Example
                 {
                     { "/im",new MvcChannelHandler(4*1024).MvcChannel_Handler}
                 };
-
+                x.ApplicationServiceCollection = services;
             });
         }
 
@@ -60,7 +60,7 @@ namespace Cyaim.WebSocketServer.Example
                 app.UseDeveloperExceptionPage();
             }
 
-            app.UseHttpsRedirection();
+            //app.UseHttpsRedirection();
 
             app.UseRouting();
 

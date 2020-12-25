@@ -521,8 +521,17 @@
             <param name="serviceProvider"></param>
             <returns></returns>
         </member>
+        <member name="M:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddlewareExtensions.UseWebSocketServerUI(Microsoft.AspNetCore.Builder.IApplicationBuilder,System.String)">
+            <summary>
+            Add WebSocket debug ui.
+            </summary>
+            <param name="app"></param>
+            <param name="path"></param>
+            <returns></returns>
+        </member>
         <member name="M:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddlewareExtensions.UseWebSocketServer(Microsoft.AspNetCore.Builder.IApplicationBuilder,System.IServiceProvider,System.Action{Cyaim.WebSocketServer.Infrastructure.Configures.ClusterOption})">
             <summary>
+            Use websocket cluster start service.
             Add Cyaim.WebSocketServer.Infrastructure.Middlewares.WebSocketRouteMiddleware Middleware.
             The websocket request will execute the with relation endpoint methods.
             </summary>

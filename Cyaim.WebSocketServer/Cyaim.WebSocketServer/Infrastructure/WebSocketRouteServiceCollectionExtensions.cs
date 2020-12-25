@@ -35,12 +35,16 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 throw new ArgumentNullException(nameof(setupAction));
             }
 
-
             WebSocketRouteOption wsrOptions = new WebSocketRouteOption();
             setupAction(wsrOptions);
             if (wsrOptions == null)
             {
                 wsrOptions = new WebSocketRouteOption();
+            }
+
+            if (wsrOptions.ApplicationServiceCollection == null)
+            {
+                throw new ArgumentNullException("WebSocketRouteOption.ApplicationServiceCollection parameter is required and cannot be null.");
             }
 
             if (wsrOptions.WebSocketChannels == null || wsrOptions.WebSocketChannels.Count < 1)

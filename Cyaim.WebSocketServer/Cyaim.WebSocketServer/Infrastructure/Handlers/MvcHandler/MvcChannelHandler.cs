@@ -331,10 +331,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     // Scope 
                     var serviceScopeFactory = WebSocketRouteOption.ApplicationServices.GetService<IServiceScopeFactory>();
                     var serviceScope = serviceScopeFactory.CreateScope();
-                    var scopeIoc = serviceScope.ServiceProvider;
+                    var scopeIocProvider = serviceScope.ServiceProvider;
                     for (int i = 0; i < constructorParameter.ParameterInfos.Length; i++)
                     {
                         ParameterInfo item = constructorParameter.ParameterInfos[i];
+
+                        if (webSocketOptions.ApplicationServiceCollection == null)
+                        {
+                            logger.LogWarning("Cannot inject target constructor parameter because DI container WebSocketRouteOption.ApplicationServiceCollection is null.", "");
+                            break;
+                        }
 
                         ServiceDescriptor nonSingleton = webSocketOptions.ApplicationServiceCollection.FirstOrDefault(x => x.ServiceType == item.ParameterType);
                         if (nonSingleton == null || nonSingleton.Lifetime == ServiceLifetime.Singleton)
@@ -343,7 +349,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
                         else
                         {
-                            instanceParmas[i] = scopeIoc.GetService(item.ParameterType);
+                            instanceParmas[i] = scopeIocProvider.GetService(item.ParameterType);
                         }
                     }
 

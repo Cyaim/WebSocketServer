@@ -30,8 +30,19 @@ namespace Cyaim.WebSocketServer.Middlewares
             app.UseMiddleware<WebSocketRouteMiddleware>();
             WebSocketRouteOption.ApplicationServices = serviceProvider;
 
+            return app;
+        }
+
+        /// <summary>
+        /// Add WebSocket debug ui.
+        /// </summary>
+        /// <param name="app"></param>
+        /// <param name="path"></param>
+        /// <returns></returns>
+        public static IApplicationBuilder UseWebSocketServerUI(this IApplicationBuilder app, string path = "/cyaim/wsdebug")
+        {
             // debug ui
-            app.Map("/cyaim/wsdebug", (appbuilder) =>
+            app.Map(path, (appbuilder) =>
             {
                 appbuilder.Run(async context =>
                 {
@@ -44,6 +55,7 @@ namespace Cyaim.WebSocketServer.Middlewares
         }
 
         /// <summary>
+        /// Use websocket cluster start service.
         /// Add Cyaim.WebSocketServer.Infrastructure.Middlewares.WebSocketRouteMiddleware Middleware.
         /// The websocket request will execute the with relation endpoint methods.
         /// </summary>
