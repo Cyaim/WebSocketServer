@@ -36,7 +36,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         private HttpContext context;
         private ILogger<WebSocketRouteMiddleware> logger;
         private WebSocketRouteOption webSocketOption;
-        private WebSocket webSocket;
+        //private WebSocket webSocket;
 
         /// <summary>
         /// Get instance
@@ -66,6 +66,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             this.logger = logger;
             this.webSocketOption = webSocketOptions;
 
+            WebSocket webSocketCloseInst = null;
+
             try
             {
                 if (context.WebSockets.IsWebSocketRequest)
@@ -84,7 +86,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                     using (WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync())
                     {
-                        this.webSocket = webSocket;
+                        //this.webSocket = webSocket;
+                        webSocketCloseInst = webSocket;
 
                         logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已建立({context.Connection.Id})");
                         bool succ = Clients.TryAdd(context.Connection.Id, webSocket);
@@ -112,7 +115,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
             finally
             {
-                await MvcChannel_OnDisConnected(context, this.webSocket, webSocketOptions, logger);
+                //await MvcChannel_OnDisConnected(context, this.webSocket, webSocketOptions, logger);
+                await MvcChannel_OnDisConnected(context, webSocketCloseInst, webSocketOptions, logger);
             }
 
         }
@@ -135,12 +139,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         await MvcBinaryForward(context, webSocket, result, buffer);
                         break;
                     case WebSocketMessageType.Text:
-                        await MvcTextForward(result, buffer);
+                        await MvcTextForward(result, buffer, webSocket);
                         break;
                 }
 
                 //链接断开
-                await webSocket.CloseAsync(webSocket.CloseStatus.Value, result.CloseStatusDescription, CancellationToken.None);
+                await webSocket.CloseAsync(webSocket.CloseStatus == null ?
+                    webSocket.State == WebSocketState.Aborted ?
+                    WebSocketCloseStatus.InternalServerError : WebSocketCloseStatus.NormalClosure
+                    : webSocket.CloseStatus.Value, result.CloseStatusDescription, CancellationToken.None);
             }
             catch (OperationCanceledException ex)
             {
@@ -154,7 +161,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="result"></param>
         /// <param name="buffer"></param>
         /// <returns></returns>
-        private async Task MvcTextForward(WebSocketReceiveResult result, byte[] buffer)
+        private async Task MvcTextForward(WebSocketReceiveResult result, byte[] buffer, WebSocket webSocket)
         {
 
             long requestTime = DateTime.Now.Ticks;
@@ -168,7 +175,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 try
                 {
-                    await MvcTextForwardSendData(result, json, requestTime);
+                    await MvcTextForwardSendData(result, webSocket, json, requestTime);
                 }
                 catch (Exception ex)
                 {
@@ -186,6 +193,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 try
                 {
+                    if (!(webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseSent))
+                    {
+                        break;
+                    }
                     result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
                     requestTime = DateTime.Now.Ticks;
 
@@ -196,7 +207,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         continue;
                     }
 
-                    await MvcTextForwardSendData(result, json, requestTime);
+                    await MvcTextForwardSendData(result, webSocket, json, requestTime);
 
                 }
                 catch (OperationCanceledException ex)
@@ -224,7 +235,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="json"></param>
         /// <param name="requsetTicks"></param>
         /// <returns></returns>
-        private async Task MvcTextForwardSendData(WebSocketReceiveResult result, StringBuilder json, long requsetTicks)
+        private async Task MvcTextForwardSendData(WebSocketReceiveResult result, WebSocket webSocket, StringBuilder json, long requsetTicks)
         {
             try
             {
