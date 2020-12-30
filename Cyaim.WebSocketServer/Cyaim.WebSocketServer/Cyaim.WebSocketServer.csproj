@@ -11,7 +11,7 @@
     <RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
     <Copyright>Copyright © Cyaim Studio</Copyright>
     <Version>1.5.8</Version>
-    <PackageReleaseNotes>1.Fix some problems.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.Fix the connection caused by parallel client message acceptance.</PackageReleaseNotes>
     <PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
     <Description>WebSocketServer is lightweight and high performance WebSocket library.support route, full duplex communication.
 WebSocketServer 是一个轻量级、高性能WebSocket库。支持 WebApi 路由、多路复用等。</Description>
