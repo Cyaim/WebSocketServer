@@ -33,10 +33,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         public static ConcurrentDictionary<string, WebSocket> Clients { get; set; } = new ConcurrentDictionary<string, WebSocket>();
 
 
-        //private HttpContext context;
         private ILogger<WebSocketRouteMiddleware> logger;
         private WebSocketRouteOption webSocketOption;
-        //private WebSocket webSocket;
 
         /// <summary>
         /// Get instance
@@ -160,6 +158,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// </summary>
         /// <param name="result"></param>
         /// <param name="buffer"></param>
+        /// <param name="webSocket"></param>
+        /// <param name="context"></param>
         /// <returns></returns>
         private async Task MvcTextForward(WebSocketReceiveResult result, byte[] buffer, WebSocket webSocket, HttpContext context)
         {
@@ -232,6 +232,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// MvcChannel text forward data
         /// </summary>
         /// <param name="result"></param>
+        /// <param name="webSocket"></param>
+        /// <param name="context"></param>
         /// <param name="json"></param>
         /// <param name="requsetTicks"></param>
         /// <returns></returns>
