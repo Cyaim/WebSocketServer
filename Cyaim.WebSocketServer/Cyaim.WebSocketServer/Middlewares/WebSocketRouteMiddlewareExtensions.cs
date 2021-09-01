@@ -33,27 +33,7 @@ namespace Cyaim.WebSocketServer.Middlewares
             return app;
         }
 
-        /// <summary>
-        /// Add WebSocket debug ui.
-        /// </summary>
-        /// <param name="app"></param>
-        /// <param name="path"></param>
-        /// <returns></returns>
-        public static IApplicationBuilder UseWebSocketServerUI(this IApplicationBuilder app, string path = "/cyaim/wsdebug")
-        {
-            // debug ui
-            app.Map(path, (appbuilder) =>
-            {
-                appbuilder.Run(async context =>
-                {
-
-                    await context.Response.WriteAsync("<h1>2333333</h1/");
-                });
-            });
-
-            return app;
-        }
-
+  
         /// <summary>
         /// Use websocket cluster start service.
         /// Add Cyaim.WebSocketServer.Infrastructure.Middlewares.WebSocketRouteMiddleware Middleware.

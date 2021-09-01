@@ -46,7 +46,7 @@ namespace Cyaim.WebSocketServer.Example
                 //Define channels
                 x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
                 {
-                    { "/im",new MvcChannelHandler(4*1024).MvcChannel_Handler}
+                    { "/im",new MvcChannelHandler(4*1024).ConnectionEntry}
                 };
                 x.ApplicationServiceCollection = services;
             });

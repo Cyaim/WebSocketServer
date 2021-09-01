@@ -12,3 +12,4 @@
 /Cyaim.WebSocketServer/.vs/Cyaim.WebSocketServer/config
 /Cyaim.WebSocketServer/.vs/Cyaim.WebSocketServer/DesignTimeBuild
 *.nupkg
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.DebugUI/obj

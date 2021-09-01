@@ -25,7 +25,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
     /// <summary>
     /// Provide MVC forwarding handler
     /// </summary>
-    public class MvcChannelHandler
+    public class MvcChannelHandler : IWebSocketHandler
     {
         /// <summary>
         /// Connected clients by mvc channel
@@ -42,13 +42,25 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="receiveBufferSize"></param>
         public MvcChannelHandler(int receiveBufferSize = 4 * 1024)
         {
-            ReceiveBufferSize = receiveBufferSize;
+            ReceiveTextBufferSize = ReceiveBinaryBufferSize = receiveBufferSize;
         }
+
+        public WebSocketHandlerMetadata Metadata { get; } = new WebSocketHandlerMetadata()
+        {
+            Describe = "Provide MVC forwarding handler",
+            CanHandleBinary = false,
+            CanHandleText = true,
+        };
 
         /// <summary>
         /// Receive message buffer
         /// </summary>
-        public int ReceiveBufferSize { get; set; } = 1024 * 4;
+        public int ReceiveTextBufferSize { get; set; }
+
+        /// <summary>
+        /// Receive message buffer
+        /// </summary>
+        public int ReceiveBinaryBufferSize { get; set; }
 
 
         /// <summary>
@@ -58,9 +70,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="logger"></param>
         /// <param name="webSocketOptions"></param>
         /// <returns></returns>
-        public async Task MvcChannel_Handler(HttpContext context, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions)
+        public async Task ConnectionEntry(HttpContext context, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions)
         {
-            //this.context = context;
             this.logger = logger;
             this.webSocketOption = webSocketOptions;
 
@@ -127,7 +138,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <returns></returns>
         private async Task MvcForward(HttpContext context, WebSocket webSocket)
         {
-            var buffer = new byte[ReceiveBufferSize];
+            var buffer = new byte[ReceiveTextBufferSize];
             try
             {
                 WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
@@ -601,5 +612,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             return Task.CompletedTask;
         }
+
+
     }
 }
