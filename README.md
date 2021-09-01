@@ -8,16 +8,16 @@
 # QuickStart
 
 1. Install library
-> Install-Package Cyaim.WebSocketServer -Version 1.5.8
+> Install-Package Cyaim.WebSocketServer
 2. Configure middleware
 - Configure websocket route
 ```C#
 services.ConfigureWebSocketRoute(x =>
 {
-                //Define channels
+    //Define channels
     x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
     {
-        { "/ws",new MvcChannelHandler(4*1024).MvcChannel_Handler}
+        { "/ws",new MvcChannelHandler(4*1024).ConnectionEntry}
     };
     x.ApplicationServiceCollection = services;
 });
