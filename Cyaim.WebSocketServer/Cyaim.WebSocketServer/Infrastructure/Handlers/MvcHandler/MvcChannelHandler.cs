@@ -33,7 +33,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         public static ConcurrentDictionary<string, WebSocket> Clients { get; set; } = new ConcurrentDictionary<string, WebSocket>();
 
 
-        private HttpContext context;
+        //private HttpContext context;
         private ILogger<WebSocketRouteMiddleware> logger;
         private WebSocketRouteOption webSocketOption;
         //private WebSocket webSocket;
@@ -62,7 +62,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <returns></returns>
         public async Task MvcChannel_Handler(HttpContext context, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions)
         {
-            this.context = context;
+            //this.context = context;
             this.logger = logger;
             this.webSocketOption = webSocketOptions;
 
@@ -139,7 +139,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         await MvcBinaryForward(context, webSocket, result, buffer);
                         break;
                     case WebSocketMessageType.Text:
-                        await MvcTextForward(result, buffer, webSocket);
+                        await MvcTextForward(result, buffer, webSocket, context);
                         break;
                 }
 
@@ -161,7 +161,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="result"></param>
         /// <param name="buffer"></param>
         /// <returns></returns>
-        private async Task MvcTextForward(WebSocketReceiveResult result, byte[] buffer, WebSocket webSocket)
+        private async Task MvcTextForward(WebSocketReceiveResult result, byte[] buffer, WebSocket webSocket, HttpContext context)
         {
 
             long requestTime = DateTime.Now.Ticks;
@@ -175,7 +175,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 try
                 {
-                    await MvcTextForwardSendData(result, webSocket, json, requestTime);
+                    await MvcTextForwardSendData(result, webSocket, context, json, requestTime);
                 }
                 catch (Exception ex)
                 {
@@ -207,7 +207,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         continue;
                     }
 
-                    await MvcTextForwardSendData(result, webSocket, json, requestTime);
+                    await MvcTextForwardSendData(result, webSocket, context, json, requestTime);
 
                 }
                 catch (OperationCanceledException ex)
@@ -235,7 +235,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="json"></param>
         /// <param name="requsetTicks"></param>
         /// <returns></returns>
-        private async Task MvcTextForwardSendData(WebSocketReceiveResult result, WebSocket webSocket, StringBuilder json, long requsetTicks)
+        private async Task MvcTextForwardSendData(WebSocketReceiveResult result, WebSocket webSocket, HttpContext context, StringBuilder json, long requsetTicks)
         {
             try
             {
