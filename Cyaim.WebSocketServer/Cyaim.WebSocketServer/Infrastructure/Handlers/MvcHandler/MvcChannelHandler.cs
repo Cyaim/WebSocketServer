@@ -62,7 +62,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// </summary>
         public int ReceiveBinaryBufferSize { get; set; }
 
-
         /// <summary>
         /// Mvc Channel entry
         /// </summary>
@@ -164,7 +163,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         }
 
         /// <summary>
-        /// Type by Text transfer
+        /// Handle request content
         /// </summary>
         /// <param name="result"></param>
         /// <param name="buffer"></param>
@@ -185,7 +184,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 try
                 {
-                    await MvcForwardSendData(result, webSocket, context, json, requestTime);
+                    await MvcForwardSendData(webSocket, context, result, json, requestTime);
                 }
                 catch (Exception ex)
                 {
@@ -216,7 +215,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         continue;
                     }
 
-                    await MvcForwardSendData(result, webSocket, context, json, requestTime);
+                    await MvcForwardSendData(webSocket, context, result, json, requestTime);
 
                 }
                 catch (OperationCanceledException ex)
@@ -238,7 +237,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         }
 
         /// <summary>
-        /// MvcChannel text forward data
+        /// MvcChannel forward data
         /// </summary>
         /// <param name="result"></param>
         /// <param name="webSocket"></param>
@@ -246,7 +245,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="json"></param>
         /// <param name="requsetTicks"></param>
         /// <returns></returns>
-        private async Task MvcForwardSendData(WebSocketReceiveResult result, WebSocket webSocket, HttpContext context, StringBuilder json, long requsetTicks)
+        private async Task MvcForwardSendData(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, StringBuilder json, long requsetTicks)
         {
             try
             {
@@ -307,11 +306,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
 
         }
-
-        //private async Task MvcBinaryForward(HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
-        //{
-        //    await Task.CompletedTask;
-        //}
 
         /// <summary>
         /// Forward request to endpoint method
