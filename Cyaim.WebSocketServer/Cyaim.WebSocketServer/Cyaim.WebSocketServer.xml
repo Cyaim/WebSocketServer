@@ -299,6 +299,50 @@
             <param name="type"></param>
             <returns></returns>
         </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.IWebSocketHandler.Metadata">
+            <summary>
+            Handler metadata
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.IWebSocketHandler.ReceiveTextBufferSize">
+            <summary>
+            Text transfer buffer size
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.IWebSocketHandler.ReceiveBinaryBufferSize">
+            <summary>
+            Binary transfer buffer size
+            </summary>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.IWebSocketHandler.ConnectionEntry(Microsoft.AspNetCore.Http.HttpContext,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware},Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption)">
+            <summary>
+            Connection request entry
+            </summary>
+            <param name="context"></param>
+            <param name="logger"></param>
+            <param name="webSocketOptions"></param>
+            <returns></returns>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketHandlerMetadata">
+            <summary>
+            WebSocketHandler describe
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketHandlerMetadata.Describe">
+            <summary>
+            Describe the function of the handle and how to use it 
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketHandlerMetadata.CanHandleBinary">
+            <summary>
+            This handle allows binary to be transferred
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketHandlerMetadata.CanHandleText">
+            <summary>
+            This handle allows text to be transferred
+            </summary>
+        </member>
         <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler">
             <summary>
             Provide MVC forwarding handler
@@ -315,12 +359,17 @@
             </summary>
             <param name="receiveBufferSize"></param>
         </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.ReceiveBufferSize">
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.ReceiveTextBufferSize">
             <summary>
             Receive message buffer
             </summary>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcChannel_Handler(Microsoft.AspNetCore.Http.HttpContext,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware},Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption)">
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.ReceiveBinaryBufferSize">
+            <summary>
+            Receive message buffer
+            </summary>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.ConnectionEntry(Microsoft.AspNetCore.Http.HttpContext,Microsoft.Extensions.Logging.ILogger{Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddleware},Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption)">
             <summary>
             Mvc Channel entry
             </summary>
@@ -337,19 +386,23 @@
             <param name="webSocket"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcTextForward(System.Net.WebSockets.WebSocketReceiveResult,System.Byte[])">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcTextForward(System.Net.WebSockets.WebSocketReceiveResult,System.Byte[],System.Net.WebSockets.WebSocket,Microsoft.AspNetCore.Http.HttpContext)">
             <summary>
             Type by Text transfer
             </summary>
             <param name="result"></param>
             <param name="buffer"></param>
+            <param name="webSocket"></param>
+            <param name="context"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcTextForwardSendData(System.Net.WebSockets.WebSocketReceiveResult,System.Text.StringBuilder,System.Int64)">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcTextForwardSendData(System.Net.WebSockets.WebSocketReceiveResult,System.Net.WebSockets.WebSocket,Microsoft.AspNetCore.Http.HttpContext,System.Text.StringBuilder,System.Int64)">
             <summary>
             MvcChannel text forward data
             </summary>
             <param name="result"></param>
+            <param name="webSocket"></param>
+            <param name="context"></param>
             <param name="json"></param>
             <param name="requsetTicks"></param>
             <returns></returns>
@@ -519,14 +572,6 @@
             </summary>
             <param name="app"></param>
             <param name="serviceProvider"></param>
-            <returns></returns>
-        </member>
-        <member name="M:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddlewareExtensions.UseWebSocketServerUI(Microsoft.AspNetCore.Builder.IApplicationBuilder,System.String)">
-            <summary>
-            Add WebSocket debug ui.
-            </summary>
-            <param name="app"></param>
-            <param name="path"></param>
             <returns></returns>
         </member>
         <member name="M:Cyaim.WebSocketServer.Middlewares.WebSocketRouteMiddlewareExtensions.UseWebSocketServer(Microsoft.AspNetCore.Builder.IApplicationBuilder,System.IServiceProvider,System.Action{Cyaim.WebSocketServer.Infrastructure.Configures.ClusterOption})">
