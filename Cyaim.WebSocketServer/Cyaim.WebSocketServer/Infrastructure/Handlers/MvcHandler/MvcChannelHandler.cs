@@ -217,6 +217,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                     await MvcForwardSendData(webSocket, context, result, json, requestTime);
 
+                    json = json.Clear();
                 }
                 catch (OperationCanceledException ex)
                 {
@@ -225,10 +226,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 catch (Exception ex)
                 {
                     logger.LogError(ex, ex.Message);
-                }
-                finally
-                {
-                    json = json.Clear();
                 }
 
             }
@@ -250,6 +247,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             try
             {
                 MvcRequestScheme request = JsonConvert.DeserializeObject<MvcRequestScheme>(json.ToString());
+                if (request == null)
+                {
+                    throw new JsonSerializationException("Json格式错误，请求数据：" + json);
+                }
 
                 //按节点请求转发
                 object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, logger);

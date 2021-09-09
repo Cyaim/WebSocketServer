@@ -386,9 +386,9 @@
             <param name="webSocket"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcTextForward(System.Net.WebSockets.WebSocketReceiveResult,System.Byte[],System.Net.WebSockets.WebSocket,Microsoft.AspNetCore.Http.HttpContext)">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcForward(System.Net.WebSockets.WebSocket,Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocketReceiveResult,System.Byte[])">
             <summary>
-            Type by Text transfer
+            Handle request content
             </summary>
             <param name="result"></param>
             <param name="buffer"></param>
@@ -396,9 +396,9 @@
             <param name="context"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcTextForwardSendData(System.Net.WebSockets.WebSocketReceiveResult,System.Net.WebSockets.WebSocket,Microsoft.AspNetCore.Http.HttpContext,System.Text.StringBuilder,System.Int64)">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcForwardSendData(System.Net.WebSockets.WebSocket,Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocketReceiveResult,System.Text.StringBuilder,System.Int64)">
             <summary>
-            MvcChannel text forward data
+            MvcChannel forward data
             </summary>
             <param name="result"></param>
             <param name="webSocket"></param>
