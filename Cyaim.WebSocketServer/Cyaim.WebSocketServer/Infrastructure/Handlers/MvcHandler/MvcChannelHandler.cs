@@ -98,7 +98,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         //this.webSocket = webSocket;
                         webSocketCloseInst = webSocket;
 
-                        logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已建立({context.Connection.Id})");
+                        logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connected({context.Connection.Id})");
                         bool succ = Clients.TryAdd(context.Connection.Id, webSocket);
                         if (succ)
                         {
@@ -106,7 +106,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
                         else
                         {
-                            throw new InvalidOperationException("客户端登录失败");
+                            throw new InvalidOperationException("Client connect failed");
                         }
 
 
@@ -114,7 +114,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 }
                 else
                 {
-                    logger.LogWarning($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 拒绝连接，缺少请求头({context.Connection.Id})");
+                    logger.LogWarning($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connection denied:request header error({context.Connection.Id})");
                     context.Response.StatusCode = 400;
                 }
             }
