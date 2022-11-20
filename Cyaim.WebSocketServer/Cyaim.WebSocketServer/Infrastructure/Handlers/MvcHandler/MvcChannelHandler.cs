@@ -104,7 +104,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
                         else
                         {
-                            throw new InvalidOperationException("Client connect failed");
+                            logger.LogError($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Client connect failed({context.Connection.Id})");
                         }
 
 
@@ -112,13 +112,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 }
                 else
                 {
-                    logger.LogWarning($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connection denied:request header error({context.Connection.Id})");
+                    logger.LogTrace($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connection denied:request header error({context.Connection.Id})");
                     context.Response.StatusCode = 400;
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                throw;
+                logger.LogError(ex, ex.Message);
+                //throw;
             }
             finally
             {
@@ -246,10 +247,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             try
             {
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    return;
+                }
                 MvcRequestScheme request = JsonConvert.DeserializeObject<MvcRequestScheme>(json.ToString());
                 if (request == null)
                 {
-                    throw new JsonSerializationException("Json格式错误，请求数据：" + json);
+                    logger.LogTrace("Json格式错误，请求数据：" + json);
+                    //throw new JsonSerializationException("Json格式错误，请求数据：" + json);
+                    return;
                 }
 
                 //按节点请求转发
@@ -275,10 +282,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 serialJson = JsonConvert.SerializeObject(jo);
 
                 await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
-
             }
             catch (JsonSerializationException ex)
             {
+
                 MvcResponseScheme mvcResponse = new MvcResponseScheme()
                 {
                     Status = 1,
@@ -286,7 +293,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     ComplateTime = DateTime.Now.Ticks,
                     Msg = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> \r\n {ex.Message}\r\n{ex.StackTrace}",
                 };
-                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(mvcResponse))), result.MessageType, result.EndOfMessage, CancellationToken.None);
+                logger.LogDebug(JsonConvert.SerializeObject(mvcResponse));
+
+                //if (result.MessageType != WebSocketMessageType.Close)
+                //{
+                //    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(mvcResponse))), result.MessageType, result.EndOfMessage, CancellationToken.None);
+                //}
             }
             catch (JsonReaderException ex)
             {
@@ -297,7 +309,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     ComplateTime = DateTime.Now.Ticks,
                     Msg = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 请求解析错误\r\n {ex.Message}\r\n{ex.StackTrace}",
                 };
-                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(mvcResponse))), result.MessageType, result.EndOfMessage, CancellationToken.None);
+                logger.LogDebug(JsonConvert.SerializeObject(mvcResponse));
+                //if (result.MessageType != WebSocketMessageType.Close)
+                //{
+                //    await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(mvcResponse))), result.MessageType, result.EndOfMessage, CancellationToken.None);
+                //}
             }
             catch (Exception)
             {
@@ -501,7 +517,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 return new MvcResponseScheme() { Id = request.Id, Status = 1, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath}\r\n{ex.Message}\r\n{ex.StackTrace}", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
             }
 
-            NotFound: return new MvcResponseScheme() { Id = request.Id, Status = 2, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath} not found", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
+        NotFound: return new MvcResponseScheme() { Id = request.Id, Status = 2, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath} not found", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
         }
 
         /// <summary>
@@ -588,9 +604,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public virtual Task<bool> MvcChannel_OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        public virtual async Task<bool> MvcChannel_OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
-            return Task.FromResult(true);
+            return await Task.FromResult(true);
         }
 
         /// <summary>
@@ -601,9 +617,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public virtual Task MvcChannel_OnDisConnectioned(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        public virtual async Task MvcChannel_OnDisConnectioned(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
-            return Task.CompletedTask;
+            await Task.CompletedTask;
         }
 
 

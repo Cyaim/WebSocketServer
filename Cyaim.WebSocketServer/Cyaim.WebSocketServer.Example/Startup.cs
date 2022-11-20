@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Example.Common.Redis;
 using Cyaim.WebSocketServer.Infrastructure;
@@ -83,5 +84,8 @@ namespace Cyaim.WebSocketServer.Example
             app.UseWebSocketServer(app.ApplicationServices);
             //---------------------END---------------------
         }
+
+
+
     }
 }
