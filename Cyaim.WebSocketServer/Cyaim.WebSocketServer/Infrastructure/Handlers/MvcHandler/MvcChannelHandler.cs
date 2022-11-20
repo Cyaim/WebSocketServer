@@ -48,7 +48,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         public WebSocketHandlerMetadata Metadata { get; } = new WebSocketHandlerMetadata()
         {
             Describe = "Provide MVC forwarding handler",
-            CanHandleBinary = false,
+            CanHandleBinary = true,
             CanHandleText = true,
         };
 
@@ -61,7 +61,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// Receive message buffer
         /// </summary>
         public int ReceiveBinaryBufferSize { get; set; }
-
 
         /// <summary>
         /// Mvc Channel entry
@@ -95,7 +94,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                     using (WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync())
                     {
-                        //this.webSocket = webSocket;
                         webSocketCloseInst = webSocket;
 
                         logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connected({context.Connection.Id})");
@@ -124,7 +122,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
             finally
             {
-                //await MvcChannel_OnDisConnected(context, this.webSocket, webSocketOptions, logger);
                 await MvcChannel_OnDisConnected(context, webSocketCloseInst, webSocketOptions, logger);
             }
 
@@ -142,15 +139,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             try
             {
                 WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-                switch (result.MessageType)
-                {
-                    case WebSocketMessageType.Binary:
-                        await MvcBinaryForward(context, webSocket, result, buffer);
-                        break;
-                    case WebSocketMessageType.Text:
-                        await MvcTextForward(result, buffer, webSocket, context);
-                        break;
-                }
+                //switch (result.MessageType)
+                //{
+                //    case WebSocketMessageType.Binary:
+                //        await MvcBinaryForward(context, webSocket, result, buffer);
+                //        break;
+                //    case WebSocketMessageType.Text:
+                //        await MvcTextForward(webSocket, context, result, buffer);
+                //        break;
+                //}
+                await MvcForward(webSocket, context, result, buffer);
 
                 //链接断开
                 await webSocket.CloseAsync(webSocket.CloseStatus == null ?
@@ -165,14 +163,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         }
 
         /// <summary>
-        /// Type by Text transfer
+        /// Handle request content
         /// </summary>
         /// <param name="result"></param>
         /// <param name="buffer"></param>
         /// <param name="webSocket"></param>
         /// <param name="context"></param>
         /// <returns></returns>
-        private async Task MvcTextForward(WebSocketReceiveResult result, byte[] buffer, WebSocket webSocket, HttpContext context)
+        private async Task MvcForward(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, byte[] buffer)
         {
 
             long requestTime = DateTime.Now.Ticks;
@@ -186,7 +184,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 try
                 {
-                    await MvcTextForwardSendData(result, webSocket, context, json, requestTime);
+                    await MvcForwardSendData(webSocket, context, result, json, requestTime);
                 }
                 catch (Exception ex)
                 {
@@ -194,7 +192,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 }
                 finally
                 {
-                    //json = string.Empty;
                     json = json.Clear();
                 }
             }
@@ -218,8 +215,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         continue;
                     }
 
-                    await MvcTextForwardSendData(result, webSocket, context, json, requestTime);
+                    await MvcForwardSendData(webSocket, context, result, json, requestTime);
 
+                    json = json.Clear();
                 }
                 catch (OperationCanceledException ex)
                 {
@@ -229,10 +227,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     logger.LogError(ex, ex.Message);
                 }
-                finally
-                {
-                    json = json.Clear();
-                }
 
             }
 
@@ -240,7 +234,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         }
 
         /// <summary>
-        /// MvcChannel text forward data
+        /// MvcChannel forward data
         /// </summary>
         /// <param name="result"></param>
         /// <param name="webSocket"></param>
@@ -248,11 +242,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="json"></param>
         /// <param name="requsetTicks"></param>
         /// <returns></returns>
-        private async Task MvcTextForwardSendData(WebSocketReceiveResult result, WebSocket webSocket, HttpContext context, StringBuilder json, long requsetTicks)
+        private async Task MvcForwardSendData(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, StringBuilder json, long requsetTicks)
         {
             try
             {
                 MvcRequestScheme request = JsonConvert.DeserializeObject<MvcRequestScheme>(json.ToString());
+                if (request == null)
+                {
+                    throw new JsonSerializationException("Json格式错误，请求数据：" + json);
+                }
 
                 //按节点请求转发
                 object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, logger);
@@ -308,11 +306,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
 
 
-        }
-
-        private async Task MvcBinaryForward(HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
-        {
-            await Task.CompletedTask;
         }
 
         /// <summary>
