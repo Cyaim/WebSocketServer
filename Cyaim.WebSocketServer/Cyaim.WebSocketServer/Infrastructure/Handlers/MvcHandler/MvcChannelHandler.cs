@@ -137,9 +137,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         private async Task MvcForward(HttpContext context, WebSocket webSocket)
         {
             var buffer = new byte[ReceiveTextBufferSize];
+            ArraySegment<byte> bufferSeg = new ArraySegment<byte>(buffer);
+            
             try
             {
-                WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                WebSocketReceiveResult result = await webSocket.ReceiveAsync(bufferSeg, CancellationToken.None);
                 //switch (result.MessageType)
                 //{
                 //    case WebSocketMessageType.Binary:
@@ -149,7 +151,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 //        await MvcTextForward(webSocket, context, result, buffer);
                 //        break;
                 //}
-                await MvcForward(webSocket, context, result, buffer);
+                await MvcForward(webSocket, context, result, bufferSeg);
 
                 //链接断开
                 await webSocket.CloseAsync(webSocket.CloseStatus == null ?
@@ -171,7 +173,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="webSocket"></param>
         /// <param name="context"></param>
         /// <returns></returns>
-        private async Task MvcForward(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, byte[] buffer)
+        private async Task MvcForward(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, ArraySegment<byte> buffer)
         {
 
             long requestTime = DateTime.Now.Ticks;
@@ -206,7 +208,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     {
                         break;
                     }
-                    result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                    
+                    result = await webSocket.ReceiveAsync(buffer, CancellationToken.None);
                     requestTime = DateTime.Now.Ticks;
 
                     json = json.Append(Encoding.UTF8.GetString(buffer[..result.Count]));
@@ -398,8 +401,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     }
                     #endregion
 
-                    #region 注入调用方法参数
                     MvcResponseScheme mvcResponse = new MvcResponseScheme() { Status = 0, RequestTime = requestTime };
+                    #region 注入调用方法参数
                     object invokeResult = default;
                     if (requestBody == null)
                     {
@@ -531,7 +534,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             string msg = string.Empty;
 
-            if (webSocket.CloseStatus.HasValue)
+            if ((webSocket?.CloseStatus.HasValue).HasValue)
             {
                 switch (webSocket.CloseStatus.Value)
                 {
@@ -571,10 +574,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
             else
             {
-                msg = "The server shutting down.";
+                msg = "The connection of this client is shutting down.";
             }
 
-            logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已断开({context.Connection.Id})\r\nStatus:{webSocket.CloseStatus}\r\n{msg}");
+            logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 连接已断开({context.Connection.Id})\r\nStatus:{webSocket?.CloseStatus.ToString() ?? "NoHandshakeSucceeded"}\r\n{msg}");
 
             try
             {

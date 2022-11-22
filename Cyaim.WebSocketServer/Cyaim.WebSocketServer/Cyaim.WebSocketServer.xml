@@ -386,7 +386,7 @@
             <param name="webSocket"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcForward(System.Net.WebSockets.WebSocket,Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocketReceiveResult,System.Byte[])">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.MvcForward(System.Net.WebSockets.WebSocket,Microsoft.AspNetCore.Http.HttpContext,System.Net.WebSockets.WebSocketReceiveResult,System.ArraySegment{System.Byte})">
             <summary>
             Handle request content
             </summary>
@@ -503,6 +503,40 @@
             <summary>
             Response body
             </summary>
+        </member>
+        <member name="T:Cyaim.WebSocketServer.Infrastructure.WebSocketManager">
+            <summary>
+            WebSocket operation method
+            </summary>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendAsync(System.ReadOnlyMemory{System.Byte},System.Net.WebSockets.WebSocketMessageType,System.Boolean,System.Threading.CancellationToken,System.Net.WebSockets.WebSocket[])">
+            <summary>
+            发送数据
+            </summary>
+            <param name="buffer"></param>
+            <param name="messageType"></param>
+            <param name="endOfMessage"></param>
+            <param name="cancellationToken"></param>
+            <param name="socket"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendAsync(System.String,System.Text.Encoding,System.Net.WebSockets.WebSocket[])">
+            <summary>
+            发送文本数据，不使用缓冲区
+            </summary>
+            <param name="data"></param>
+            <param name="encoding"></param>
+            <param name="socket"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendAsync``1(``0,System.Net.WebSockets.WebSocket[])">
+            <summary>
+            序列化并发送文本数据，不使用缓冲区
+            </summary>
+            <typeparam name="T"></typeparam>
+            <param name="data"></param>
+            <param name="socket"></param>
+            <returns></returns>
         </member>
         <member name="T:Cyaim.WebSocketServer.Infrastructure.WebSocketRouteServiceCollectionExtensions">
             <summary>
