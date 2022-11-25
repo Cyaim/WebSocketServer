@@ -34,6 +34,26 @@ app.UseWebSockets(webSocketOptions);
 app.UseWebSocketServer(app.ApplicationServices);
 ```
 
+- Minimal API can be use
+```C#
+builder.Services.ConfigureWebSocketRoute(x =>
+{
+    //Define channels
+    x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
+    {
+        { "/ws",new MvcChannelHandler(4*1024).ConnectionEntry}
+    };
+    x.ApplicationServiceCollection = builder.Services;
+});
+
+var webSocketOptions = new WebSocketOptions()
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(120),
+};
+app.UseWebSockets(webSocketOptions);
+app.UseWebSocketServer(app.Services);
+```
+
 3. Mark WebSocket Endpoints
     - Go to Controller -> Action
     - Add attribute [WebSocket]  
