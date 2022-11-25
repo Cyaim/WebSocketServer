@@ -359,6 +359,11 @@
             </summary>
             <param name="receiveBufferSize"></param>
         </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.Metadata">
+            <summary>
+            Metadata used when parsing the handler
+            </summary>
+        </member>
         <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler.ReceiveTextBufferSize">
             <summary>
             Receive message buffer
@@ -509,9 +514,14 @@
             WebSocket operation method
             </summary>
         </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.WebSocketManager.Encoding">
+            <summary>
+            Default send encoding
+            </summary>
+        </member>
         <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendAsync(System.ReadOnlyMemory{System.Byte},System.Net.WebSockets.WebSocketMessageType,System.Boolean,System.Threading.CancellationToken,System.Net.WebSockets.WebSocket[])">
             <summary>
-            发送数据
+            Send data without buffer
             </summary>
             <param name="buffer"></param>
             <param name="messageType"></param>
@@ -520,22 +530,34 @@
             <param name="socket"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendAsync(System.String,System.Text.Encoding,System.Net.WebSockets.WebSocket[])">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendAsync(System.String,System.Net.WebSockets.WebSocketMessageType,System.Text.Encoding,System.Net.WebSockets.WebSocket[])">
             <summary>
-            发送文本数据，不使用缓冲区
+            Send data without buffer
             </summary>
             <param name="data"></param>
+            <param name="messageType"></param>
             <param name="encoding"></param>
             <param name="socket"></param>
             <returns></returns>
         </member>
-        <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendAsync``1(``0,System.Net.WebSockets.WebSocket[])">
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendAsync``1(``0,System.Net.WebSockets.WebSocketMessageType,System.Net.WebSockets.WebSocket[])">
             <summary>
-            序列化并发送文本数据，不使用缓冲区
+            Sending serialized model text data without using a buffer
             </summary>
             <typeparam name="T"></typeparam>
             <param name="data"></param>
+            <param name="messageType"></param>
             <param name="socket"></param>
+            <returns></returns>
+        </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendAsync``1(System.Net.WebSockets.WebSocket,``0,System.Net.WebSockets.WebSocketMessageType)">
+            <summary>
+            Sending serialized model text data without using a buffer
+            </summary>
+            <typeparam name="T"></typeparam>
+            <param name="socket"></param>
+            <param name="data"></param>
+            <param name="messageType"></param>
             <returns></returns>
         </member>
         <member name="T:Cyaim.WebSocketServer.Infrastructure.WebSocketRouteServiceCollectionExtensions">

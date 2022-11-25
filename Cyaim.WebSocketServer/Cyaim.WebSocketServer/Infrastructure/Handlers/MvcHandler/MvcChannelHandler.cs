@@ -45,6 +45,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             ReceiveTextBufferSize = ReceiveBinaryBufferSize = receiveBufferSize;
         }
 
+
+        /// <summary>
+        /// Metadata used when parsing the handler
+        /// </summary>
         public WebSocketHandlerMetadata Metadata { get; } = new WebSocketHandlerMetadata()
         {
             Describe = "Provide MVC forwarding handler",

@@ -11,10 +11,15 @@ namespace Cyaim.WebSocketServer.Infrastructure
     /// <summary>
     /// WebSocket operation method
     /// </summary>
-    public class WebSocketManager
+    public static class WebSocketManager
     {
         /// <summary>
-        /// 发送数据
+        /// Default send encoding
+        /// </summary>
+        public static Encoding Encoding { get; set; } = Encoding.UTF8;
+
+        /// <summary>
+        /// Send data without buffer
         /// </summary>
         /// <param name="buffer"></param>
         /// <param name="messageType"></param>
@@ -65,13 +70,14 @@ namespace Cyaim.WebSocketServer.Infrastructure
         }
 
         /// <summary>
-        /// 发送文本数据，不使用缓冲区
+        /// Send data without buffer
         /// </summary>
         /// <param name="data"></param>
+        /// <param name="messageType"></param>
         /// <param name="encoding"></param>
         /// <param name="socket"></param>
         /// <returns></returns>
-        public static async Task SendAsync(string data, Encoding encoding = null, params WebSocket[] socket)
+        public static async Task SendAsync(string data, WebSocketMessageType messageType = WebSocketMessageType.Text, Encoding encoding = null, params WebSocket[] socket)
         {
             if (string.IsNullOrEmpty(data) || socket == null || socket.LongLength < 1)
             {
@@ -79,19 +85,21 @@ namespace Cyaim.WebSocketServer.Infrastructure
             }
             if (encoding == null)
             {
-                encoding = Encoding.UTF8;
+                encoding = Encoding;
             }
-            await SendAsync(encoding.GetBytes(data), WebSocketMessageType.Text, true, CancellationToken.None, socket);
+            await SendAsync(encoding.GetBytes(data), messageType, true, CancellationToken.None, socket);
         }
 
+
         /// <summary>
-        /// 序列化并发送文本数据，不使用缓冲区
+        /// Sending serialized model text data without using a buffer
         /// </summary>
         /// <typeparam name="T"></typeparam>
         /// <param name="data"></param>
+        /// <param name="messageType"></param>
         /// <param name="socket"></param>
         /// <returns></returns>
-        public static async Task SendAsync<T>(T data, params WebSocket[] socket)
+        public static async Task SendAsync<T>(this T data, WebSocketMessageType messageType = WebSocketMessageType.Text, params WebSocket[] socket)
         {
             try
             {
@@ -100,7 +108,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     return;
                 }
 
-                await SendAsync(JsonConvert.SerializeObject(data), Encoding.UTF8, socket);
+                await SendAsync(JsonConvert.SerializeObject(data), messageType, Encoding, socket);
             }
             catch (Exception)
             {
@@ -108,5 +116,33 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 throw;
             }
         }
+
+        /// <summary>
+        /// Sending serialized model text data without using a buffer
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="socket"></param>
+        /// <param name="data"></param>
+        /// <param name="messageType"></param>
+        /// <returns></returns>
+        public static async Task SendAsync<T>(this WebSocket socket, T data, WebSocketMessageType messageType = WebSocketMessageType.Text)
+        {
+            try
+            {
+                if (data == null || socket == null)
+                {
+                    return;
+                }
+
+                await SendAsync(JsonConvert.SerializeObject(data), messageType, Encoding, socket);
+            }
+            catch (Exception)
+            {
+
+                throw;
+            }
+        }
+
+
     }
 }
