@@ -142,7 +142,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             var buffer = new byte[ReceiveTextBufferSize];
             ArraySegment<byte> bufferSeg = new ArraySegment<byte>(buffer);
-            
+
             try
             {
                 WebSocketReceiveResult result = await webSocket.ReceiveAsync(bufferSeg, CancellationToken.None);
@@ -212,7 +212,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     {
                         break;
                     }
-                    
+
                     result = await webSocket.ReceiveAsync(buffer, CancellationToken.None);
                     requestTime = DateTime.Now.Ticks;
 
@@ -407,16 +407,46 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                     MvcResponseScheme mvcResponse = new MvcResponseScheme() { Status = 0, RequestTime = requestTime };
                     #region 注入调用方法参数
+                    webSocketOptions.WatchAssemblyContext.MethodParameters.TryGetValue(method, out ParameterInfo[] methodParam);
                     object invokeResult = default;
                     if (requestBody == null)
                     {
-                        //无参方法
-                        invokeResult = method.Invoke(inst, new object[0]);
+                        object[] args = new object[0];
+                        // 有参方法
+                        if (methodParam.Length > 0)
+                        {
+                            args = new object[methodParam.LongLength];
+
+                            // 为每个参数设置其类型的默认值
+                            for (int i = 0; i < methodParam.Length; i++)
+                            {
+                                ParameterInfo item = methodParam[i];
+                                if (item.HasDefaultValue)
+                                {
+                                    args[i] = item.DefaultValue;
+                                    continue;
+                                }
+                                // 如果参数类型是值类型，则使用类型的零值
+                                if (item.ParameterType.IsValueType)
+                                {
+                                    args[i] = Activator.CreateInstance(item.ParameterType);
+                                }
+                                else
+                                {
+                                    // 如果参数类型是引用类型，则使用 null
+                                    args[i] = null;
+                                }
+                            }
+                        }
+                        else if (methodParam.Length < 0)
+                        {
+                            throw new InvalidOperationException("请求的目标终结点参数异常");
+                        }
+                        invokeResult = method.Invoke(inst, args);
                     }
                     else
                     {
                         // 异步调用该方法 
-                        webSocketOptions.WatchAssemblyContext.MethodParameters.TryGetValue(method, out ParameterInfo[] methodParam);
 
                         Task<object> invoke = new Task<object>(() =>
                         {
@@ -513,6 +543,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     serviceScope?.Dispose();
 
                     mvcResponse.Id = request.Id;
+                    mvcResponse.FromTarget = request.Target;
                     mvcResponse.Body = invokeResult;
                     mvcResponse.ComplateTime = DateTime.Now.Ticks;
 
@@ -538,7 +569,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             string msg = string.Empty;
 
-            if ((webSocket?.CloseStatus.HasValue).HasValue)
+            if (webSocket?.CloseStatus.HasValue ?? false)
             {
                 switch (webSocket.CloseStatus.Value)
                 {

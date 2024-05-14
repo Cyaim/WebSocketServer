@@ -15,6 +15,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         public string Id { get; set; }
 
         /// <summary>
+        /// Target when responding to return requests 
+        /// </summary>
+        public string FromTarget { get; set; }
+
+        /// <summary>
         /// Response status.
         /// Success:0,Application Error:1,NotFoundTarget:2
         /// </summary>
@@ -39,5 +44,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// Response body
         /// </summary>
         public object Body { get; set; }
+
     }
 }

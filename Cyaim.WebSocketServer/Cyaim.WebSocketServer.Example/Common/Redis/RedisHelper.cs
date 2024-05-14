@@ -116,7 +116,9 @@ namespace Cyaim.WebSocketServer.Example.Common.Redis
             {
                 if (obj == null)
                     return null;
+#pragma warning disable SYSLIB0011 // 类型或成员已过时
                 var binaryFormatter = new BinaryFormatter();
+#pragma warning restore SYSLIB0011 // 类型或成员已过时
                 using (var memoryStream = new MemoryStream())
                 {
                     binaryFormatter.Serialize(memoryStream, obj);
@@ -140,7 +142,9 @@ namespace Cyaim.WebSocketServer.Example.Common.Redis
         {
             if (data == null)
                 return default(T);
+#pragma warning disable SYSLIB0011 // 类型或成员已过时
             var binaryFormatter = new BinaryFormatter();
+#pragma warning restore SYSLIB0011 // 类型或成员已过时
             using (var memoryStream = new MemoryStream(data))
             {
                 var result = (T)binaryFormatter.Deserialize(memoryStream);
