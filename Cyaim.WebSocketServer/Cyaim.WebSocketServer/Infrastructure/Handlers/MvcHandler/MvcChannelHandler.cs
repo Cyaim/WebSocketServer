@@ -623,7 +623,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 bool wsExists = Clients.ContainsKey(context.Connection.Id);
                 if (wsExists)
                 {
-                    Clients.TryRemove(context.Connection.Id, out var ws);
+                    Clients.TryRemove(context.Connection.Id, out var _);
                 }
             }
         }
