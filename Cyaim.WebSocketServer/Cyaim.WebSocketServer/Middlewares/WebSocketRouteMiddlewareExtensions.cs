@@ -21,14 +21,13 @@ namespace Cyaim.WebSocketServer.Middlewares
         /// The websocket request will execute the with relation endpoint methods.
         /// </summary>
         /// <param name="app"></param>
-        /// <param name="serviceProvider"></param>
         /// <returns></returns>
-        public static IApplicationBuilder UseWebSocketServer(this IApplicationBuilder app, IServiceProvider serviceProvider)
+        public static IApplicationBuilder UseWebSocketServer(this IApplicationBuilder app)
         {
             app.UseMiddleware<WebSocketRouteMiddleware>();
-            WebSocketRouteOption.ApplicationServices = serviceProvider;
+            WebSocketRouteOption.ApplicationServices = app.ApplicationServices;
 
-            var server = serviceProvider.GetRequiredService<IServer>();
+            var server = WebSocketRouteOption.ApplicationServices.GetRequiredService<IServer>();
             var address = server.Features.Get<IServerAddressesFeature>();
             WebSocketRouteOption.ServerAddresses = address.Addresses.Select(x => x.Replace("https", "wss").Replace("http", "ws")).ToList();
             foreach (var item in WebSocketRouteOption.ServerAddresses)
@@ -39,6 +38,20 @@ namespace Cyaim.WebSocketServer.Middlewares
             return app;
         }
 
+        /// <summary>
+        /// Get WebSocket access address
+        /// </summary>
+        /// <returns></returns>
+        public static void GetWebSocketAddress()
+        {
+            var server = WebSocketRouteOption.ApplicationServices.GetRequiredService<IServer>();
+            var address = server.Features.Get<IServerAddressesFeature>();
+            WebSocketRouteOption.ServerAddresses = address.Addresses.Select(x => x.Replace("https", "wss").Replace("http", "ws")).ToList();
+            foreach (var item in WebSocketRouteOption.ServerAddresses)
+            {
+                Console.WriteLine($"Now websocket on:{item}");
+            }
+        }
 
         /// <summary>
         /// Use websocket cluster start service.

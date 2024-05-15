@@ -4,10 +4,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
+using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Reflection;
+using System.Runtime.InteropServices.ComTypes;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -126,6 +129,118 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
         }
 
+        #region Old
+
+        ///// <summary>
+        ///// Forward by WebSocket transfer type
+        ///// </summary>
+        ///// <param name="context"></param>
+        ///// <param name="webSocket"></param>
+        ///// <returns></returns>
+        //private async Task MvcForward(HttpContext context, WebSocket webSocket)
+        //{
+        //    var buffer = new byte[ReceiveTextBufferSize];
+        //    ArraySegment<byte> bufferSeg = new ArraySegment<byte>(buffer);
+
+        //    try
+        //    {
+        //        WebSocketReceiveResult result = await webSocket.ReceiveAsync(bufferSeg, CancellationToken.None);
+        //        //switch (result.MessageType)
+        //        //{
+        //        //    case WebSocketMessageType.Binary:
+        //        //        await MvcBinaryForward(context, webSocket, result, buffer);
+        //        //        break;
+        //        //    case WebSocketMessageType.Text:
+        //        //        await MvcTextForward(webSocket, context, result, buffer);
+        //        //        break;
+        //        //}
+        //        await MvcForward(webSocket, context, result, bufferSeg);
+
+        //        //链接断开
+        //        await webSocket.CloseAsync(webSocket.CloseStatus == null ?
+        //            webSocket.State == WebSocketState.Aborted ?
+        //            WebSocketCloseStatus.InternalServerError : WebSocketCloseStatus.NormalClosure
+        //            : webSocket.CloseStatus.Value, result.CloseStatusDescription, CancellationToken.None);
+        //    }
+        //    catch (OperationCanceledException ex)
+        //    {
+        //        logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 终止接收数据({context.Connection.Id})\r\nStatus:{(webSocket.CloseStatus.HasValue ? webSocket.CloseStatus.ToString() : "ServerClose")}\r\n{ex.Message}");
+        //    }
+        //}
+
+        ///// <summary>
+        ///// Handle request content
+        ///// </summary>
+        ///// <param name="result"></param>
+        ///// <param name="buffer"></param>
+        ///// <param name="webSocket"></param>
+        ///// <param name="context"></param>
+        ///// <returns></returns>
+        //private async Task MvcForward(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, ArraySegment<byte> buffer)
+        //{
+
+        //    long requestTime = DateTime.Now.Ticks;
+        //    StringBuilder json = new StringBuilder();
+
+        //    //处理第一次返回的数据
+        //    json = json.Append(Encoding.UTF8.GetString(buffer[..result.Count]));
+
+        //    //第一次接受已经接受完数据了
+        //    if (result.EndOfMessage)
+        //    {
+        //        try
+        //        {
+        //            await MvcForwardSendData(webSocket, context, result, json, requestTime);
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            logger.LogError(ex, ex.Message);
+        //        }
+        //        finally
+        //        {
+        //            json = json.Clear();
+        //        }
+        //    }
+
+        //    //等待客户端发送数据，第二次接受数据
+        //    while (!result.CloseStatus.HasValue)
+        //    {
+        //        try
+        //        {
+        //            if (!(webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseSent))
+        //            {
+        //                break;
+        //            }
+
+        //            result = await webSocket.ReceiveAsync(buffer, CancellationToken.None);
+        //            requestTime = DateTime.Now.Ticks;
+
+        //            json = json.Append(Encoding.UTF8.GetString(buffer[..result.Count]));
+
+        //            if (!result.EndOfMessage || result.CloseStatus.HasValue)
+        //            {
+        //                continue;
+        //            }
+
+        //            await MvcForwardSendData(webSocket, context, result, json, requestTime);
+
+        //            json = json.Clear();
+        //        }
+        //        catch (OperationCanceledException ex)
+        //        {
+        //            logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 终止接收数据({context.Connection.Id})\r\nStatus:{(webSocket.CloseStatus.HasValue ? webSocket.CloseStatus.ToString() : "ServerClose")}\r\n{ex.Message}");
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            logger.LogError(ex, ex.Message);
+        //        }
+
+        //    }
+
+
+        //}
+        #endregion
+
         /// <summary>
         /// Forward by WebSocket transfer type
         /// </summary>
@@ -134,12 +249,75 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <returns></returns>
         private async Task MvcForward(HttpContext context, WebSocket webSocket)
         {
-            var buffer = new byte[ReceiveTextBufferSize];
-            ArraySegment<byte> bufferSeg = new ArraySegment<byte>(buffer);
-
             try
             {
-                WebSocketReceiveResult result = await webSocket.ReceiveAsync(bufferSeg, CancellationToken.None);
+                CancellationTokenSource connCts = new CancellationTokenSource();
+                string wsCloseDesc = string.Empty;
+                do
+                {
+                    long requestTime = DateTime.Now.Ticks;
+                    StringBuilder json = new StringBuilder();
+                    WebSocketReceiveResult result = null;
+                    MemoryStream stream = new MemoryStream(0);
+                    try
+                    {
+                        #region 接收数据
+                        byte[] buffer = ArrayPool<byte>.Shared.Rent(ReceiveTextBufferSize);
+
+                        while ((result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None)).Count > 0)
+                        {
+                            try
+                            {
+                                await stream.WriteAsync(buffer, 0, result.Count);
+                                // 已经接受完数据了
+                                if (result.EndOfMessage || result.CloseStatus.HasValue)
+                                {
+                                    break;
+                                }
+                            }
+                            catch (OperationCanceledException ex)
+                            {
+                                logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 终止接收数据({context.Connection.Id})\r\nStatus:{(webSocket.CloseStatus.HasValue ? webSocket.CloseStatus.ToString() : "ServerClose")}\r\n{ex.Message}");
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.LogError(ex, ex.Message);
+                            }
+                            finally
+                            {
+                                ArrayPool<byte>.Shared.Return(buffer);
+                            }
+                        }
+                        #endregion
+
+                        wsCloseDesc = result?.CloseStatusDescription;
+
+                        if (!(result == null || json == null))
+                        {
+                            //JsonDocument document = JsonDocument.Parse(stream);
+                            
+                            // 处理返回的数据
+                            json = json.Append(Encoding.UTF8.GetString(stream.ToArray()));
+                            await MvcForwardSendData(webSocket, context, result, json, requestTime);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, ex.Message);
+                    }
+                    finally
+                    {
+                        json = json.Clear();
+                        wsCloseDesc = result.CloseStatusDescription;
+
+                        stream.SetLength(0);
+                        stream.Seek(0, SeekOrigin.Begin);
+                        stream.Position = 0;
+                    }
+
+                } while (connCts.IsCancellationRequested);
+
+
                 //switch (result.MessageType)
                 //{
                 //    case WebSocketMessageType.Binary:
@@ -149,91 +327,19 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 //        await MvcTextForward(webSocket, context, result, buffer);
                 //        break;
                 //}
-                await MvcForward(webSocket, context, result, bufferSeg);
 
-                //链接断开
+                // 连接断开
                 await webSocket.CloseAsync(webSocket.CloseStatus == null ?
                     webSocket.State == WebSocketState.Aborted ?
                     WebSocketCloseStatus.InternalServerError : WebSocketCloseStatus.NormalClosure
-                    : webSocket.CloseStatus.Value, result.CloseStatusDescription, CancellationToken.None);
+                    : webSocket.CloseStatus.Value, wsCloseDesc, CancellationToken.None);
             }
-            catch (OperationCanceledException ex)
+            catch (Exception ex)
             {
                 logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 终止接收数据({context.Connection.Id})\r\nStatus:{(webSocket.CloseStatus.HasValue ? webSocket.CloseStatus.ToString() : "ServerClose")}\r\n{ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Handle request content
-        /// </summary>
-        /// <param name="result"></param>
-        /// <param name="buffer"></param>
-        /// <param name="webSocket"></param>
-        /// <param name="context"></param>
-        /// <returns></returns>
-        private async Task MvcForward(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, ArraySegment<byte> buffer)
-        {
-
-            long requestTime = DateTime.Now.Ticks;
-            StringBuilder json = new StringBuilder();
-
-            //处理第一次返回的数据
-            json = json.Append(Encoding.UTF8.GetString(buffer[..result.Count]));
-
-            //第一次接受已经接受完数据了
-            if (result.EndOfMessage)
-            {
-                try
-                {
-                    await MvcForwardSendData(webSocket, context, result, json, requestTime);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, ex.Message);
-                }
-                finally
-                {
-                    json = json.Clear();
-                }
-            }
-
-            //等待客户端发送数据，第二次接受数据
-            while (!result.CloseStatus.HasValue)
-            {
-                try
-                {
-                    if (!(webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseSent))
-                    {
-                        break;
-                    }
-
-                    result = await webSocket.ReceiveAsync(buffer, CancellationToken.None);
-                    requestTime = DateTime.Now.Ticks;
-
-                    json = json.Append(Encoding.UTF8.GetString(buffer[..result.Count]));
-
-                    if (!result.EndOfMessage || result.CloseStatus.HasValue)
-                    {
-                        continue;
-                    }
-
-                    await MvcForwardSendData(webSocket, context, result, json, requestTime);
-
-                    json = json.Clear();
-                }
-                catch (OperationCanceledException ex)
-                {
-                    logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 终止接收数据({context.Connection.Id})\r\nStatus:{(webSocket.CloseStatus.HasValue ? webSocket.CloseStatus.ToString() : "ServerClose")}\r\n{ex.Message}");
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, ex.Message);
-                }
-
-            }
-
-
-        }
 
         /// <summary>
         /// MvcChannel forward data
