@@ -14,3 +14,8 @@
 *.nupkg
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer.DebugUI/obj
 /Cyaim.WebSocketServer/.vs/Cyaim.WebSocketServer
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer/bin
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer/bin/Release
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer/bin/Release/net6.0
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer/Properties/PublishProfiles/FolderProfile.pubxml.user
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer/Cyaim.WebSocketServer.csproj.user
