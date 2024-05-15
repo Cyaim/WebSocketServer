@@ -8,7 +8,6 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Websocket.Client;
 
 namespace Cyaim.WebSocketServer.Middlewares
 {

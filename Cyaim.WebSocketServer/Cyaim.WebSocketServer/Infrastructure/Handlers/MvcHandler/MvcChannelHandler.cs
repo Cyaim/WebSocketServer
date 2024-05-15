@@ -1,5 +1,4 @@
-﻿using Cyaim.WebSocketServer.Infrastructure.Attributes;
-using Cyaim.WebSocketServer.Infrastructure.Configures;
+﻿using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,17 +7,12 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Transactions;
-using Microsoft.CSharp;
-
 
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 {
@@ -378,7 +372,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                         if (webSocketOptions.ApplicationServiceCollection == null)
                         {
-                            logger.LogWarning("Cannot inject target constructor parameter because DI container WebSocketRouteOption.ApplicationServiceCollection is null.", "");
+                            logger.LogWarning("Cannot inject target constructor parameter because DI container WebSocketRouteOption.ApplicationServiceCollection is null.");
                             break;
                         }
 
