@@ -97,7 +97,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     //not supported 
                     parmItem.MethodPath = $"{parmItem.Controller.Replace("Controller", "")}.{parmItem.Methods.FirstOrDefault()}".ToLower();
                     parmItem.Class = item;
-                    Console.WriteLine($"WebSocket加载成功 -> { parmItem.Controller.Replace("Controller", "")}.{parmItem.Methods.FirstOrDefault()}");
+                    Console.WriteLine($"WebSocket加载成功 -> {parmItem.Controller.Replace("Controller", "")}.{parmItem.Methods.FirstOrDefault()}");
                 }
 
                 points.AddRange(accessParm);
@@ -168,6 +168,12 @@ namespace Cyaim.WebSocketServer.Infrastructure
             services.AddSingleton(x => wsrOptions);
 
             //services.TryAddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+
+            wsrOptions.WebSocketChannelAddresses = WebSocketRouteOption.ServerAddresses.Select(x => wsrOptions.WebSocketChannels.Keys.Select(ch => x + ch)).SelectMany(x => x).ToList();
+            foreach (var item in wsrOptions.WebSocketChannelAddresses)
+            {
+                Console.WriteLine($"Now websocket on:{item}");
+            }
         }
 
 

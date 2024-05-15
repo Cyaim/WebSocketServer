@@ -1,13 +1,11 @@
 ﻿using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.DependencyInjection;
 using System;
-using System.Collections.Generic;
-using System.Net.WebSockets;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Linq;
 
 namespace Cyaim.WebSocketServer.Middlewares
 {
@@ -29,10 +27,14 @@ namespace Cyaim.WebSocketServer.Middlewares
             app.UseMiddleware<WebSocketRouteMiddleware>();
             WebSocketRouteOption.ApplicationServices = serviceProvider;
 
+            var server = serviceProvider.GetRequiredService<IServer>();
+            var address = server.Features.Get<IServerAddressesFeature>();
+            WebSocketRouteOption.ServerAddresses = address.Addresses.Select(x => x.Replace("https", "wss").Replace("http", "ws")).ToList();
+
             return app;
         }
 
-  
+
         /// <summary>
         /// Use websocket cluster start service.
         /// Add Cyaim.WebSocketServer.Infrastructure.Middlewares.WebSocketRouteMiddleware Middleware.

@@ -17,9 +17,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
     public class WebSocketRouteOption
     {
         /// <summary>
-        /// Dependency injection container provider
+        /// Dependency injection container provider,Set on UseWebSocketServer
         /// </summary>
         public static IServiceProvider ApplicationServices { get; set; }
+
+        /// <summary>
+        /// Kestrel server addresses,Set on UseWebSocketServer
+        /// </summary>
+        public static List<string> ServerAddresses { get; set; }
 
         /// <summary>
         /// Dependency injection container
@@ -44,6 +49,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// Channel handlers
         /// </summary>
         public Dictionary<string, WebSocketChannelHandler> WebSocketChannels { get; set; }
+
+        /// <summary>
+        /// Full channel address
+        /// </summary>
+        public List<string> WebSocketChannelAddresses { get; set; }
 
         /// <summary>
         /// Watch assembly context
