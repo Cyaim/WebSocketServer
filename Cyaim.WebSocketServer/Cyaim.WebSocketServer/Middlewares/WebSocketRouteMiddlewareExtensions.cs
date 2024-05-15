@@ -1,6 +1,7 @@
 ﻿using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,6 +31,10 @@ namespace Cyaim.WebSocketServer.Middlewares
             var server = serviceProvider.GetRequiredService<IServer>();
             var address = server.Features.Get<IServerAddressesFeature>();
             WebSocketRouteOption.ServerAddresses = address.Addresses.Select(x => x.Replace("https", "wss").Replace("http", "ws")).ToList();
+            foreach (var item in WebSocketRouteOption.ServerAddresses)
+            {
+                Console.WriteLine($"Now websocket on:{item}");
+            }
 
             return app;
         }

@@ -1,8 +1,8 @@
-﻿using Newtonsoft.Json;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -108,7 +108,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     return;
                 }
 
-                await SendAsync(JsonConvert.SerializeObject(data), messageType, Encoding, socket);
+                await SendAsync(JsonSerializer.Serialize(data), messageType, Encoding, socket);
             }
             catch (Exception)
             {
@@ -134,7 +134,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     return;
                 }
 
-                await SendAsync(JsonConvert.SerializeObject(data), messageType, Encoding, socket);
+                await SendAsync(JsonSerializer.Serialize(data), messageType, Encoding, socket);
             }
             catch (Exception)
             {

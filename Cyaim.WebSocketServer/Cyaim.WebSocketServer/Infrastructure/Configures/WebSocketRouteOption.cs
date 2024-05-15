@@ -51,11 +51,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         public Dictionary<string, WebSocketChannelHandler> WebSocketChannels { get; set; }
 
         /// <summary>
-        /// Full channel address
-        /// </summary>
-        public List<string> WebSocketChannelAddresses { get; set; }
-
-        /// <summary>
         /// Watch assembly context
         /// </summary>
         public WatchAssemblyContext WatchAssemblyContext { get; set; }
@@ -66,10 +61,19 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         public string WatchAssemblyPath { get; set; }
 
         /// <summary>
+        /// Assembly prefix for Watch [WebSocket],Default:The Controllers folder of this assembly.
+        /// </summary>
+        public string WatchAssemblyNamespacePrefix { get; set; }
+
+        /// <summary>
+        /// Current ASPNETCORE_ENVIRONMENT==Development
+        /// </summary>
+        public bool IsDevelopment { get; set; } = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
+
+        /// <summary>
         /// Channel handler
         /// </summary>
         /// <param name="context">Http context</param>
-        /// <param name="webSocketManager">Http request WebSocket</param>
         /// <param name="logger">logger</param>
         /// <param name="webSocketOptions">WebSocket configure option</param>
         /// <returns></returns>

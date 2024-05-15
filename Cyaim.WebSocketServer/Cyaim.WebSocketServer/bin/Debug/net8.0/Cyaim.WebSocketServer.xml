@@ -187,7 +187,12 @@
         </member>
         <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.ApplicationServices">
             <summary>
-            Dependency injection container provider
+            Dependency injection container provider,Set on UseWebSocketServer
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.ServerAddresses">
+            <summary>
+            Kestrel server addresses,Set on UseWebSocketServer
             </summary>
         </member>
         <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.ApplicationServiceCollection">
@@ -224,12 +229,16 @@
             Watch assembly path
             </summary>
         </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.WatchAssemblyNamespacePrefix">
+            <summary>
+            Assembly prefix for Watch [WebSocket],Default:The Controllers folder of this assembly.
+            </summary>
+        </member>
         <member name="T:Cyaim.WebSocketServer.Infrastructure.Configures.WebSocketRouteOption.WebSocketChannelHandler">
             <summary>
             Channel handler
             </summary>
             <param name="context">Http context</param>
-            <param name="webSocketManager">Http request WebSocket</param>
             <param name="logger">logger</param>
             <param name="webSocketOptions">WebSocket configure option</param>
             <returns></returns>
@@ -284,11 +293,19 @@
             <param name="logger"></param>
             <returns></returns>
         </member>
+        <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.DataTypes.ConvertTo(System.Type,System.Text.Json.Nodes.JsonNode)">
+            <summary>
+            JsonNode value to target type
+            </summary>
+            <param name="type">target type</param>
+            <param name="value"></param>
+            <returns></returns>
+        </member>
         <member name="M:Cyaim.WebSocketServer.Infrastructure.Handlers.DataTypes.ConvertTo(System.Type,System.Object)">
             <summary>
             object to real type
             </summary>
-            <param name="type"></param>
+            <param name="type">Target type</param>
             <param name="value"></param>
             <returns></returns>
         </member>
@@ -341,6 +358,22 @@
         <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.WebSocketHandlerMetadata.CanHandleText">
             <summary>
             This handle allows text to be transferred
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.IMvcScheme.Id">
+            <summary>
+            Request Id
+            In Multiplex, you need to keep the id of uniqueness
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.IMvcScheme.Target">
+            <summary>
+            Request target
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.IMvcScheme.Body">
+            <summary>
+            Request context
             </summary>
         </member>
         <member name="T:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler">
@@ -483,7 +516,7 @@
             Response Id with request consistent 
             </summary>
         </member>
-        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseScheme.FromTarget">
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseScheme.Target">
             <summary>
             Target when responding to return requests 
             </summary>
@@ -512,6 +545,37 @@
         <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseScheme.Body">
             <summary>
             Response body
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseSchemeException.Id">
+            <summary>
+            Response Id with request consistent 
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseSchemeException.Target">
+            <summary>
+            Target when responding to return requests 
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseSchemeException.Status">
+            <summary>
+            Response status.
+            Success:0,Application Error:1,NotFoundTarget:2
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseSchemeException.Msg">
+            <summary>
+            Response message
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseSchemeException.RequestTime">
+            <summary>
+            Request time tick
+            </summary>
+        </member>
+        <member name="P:Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcResponseSchemeException.ComplateTime">
+            <summary>
+            Handle complate time tick
             </summary>
         </member>
         <member name="T:Cyaim.WebSocketServer.Infrastructure.WebSocketManager">

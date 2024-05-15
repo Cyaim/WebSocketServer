@@ -4,10 +4,7 @@ using System.Text;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 {
-    /// <summary>
-    /// WebSocket communication scheme
-    /// </summary>
-    public class MvcRequestScheme : IMvcScheme
+    public interface IMvcScheme
     {
         /// <summary>
         /// Request Id

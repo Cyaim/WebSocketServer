@@ -1,5 +1,7 @@
 ﻿using Cyaim.WebSocketServer.Infrastructure.Attributes;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using System;
@@ -52,8 +54,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 Console.WriteLine("WebSocket -> 没有定义WebSocket数据处理通道");
             }
 
-
             Assembly assembly = null;
+            // 指定标记WebSocket特性的程序集路径，默认为本程序集
             if (string.IsNullOrEmpty(wsrOptions?.WatchAssemblyPath))
             {
                 assembly = Assembly.GetEntryAssembly();
@@ -72,15 +74,16 @@ namespace Cyaim.WebSocketServer.Infrastructure
             #region 计算WebSocketEndPoint
 
             List<WebSocketEndPoint> points = new List<WebSocketEndPoint>();
-            string assemblyName = assembly.FullName.Split()[0]?.Trim(',') + ".Controllers";
+            // 在程序集中查询带有指定命名空间前缀的类
+            string assemblyName = string.IsNullOrEmpty(wsrOptions.WatchAssemblyNamespacePrefix) ? assembly.FullName.Split()[0]?.Trim(',') + ".Controllers" : wsrOptions.WatchAssemblyNamespacePrefix;
             var types = assembly.GetTypes().Where(x => !x.IsNestedPrivate && x.FullName.StartsWith(assemblyName)).ToList();
 
             wsrOptions.WatchAssemblyContext.WatchAssemblyPath = wsrOptions.WatchAssemblyPath;
             wsrOptions.WatchAssemblyContext.WatchAssemblyTypes = types;
 
-
             foreach (Type item in types)
             {
+                // 从类提取标记了的方法
                 var accessParm = GetClassAccessParm(item);
                 foreach (WebSocketEndPoint parmItem in accessParm)
                 {
@@ -94,10 +97,12 @@ namespace Cyaim.WebSocketServer.Infrastructure
                         parmItem.Methods = new string[] { parmItem.Action };
                     }
 
-                    //not supported 
-                    parmItem.MethodPath = $"{parmItem.Controller.Replace("Controller", "")}.{parmItem.Methods.FirstOrDefault()}".ToLower();
+                    // 方法的类名替换Controller
+                    string endPointPath = $"{parmItem.Controller.Replace("Controller", string.Empty)}.{parmItem.Methods.FirstOrDefault()}";
+                    // 终结点全部小写
+                    parmItem.MethodPath = endPointPath.ToLower();
                     parmItem.Class = item;
-                    Console.WriteLine($"WebSocket加载成功 -> {parmItem.Controller.Replace("Controller", "")}.{parmItem.Methods.FirstOrDefault()}");
+                    Console.WriteLine($"WebSocket加载成功 -> {endPointPath}");
                 }
 
                 points.AddRange(accessParm);
@@ -168,11 +173,9 @@ namespace Cyaim.WebSocketServer.Infrastructure
             services.AddSingleton(x => wsrOptions);
 
             //services.TryAddSingleton<IHttpContextAccessor, HttpContextAccessor>();
-
-            wsrOptions.WebSocketChannelAddresses = WebSocketRouteOption.ServerAddresses.Select(x => wsrOptions.WebSocketChannels.Keys.Select(ch => x + ch)).SelectMany(x => x).ToList();
-            foreach (var item in wsrOptions.WebSocketChannelAddresses)
+            foreach (var item in wsrOptions.WebSocketChannels.Keys)
             {
-                Console.WriteLine($"Now websocket on:{item}");
+                Console.WriteLine($"Define websocket channel on: {item}");
             }
         }
 
