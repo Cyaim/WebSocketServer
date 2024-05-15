@@ -1,0 +1,27 @@
+﻿<?xml version="1.0"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
+	<metadata>
+		<id>Cyaim.WebSocketServer</id>
+		<version>1.6.1</version>
+		<authors>Psyche</authors>
+		<owners>Cyaim Studio</owners>
+		<requireLicenseAcceptance>true</requireLicenseAcceptance>
+		<description>
+			WebSocketServer is lightweight and high performance WebSocket library.support route, full duplex communication.
+			WebSocketServer 是一个轻量级、高性能WebSocket库。支持 WebApi 路由、多路复用等。
+		</description>
+		<releaseNotes>
+			1,fix more bug.
+			2,add response target from request.
+		</releaseNotes>
+	</metadata>
+	<!-- The `file` tag defines the inclusion of assemblies and other files -->
+	<files>
+		<!-- Include all assemblies for each target framework -->
+		<file src="bin\Release\netstandard2.1\*.dll" target="lib\netstandard2.1" />
+		<file src="bin\Release\net5.0\*.dll" target="lib\net5.0" />
+		<file src="bin\Release\net6.0\*.dll" target="lib\net6.0" />
+		<file src="bin\Release\net7.0\*.dll" target="lib\net7.0" />
+		<file src="bin\Release\net8.0\*.dll" target="lib\net8.0" />
+	</files>
+</package>
