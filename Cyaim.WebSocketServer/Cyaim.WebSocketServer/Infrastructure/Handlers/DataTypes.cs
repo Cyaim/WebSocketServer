@@ -7,31 +7,94 @@ using System.Text.Json.Nodes;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 {
+    /// <summary>
+    /// DataTypes
+    /// </summary>
     public static class DataTypes
     {
         #region BaseType
+        /// <summary>
+        /// System.SByte
+        /// </summary>
         public const string Type_SByte = "System.SByte";
+        /// <summary>
+        /// System.Byte
+        /// </summary>
         public const string Type_Byte = "System.Byte";
+        /// <summary>
+        /// System.Int16
+        /// </summary>
         public const string Type_Short = "System.Int16";
+        /// <summary>
+        /// System.UInt16
+        /// </summary>
         public const string Type_UShort = "System.UInt16";
+        /// <summary>
+        /// System.Int32
+        /// </summary>
         public const string Type_Int = "System.Int32";
+        /// <summary>
+        /// System.UInt32
+        /// </summary>
         public const string Type_UInt = "System.UInt32";
+        /// <summary>
+        /// System.Int64
+        /// </summary>
         public const string Type_Long = "System.Int64";
+        /// <summary>
+        /// System.UInt64
+        /// </summary>
         public const string Type_ULong = "System.UInt64";
+        /// <summary>
+        /// System.Single
+        /// </summary>
         public const string Type_Float = "System.Single";
+        /// <summary>
+        /// System.Double
+        /// </summary>
         public const string Type_Double = "System.Double";
+        /// <summary>
+        /// System.Boolean
+        /// </summary>
         public const string Type_Bool = "System.Boolean";
+        /// <summary>
+        /// System.Char
+        /// </summary>
         public const string Type_Char = "System.Char";
+        /// <summary>
+        /// System.Decimal
+        /// </summary>
         public const string Type_Decimal = "System.Decimal";
+        /// <summary>
+        /// System.String
+        /// </summary>
         public const string Type_String = "System.String";
         #endregion
 
+        /// <summary>
+        /// System.DateTime
+        /// </summary>
         public const string Type_DateTime = "System.DateTime";
+        /// <summary>
+        /// System.DateTimeOffset
+        /// </summary>
         public const string Type_DateTimeOffset = "System.DateTimeOffset";
 
+        /// <summary>
+        /// System.Text.Json.JsonNode
+        /// </summary>
         public const string Type_JsonNode = "System.Text.Json.JsonNode";
+        /// <summary>
+        /// System.Text.Json.JsonObject
+        /// </summary>
         public const string Type_JsonObject = "System.Text.Json.JsonObject";
+        /// <summary>
+        /// System.Text.Json.JsonArray
+        /// </summary>
         public const string Type_JsonArray = "System.Text.Json.JsonArray";
+        /// <summary>
+        /// System.Text.Json.JsonValue
+        /// </summary>
         public const string Type_JsonValue = "System.Text.Json.JsonValue";
 
         /// <summary>
@@ -44,43 +107,26 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         {
             try
             {
-                switch (type.FullName)
+                return type.FullName switch
                 {
-                    case Type_String:
-                        return value.GetValue<string>();
-                    case Type_SByte:
-                        return value.GetValue<sbyte>();
-                    case Type_Byte:
-                        return value.GetValue<byte>();
-                    case Type_Short:
-                        return value.GetValue<short>();
-                    case Type_UShort:
-                        return value.GetValue<ushort>();
-                    case Type_Int:
-                        return value.GetValue<int>();
-                    case Type_UInt:
-                        return value.GetValue<uint>();
-                    case Type_Long:
-                        return value.GetValue<long>();
-                    case Type_ULong:
-                        return value.GetValue<ulong>();
-                    case Type_Float:
-                        return value.GetValue<float>();
-                    case Type_Double:
-                        return value.GetValue<double>();
-                    case Type_Bool:
-                        return value.GetValue<bool>();
-                    case Type_DateTime:
-                        return value.GetValue<DateTime>();
-                    case Type_DateTimeOffset:
-                        return value.GetValue<DateTimeOffset>();
-                    case Type_Char:
-                        return value.GetValue<char>();
-                    case Type_Decimal:
-                        return value.GetValue<decimal>();
-                    default:
-                        return JsonSerializer.Deserialize(value, type);
-                }
+                    Type_String => value.GetValue<string>(),
+                    Type_SByte => value.GetValue<sbyte>(),
+                    Type_Byte => value.GetValue<byte>(),
+                    Type_Short => value.GetValue<short>(),
+                    Type_UShort => value.GetValue<ushort>(),
+                    Type_Int => value.GetValue<int>(),
+                    Type_UInt => value.GetValue<uint>(),
+                    Type_Long => value.GetValue<long>(),
+                    Type_ULong => value.GetValue<ulong>(),
+                    Type_Float => value.GetValue<float>(),
+                    Type_Double => value.GetValue<double>(),
+                    Type_Bool => value.GetValue<bool>(),
+                    Type_DateTime => value.GetValue<DateTime>(),
+                    Type_DateTimeOffset => value.GetValue<DateTimeOffset>(),
+                    Type_Char => value.GetValue<char>(),
+                    Type_Decimal => value.GetValue<decimal>(),
+                    _ => JsonSerializer.Deserialize(value, type),
+                };
             }
             catch (Exception)
             {

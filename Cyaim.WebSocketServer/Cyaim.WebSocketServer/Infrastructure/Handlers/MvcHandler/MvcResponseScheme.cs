@@ -48,24 +48,35 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
     }
 
+    /// <summary>
+    /// MvcResponseSchemeException
+    /// </summary>
     public class MvcResponseSchemeException : Exception
     {
+        /// <summary>
+        /// MvcResponseSchemeException
+        /// </summary>
         public MvcResponseSchemeException()
         {
         }
 
+        /// <summary>
+        /// MvcResponseSchemeException
+        /// </summary>
+        /// <param name="message"></param>
         public MvcResponseSchemeException(string message) : base(message)
         {
             Msg = message;
         }
 
+        /// <summary>
+        /// MvcResponseSchemeException
+        /// </summary>
+        /// <param name="message"></param>
+        /// <param name="innerException"></param>
         public MvcResponseSchemeException(string message, Exception innerException) : base(message, innerException)
         {
             Msg = message;
-        }
-
-        protected MvcResponseSchemeException(SerializationInfo info, StreamingContext context) : base(info, context)
-        {
         }
 
 

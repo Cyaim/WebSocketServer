@@ -4,6 +4,9 @@ using System.Text;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 {
+    /// <summary>
+    /// MVC Scheme
+    /// </summary>
     public interface IMvcScheme
     {
         /// <summary>

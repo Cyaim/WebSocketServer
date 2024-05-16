@@ -151,10 +151,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 return;
             }
-            if (encoding == null)
-            {
-                encoding = Encoding;
-            }
+            encoding ??= Encoding;
             await SendAsync(encoding.GetBytes(data), messageType, true, CancellationToken.None, socket);
         }
 

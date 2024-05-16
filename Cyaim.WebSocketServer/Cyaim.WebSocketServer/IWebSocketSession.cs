@@ -6,6 +6,9 @@ using System.Text;
 
 namespace Cyaim.WebSocketServer
 {
+    /// <summary>
+    /// IWebSocketSession
+    /// </summary>
     public interface IWebSocketSession
     {
         /// <summary>

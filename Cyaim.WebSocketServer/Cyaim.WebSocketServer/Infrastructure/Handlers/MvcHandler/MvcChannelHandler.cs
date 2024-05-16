@@ -93,29 +93,27 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         return;
                     }
 
-                    using (WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync())
+                    using WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                    try
                     {
-                        try
+                        webSocketCloseInst = webSocket;
+
+                        logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connected({context.Connection.Id})");
+                        bool succ = Clients.TryAdd(context.Connection.Id, webSocket);
+                        if (succ)
                         {
-                            webSocketCloseInst = webSocket;
-
-                            logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connected({context.Connection.Id})");
-                            bool succ = Clients.TryAdd(context.Connection.Id, webSocket);
-                            if (succ)
-                            {
-                                await MvcForward(context, webSocket);
-                            }
-                            else
-                            {
-                                logger.LogDebug($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connection pool exception({context.Connection.Id})，ConnectionId repeat");
-                            }
-
-
+                            await MvcForward(context, webSocket);
                         }
-                        catch (Exception ex)
+                        else
                         {
-                            logger.LogInformation(ex, $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connection disconnected due to one or more internal exceptions({context.Connection.Id})\r\n{ex.Message}\r\n{ex.StackTrace}");
+                            logger.LogDebug($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connection pool exception({context.Connection.Id})，ConnectionId repeat");
                         }
+
+
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogInformation(ex, $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connection disconnected due to one or more internal exceptions({context.Connection.Id})\r\n{ex.Message}\r\n{ex.StackTrace}");
                     }
                 }
                 else
@@ -126,14 +124,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, ex.Message);
+                logger.LogInformation(ex, ex.Message);
             }
             finally
             {
                 await MvcChannel_OnDisconnected(context, webSocketCloseInst, webSocketOptions, logger);
 
                 webSocketCloseInst?.Dispose();
-                webSocketCloseInst = null;
             }
 
         }
@@ -286,7 +283,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                         #region 接收数据
                         byte[] buffer = ArrayPool<byte>.Shared.Rent(ReceiveTextBufferSize);
-
                         while ((result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None)).Count > 0)
                         {
                             try
@@ -298,7 +294,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                     goto CONTINUE;
                                 }
 
-                                await wsReceiveReader.WriteAsync(buffer, 0, result.Count);
+                                //await wsReceiveReader.WriteAsync(buffer, 0, result.Count);
+                                await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
                                 // 已经接受完数据了
                                 if (result.EndOfMessage || result.CloseStatus.HasValue)
                                 {
@@ -851,7 +848,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 object invokeResult = default;
                 if (requestBody == null || requestBody.Count <= 0)
                 {
-                    object[] args = new object[0];
+                    object[] args = Array.Empty<object>();
                     // 有参方法
                     if (methodParam.Length > 0)
                     {

@@ -9,6 +9,9 @@ using System.Threading.Tasks;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 {
+    /// <summary>
+    /// IWebSocketHandler
+    /// </summary>
     public interface IWebSocketHandler
     {
         /// <summary>
