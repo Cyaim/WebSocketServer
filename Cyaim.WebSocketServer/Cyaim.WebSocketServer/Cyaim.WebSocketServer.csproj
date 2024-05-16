@@ -11,10 +11,11 @@
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
 		<RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
 		<Copyright>Copyright © Cyaim Studio</Copyright>
-		<Version>1.6.2</Version>
+		<Version>1.6.3</Version>
 		<PackageReleaseNotes>
-			1,Fix more bug.
-			2,Add response target from request.
+			1,fix: remove unused packages.
+			2,feat: remove Newtonsoft.Json. change: Response schema "FromTarget"->"Target".
+			3,change: Receive data process changes.
 		</PackageReleaseNotes>
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
 		<Description>
