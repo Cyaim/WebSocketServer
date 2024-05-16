@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Configures
@@ -69,6 +70,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// Current ASPNETCORE_ENVIRONMENT==Development
         /// </summary>
         public bool IsDevelopment { get; set; } = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
+
+        /// <summary>
+        /// Maximum receive data limit per request,byte count
+        /// </summary>
+        public long? MaxRequestReceiveLimit { get; set; }
+
+        #region Event
 
         /// <summary>
         /// Channel handler
@@ -144,5 +152,29 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
             }
             return Task.CompletedTask;
         }
+        #endregion
+
+
+        #region System.Text.Json Options
+        /// <summary>
+        /// JsonSerialiazerOptions
+        /// </summary>
+        public JsonSerializerOptions DefaultRequestJsonSerialiazerOptions { get; set; } = new JsonSerializerOptions
+        {
+            // 设置为 true 以忽略属性名称的大小写
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = false,
+        };
+
+        /// <summary>
+        /// JsonSerialiazerOptions
+        /// </summary>
+        public JsonSerializerOptions DefaultResponseJsonSerialiazerOptions { get; set; } = new JsonSerializerOptions
+        {
+            // 设置为 true 以忽略属性名称的大小写
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = false,
+        };
+        #endregion
     }
 }

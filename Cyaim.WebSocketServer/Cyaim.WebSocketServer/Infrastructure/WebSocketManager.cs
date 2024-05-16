@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.IO;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -17,6 +17,74 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// Default send encoding
         /// </summary>
         public static Encoding Encoding { get; set; } = Encoding.UTF8;
+        /// <summary>
+        /// JsonSerialiazerOptions
+        /// </summary>
+        public static JsonSerializerOptions DefaultMvcJsonSerialiazerOptions { get; set; } = new JsonSerializerOptions
+        {
+            // 设置为 true 以忽略属性名称的大小写
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = false,
+        };
+
+        /// <summary>
+        /// Send data without buffer
+        /// </summary>
+        /// <param name="buffer"></param>
+        /// <param name="messageType"></param>
+        /// <param name="endOfMessage"></param>
+        /// <param name="cancellationToken"></param>
+        /// <param name="socket"></param>
+        /// <returns></returns>
+        public static async Task SendAsync(MemoryStream buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken, params WebSocket[] socket)
+        {
+            if (socket == null || socket.LongLength < 1)
+            {
+                return;
+            }
+            ParallelLoopResult result = Parallel.ForEach(socket, async (s, state) =>
+            {
+                try
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        state.Stop();
+                        return;
+                    }
+                    if (s.State == WebSocketState.Open)
+                    {
+                        //while (sent < data.Length)
+                        //{
+                        //    int length = Math.Min(bufferSize, data.Length - sent);
+                        //    ArraySegment<byte> segment = new ArraySegment<byte>(data, sent, length);
+                        //    await webSocket.SendAsync(segment, WebSocketMessageType.Text, true, CancellationToken.None);
+                        //    sent += length;
+                        //}
+
+                        await s.SendAsync(buffer.GetBuffer(), messageType, endOfMessage, cancellationToken);
+                    }
+
+                }
+                catch (AggregateException age)
+                {
+                    foreach (var item in age.InnerExceptions)
+                    {
+                        Console.WriteLine(item.Message);
+                    }
+                }
+                catch (Exception)
+                {
+
+                    throw;
+                }
+            });
+
+            while (!result.IsCompleted)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10));
+            }
+
+        }
 
         /// <summary>
         /// Send data without buffer
@@ -108,7 +176,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     return;
                 }
 
-                await SendAsync(JsonSerializer.Serialize(data), messageType, Encoding, socket);
+                await SendAsync(JsonSerializer.Serialize(data, DefaultMvcJsonSerialiazerOptions), messageType, Encoding, socket);
             }
             catch (Exception)
             {
@@ -134,7 +202,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     return;
                 }
 
-                await SendAsync(JsonSerializer.Serialize(data), messageType, Encoding, socket);
+                await SendAsync(JsonSerializer.Serialize(data, DefaultMvcJsonSerialiazerOptions), messageType, Encoding, socket);
             }
             catch (Exception)
             {
