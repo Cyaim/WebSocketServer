@@ -11,6 +11,7 @@ using System.Linq;
 using System.Reflection;
 using System.Security.Authentication.ExtendedProtection;
 using System.Text;
+using System.Globalization;
 
 namespace Cyaim.WebSocketServer.Infrastructure
 {
@@ -177,6 +178,9 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 Console.WriteLine($"Define websocket channel on: {item}");
             }
+
+            // 获取当前线程的默认文化
+            CultureInfo defaultCultureInfo = CultureInfo.CurrentCulture;
         }
 
 

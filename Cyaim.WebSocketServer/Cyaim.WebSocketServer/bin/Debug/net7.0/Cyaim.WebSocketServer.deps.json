@@ -6,7 +6,7 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v7.0": {
-      "Cyaim.WebSocketServer/1.6.2": {
+      "Cyaim.WebSocketServer/1.6.3": {
         "dependencies": {
           "System.Text.Json": "8.0.3"
         },
@@ -44,7 +44,7 @@
     }
   },
   "libraries": {
-    "Cyaim.WebSocketServer/1.6.2": {
+    "Cyaim.WebSocketServer/1.6.3": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

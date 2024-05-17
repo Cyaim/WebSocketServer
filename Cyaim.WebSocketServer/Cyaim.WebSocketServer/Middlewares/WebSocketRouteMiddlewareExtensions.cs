@@ -27,14 +27,6 @@ namespace Cyaim.WebSocketServer.Middlewares
             app.UseMiddleware<WebSocketRouteMiddleware>();
             WebSocketRouteOption.ApplicationServices = app.ApplicationServices;
 
-            var server = WebSocketRouteOption.ApplicationServices.GetRequiredService<IServer>();
-            var address = server.Features.Get<IServerAddressesFeature>();
-            WebSocketRouteOption.ServerAddresses = address.Addresses.Select(x => x.Replace("https", "wss").Replace("http", "ws")).ToList();
-            foreach (var item in WebSocketRouteOption.ServerAddresses)
-            {
-                Console.WriteLine($"Now websocket on:{item}");
-            }
-
             return app;
         }
 
