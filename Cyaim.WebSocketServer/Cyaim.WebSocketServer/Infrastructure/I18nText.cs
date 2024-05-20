@@ -92,12 +92,12 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// 国际化文件夹路径
         /// </summary>
         [JsonIgnore]
-        public static readonly string I18nResourcePath = "i18n";
+        public static string I18nResourcePath = "i18n";
         /// <summary>
         /// 语言文件后缀
         /// </summary>
         [JsonIgnore]
-        public static readonly string I18nResourceFileSuffix = ".json";
+        public static string I18nResourceFileSuffix = ".json";
 
         /// <summary>
         /// WebSocket 交互文本模板
