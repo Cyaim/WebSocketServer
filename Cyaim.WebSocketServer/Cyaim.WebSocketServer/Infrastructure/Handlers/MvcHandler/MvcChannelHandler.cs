@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
@@ -69,8 +70,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         public async Task ConnectionEntry(HttpContext context, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions)
         {
             this.logger = logger;
-            webSocketOption = webSocketOptions;
-            WebSocket webSocketCloseInst = null;
+            this.webSocketOption = webSocketOptions;
+
+            WebSocketCloseStatus? webSocketCloseStatus = null;
             try
             {
                 if (context.WebSockets.IsWebSocketRequest)
@@ -86,40 +88,46 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     {
                         return;
                     }
-                    using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                    
+                    // 接受连接
+                    using WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync();
                     try
                     {
-                        webSocketCloseInst = webSocket;
-                        logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connected({context.Connection.Id})");
-                        var succ = Clients.TryAdd(context.Connection.Id, webSocket);
+                        logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_Connected));
+                        bool succ = Clients.TryAdd(context.Connection.Id, webSocket);
+
                         if (succ)
                         {
                             await MvcForward(context, webSocket);
                         }
                         else
                         {
-                            logger.LogDebug($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connection pool exception({context.Connection.Id})，ConnectionId repeat");
+                            // 如果配置了允许多连接
+                            logger.LogDebug(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_ConnectionAlreadyExists));
                         }
                     }
                     catch (Exception ex)
                     {
-                        logger.LogInformation(ex, $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connection disconnected due to one or more internal exceptions({context.Connection.Id})\r\n{ex.Message}\r\n{ex.StackTrace}");
+                        logger.LogDebug(ex, string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_DisconnectedInternalExceptions + ex.Message + Environment.NewLine + ex.StackTrace));
+                    }
+                    finally
+                    {
+                        webSocketCloseStatus = webSocket.CloseStatus;
                     }
                 }
                 else
                 {
-                    logger.LogTrace($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Connection denied:request header error({context.Connection.Id})");
+                    logger.LogDebug(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_ConnectionDenied));
                     context.Response.StatusCode = 400;
                 }
             }
             catch (Exception ex)
             {
-                logger.LogInformation(ex, ex.Message);
+                logger.LogTrace(ex, ex.Message);
             }
             finally
             {
-                await MvcChannel_OnDisconnected(context, webSocketCloseInst, webSocketOptions, logger);
-                webSocketCloseInst?.Dispose();
+                await MvcChannel_OnDisconnected(context, webSocketCloseStatus, webSocketOptions, logger);
             }
         }
 
@@ -161,9 +169,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             try
                             {
                                 // 请求大小限制
-                                if (wsReceiveReader.Length > webSocketOption.MaxRequestReceiveLimit)
+                                if (wsReceiveReader.Length > webSocketOption.MaxRequestReceiveDataLimit)
                                 {
-                                    logger.LogTrace($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Request size exceeds maximum limit({context.Connection.Id})");
+                                    logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
+
                                     goto CONTINUE;
                                 }
 
@@ -178,7 +187,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             }
                             catch (Exception ex)
                             {
-                                logger.LogTrace($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> An exception occurred while receiving client data({context.Connection.Id})\r\n{ex.Message}\r\n{ex.StackTrace}");
+                                logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_ReceivingClientDataException + ex.Message + Environment.NewLine + ex.StackTrace));
                             }
                             finally
                             {
@@ -252,7 +261,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
             catch (Exception ex)
             {
-                logger.LogTrace($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Aborted receiving data({context.Connection.Id})\r\nStatus:{(webSocket.CloseStatus.HasValue ? webSocket.CloseStatus.ToString() : "ServerClose")}\r\n{ex.Message}\r\n{ex.StackTrace}");
+                logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_AbortedReceivingData + ex.Message + Environment.NewLine + ex.StackTrace));
             }
         }
 
@@ -284,7 +293,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
             catch (JsonException ex)
             {
-                var mvcRespEx = new MvcResponseSchemeException($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Request parsing error\r\n {ex.Message}\r\n{ex.StackTrace}")
+                MvcResponseSchemeException mvcRespEx = new MvcResponseSchemeException(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestParsingError + ex.Message + Environment.NewLine + ex.StackTrace))
                 {
                     Status = 1,
                     RequestTime = requsetTicks,
@@ -328,7 +337,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
             catch (JsonException ex)
             {
-                var mvcRespEx = new MvcResponseSchemeException($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Request parsing error\r\n {ex.Message}\r\n{ex.StackTrace}")
+                MvcResponseSchemeException mvcRespEx = new MvcResponseSchemeException(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestParsingError + ex.Message + Environment.NewLine + ex.StackTrace))
                 {
                     Status = 1,
                     RequestTime = requsetTicks,
@@ -358,14 +367,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 var request = JsonSerializer.Deserialize<MvcRequestScheme>(json.ToString(), webSocketOption.DefaultRequestJsonSerializerOptions);
                 if (request == null)
                 {
-                    logger.LogTrace($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Request body format error({context.Connection.Id}\r\n{json}");
+                    logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestBodyFormatError + json));
                     return;
                 }
                 await MvcForwardSendData(webSocket, context, result, request, requsetTicks).ConfigureAwait(false);
             }
             catch (JsonException ex)
             {
-                var mvcRespEx = new MvcResponseSchemeException($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Request parsing error\r\n {ex.Message}\r\n{ex.StackTrace}")
+                MvcResponseSchemeException mvcRespEx = new MvcResponseSchemeException(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestParsingError + ex.Message + Environment.NewLine + ex.StackTrace))
                 {
                     Status = 1,
                     RequestTime = requsetTicks,
@@ -971,6 +980,305 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
         //NotFound: return new MvcResponseScheme() { Id = request.Id, Status = 2, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath} not found", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
         //}
+        #endregion
+
+        /// <summary>
+        /// Forward request to endpoint method
+        /// </summary>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="context"></param>
+        /// <param name="webSocket"></param>
+        /// <param name="request"></param>
+        /// <param name="requestBody"></param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
+        public static async Task<MvcResponseScheme> MvcDistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, MvcRequestScheme request, JsonObject requestBody, ILogger<WebSocketRouteMiddleware> logger)
+        {
+            long requestTime = DateTime.Now.Ticks;
+            string requestPath = request.Target.ToLower();
+
+            try
+            {
+                // 从键值对中获取对应的执行函数 
+                webSocketOptions.WatchAssemblyContext.WatchMethods.TryGetValue(requestPath, out MethodInfo method);
+
+                if (method == null)
+                {
+                    goto NotFound;
+                }
+                Type clss = webSocketOptions.WatchAssemblyContext.WatchEndPoint.FirstOrDefault(x => x.MethodPath == requestPath)?.Class;
+                if (clss == null)
+                {
+                    //找不到访问目标
+                    goto NotFound;
+                }
+
+                #region 注入Socket的HttpContext和WebSocket客户端
+                PropertyInfo contextInfo = clss.GetProperty(webSocketOptions.InjectionHttpContextPropertyName);
+                PropertyInfo socketInfo = clss.GetProperty(webSocketOptions.InjectionWebSocketClientPropertyName);
+
+                webSocketOptions.WatchAssemblyContext.MaxCoustructorParameters.TryGetValue(clss, out ConstructorParameter constructorParameter);
+
+                object[] instanceParmas = new object[constructorParameter.ParameterInfos.Length];
+                // 从Scope从DI容器提取目标类构造函数所需的对象 
+                var serviceScopeFactory = WebSocketRouteOption.ApplicationServices.GetService<IServiceScopeFactory>();
+                var serviceScope = serviceScopeFactory.CreateScope();
+                var scopeIocProvider = serviceScope.ServiceProvider;
+                for (int i = 0; i < constructorParameter.ParameterInfos.Length; i++)
+                {
+                    ParameterInfo item = constructorParameter.ParameterInfos[i];
+
+                    if (webSocketOptions.ApplicationServiceCollection == null)
+                    {
+                        logger.LogWarning(I18nText.MvcDistributeAsync_EmptyDI);
+                        break;
+                    }
+
+                    ServiceDescriptor nonSingleton = webSocketOptions.ApplicationServiceCollection.FirstOrDefault(x => x.ServiceType == item.ParameterType);
+                    if (nonSingleton == null || nonSingleton.Lifetime == ServiceLifetime.Singleton)
+                    {
+                        instanceParmas[i] = WebSocketRouteOption.ApplicationServices.GetService(item.ParameterType);
+                    }
+                    else
+                    {
+                        instanceParmas[i] = scopeIocProvider.GetService(item.ParameterType);
+                    }
+                }
+
+                object inst = Activator.CreateInstance(clss, instanceParmas);
+
+                // 注入目标类中的帮助属性HttpContext、WebSocket
+                if (contextInfo != null && contextInfo.CanWrite)
+                {
+                    contextInfo.SetValue(inst, context);
+                }
+                if (socketInfo != null && socketInfo.CanWrite)
+                {
+                    socketInfo.SetValue(inst, webSocket);
+                }
+                #endregion
+
+                MvcResponseScheme mvcResponse = new MvcResponseScheme() { Status = 0, RequestTime = requestTime };
+                #region 注入调用方法参数
+                webSocketOptions.WatchAssemblyContext.MethodParameters.TryGetValue(method, out ParameterInfo[] methodParam);
+
+                object invokeResult = default;
+                if (requestBody == null || requestBody.Count <= 0)
+                {
+                    object[] args = Array.Empty<object>();
+                    // 有参方法
+                    if (methodParam.Length > 0)
+                    {
+                        args = new object[methodParam.LongLength];
+
+                        // 为每个参数设置其类型的默认值
+                        for (int i = 0; i < methodParam.Length; i++)
+                        {
+                            ParameterInfo item = methodParam[i];
+                            if (item.HasDefaultValue)
+                            {
+                                args[i] = item.DefaultValue;
+                                continue;
+                            }
+                            // 如果参数类型是值类型，则使用类型的零值
+                            if (item.ParameterType.IsValueType)
+                            {
+                                args[i] = Activator.CreateInstance(item.ParameterType);
+                            }
+                            else
+                            {
+                                // 如果参数类型是引用类型，则使用 null
+                                args[i] = null;
+                            }
+                        }
+                    }
+                    else if (methodParam.Length < 0)
+                    {
+                        throw new InvalidOperationException("请求的目标终结点参数异常");
+                    }
+                    invokeResult = method.Invoke(inst, args);
+                }
+                else
+                {
+                    // 异步调用目标方法 
+                    Task<object> invoke = new Task<object>(() =>
+                    {
+                        object[] methodParm = new object[methodParam.Length];
+                        for (int i = 0; i < methodParam.Length; i++)
+                        {
+                            ParameterInfo item = methodParam[i];
+
+                            // 检测方法中的参数是否是C#定义的基本类型
+                            object parmVal = null;
+                            try
+                            {
+                                // 按参数名提取JsonNode
+                                bool hasVal = requestBody.TryGetPropertyValue(item.Name, out JsonNode JProp);
+                                if (hasVal)
+                                {
+                                    parmVal = item.ParameterType.ConvertTo(requestBody[item.Name]);
+                                }
+                                else
+                                {
+                                    continue;
+                                }
+                            }
+                            //catch (JsonException ex)
+                            //{
+                            //    // 反序列化失败
+                            //    logger.LogTrace($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> {requestPath} An exception occurred while operating the request data JSON\r\n{ex.Message}\r\n{ex.StackTrace}");
+                            //}
+                            catch (FormatException ex)
+                            {
+                                // ConvertTo 抛出 类型转换失败
+                                logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, $"{requestPath}.{item.Name}" + I18nText.MvcForwardSendData_RequestBodyParameterFormatError + ex.Message + Environment.NewLine + ex.StackTrace));
+                            }
+                            methodParm[i] = parmVal;
+                        }
+
+                        return method.Invoke(inst, methodParm);
+                    });
+                    invoke.Start();
+
+                    invokeResult = await invoke;
+                }
+
+                // Async api support
+                if (invokeResult is Task)
+                {
+                    dynamic invokeResultTask = invokeResult;
+                    await invokeResultTask;
+
+                    invokeResult = invokeResultTask.Result;
+                }
+                #endregion
+
+                // Dispose ioc scope
+                serviceScope?.Dispose();
+                serviceScope = null;
+
+                mvcResponse.Id = request.Id;
+                mvcResponse.Target = request.Target;
+                mvcResponse.Body = invokeResult;
+                mvcResponse.ComplateTime = DateTime.Now.Ticks;
+
+                return mvcResponse;
+
+            }
+            catch (Exception ex)
+            {
+                var resp = new MvcResponseScheme() { Id = request.Id, Status = 1, RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
+                if (webSocketOptions.IsDevelopment)
+                {
+                    resp.Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath}\r\n{ex.Message}\r\n{ex.StackTrace}";
+                }
+                return resp;
+            }
+
+        NotFound: return new MvcResponseScheme() { Id = request.Id, Status = 2, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath} not found", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
+        }
+
+        /// <summary>
+        /// Client close connection
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="webSocketCloseStatus"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="logger"></param>
+        private async Task MvcChannel_OnDisconnected(HttpContext context, WebSocketCloseStatus? webSocketCloseStatus, WebSocketRouteOption webSocketOptions, ILogger<WebSocketRouteMiddleware> logger)
+        {
+            // 打印关闭连接信息
+            string msg = string.Empty;
+            if (webSocketCloseStatus.HasValue)
+            {
+                switch (webSocketCloseStatus.Value)
+                {
+                    case WebSocketCloseStatus.Empty:
+                        msg = I18nText.WebSocketCloseStatus_Empty;
+                        break;
+                    case WebSocketCloseStatus.EndpointUnavailable:
+                        msg = I18nText.WebSocketCloseStatus_EndpointUnavailable;
+                        break;
+                    case WebSocketCloseStatus.InternalServerError:
+                        msg = I18nText.WebSocketCloseStatus_InternalServerError;
+                        break;
+                    case WebSocketCloseStatus.InvalidMessageType:
+                        msg = I18nText.WebSocketCloseStatus_InvalidMessageType;
+                        break;
+                    case WebSocketCloseStatus.InvalidPayloadData:
+                        msg = I18nText.WebSocketCloseStatus_InvalidPayloadData;
+                        break;
+                    case WebSocketCloseStatus.MandatoryExtension:
+                        msg = I18nText.WebSocketCloseStatus_MandatoryExtension;
+                        break;
+                    case WebSocketCloseStatus.MessageTooBig:
+                        msg = I18nText.WebSocketCloseStatus_MessageTooBig;
+                        break;
+                    case WebSocketCloseStatus.NormalClosure:
+                        msg = I18nText.WebSocketCloseStatus_NormalClosure;
+                        break;
+                    case WebSocketCloseStatus.PolicyViolation:
+                        msg = I18nText.WebSocketCloseStatus_PolicyViolation;
+                        break;
+                    case WebSocketCloseStatus.ProtocolError:
+                        msg = I18nText.WebSocketCloseStatus_ProtocolError;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            else
+            {
+                msg = I18nText.WebSocketCloseStatus_ConnectionShutdown;
+            }
+
+            logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.OnDisconnected_Disconnected + msg + Environment.NewLine + $"Status:{webSocketCloseStatus.ToString() ?? "NoHandshakeSucceeded"}"));
+
+            try
+            {
+                await MvcChannel_OnDisconnectioned(context, webSocketOptions, context.Request.Path, logger);
+
+                await webSocketOptions.OnDisConnectioned(context, webSocketOptions, context.Request.Path, logger);
+            }
+            catch (Exception ex)
+            {
+                logger.LogInformation(ex, ex.Message);
+            }
+            finally
+            {
+                bool wsExists = Clients.ContainsKey(context.Connection.Id);
+                if (wsExists)
+                {
+                    Clients.TryRemove(context.Connection.Id, out var _);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Mvc channel before connection
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="channel"></param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
+        public virtual async Task<bool> MvcChannel_OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        {
+            return await Task.FromResult(true);
+        }
+
+        /// <summary>
+        /// Mvc channel DisconnectionedEvent entry
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="channel"></param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
+        public virtual async Task MvcChannel_OnDisconnectioned(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        {
+            await Task.CompletedTask;
+        }
 
         #endregion
     }

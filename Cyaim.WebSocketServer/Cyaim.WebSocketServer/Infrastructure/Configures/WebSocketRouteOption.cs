@@ -73,7 +73,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <summary>
         /// Maximum receive data limit per request,byte count
         /// </summary>
-        public long? MaxRequestReceiveLimit { get; set; }
+        public long? MaxRequestReceiveDataLimit { get; set; }
 
         #region Event
 

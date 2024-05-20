@@ -31,7 +31,7 @@ var webSocketOptions = new WebSocketOptions()
     ReceiveBufferSize = 4 * 1024
 };
 app.UseWebSockets(webSocketOptions);
-app.UseWebSocketServer(app.ApplicationServices);
+app.UseWebSocketServer();
 ```
 
 - Minimal API can be use
@@ -51,7 +51,7 @@ var webSocketOptions = new WebSocketOptions()
     KeepAliveInterval = TimeSpan.FromSeconds(120),
 };
 app.UseWebSockets(webSocketOptions);
-app.UseWebSocketServer(app.Services);
+app.UseWebSocketServer();
 ```
 
 3. Mark WebSocket Endpoints
