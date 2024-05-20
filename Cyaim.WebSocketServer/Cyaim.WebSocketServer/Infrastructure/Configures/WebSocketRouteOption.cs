@@ -7,6 +7,8 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading.Tasks;
 
+// ReSharper disable ClassWithVirtualMembersNeverInherited.Global
+
 namespace Cyaim.WebSocketServer.Infrastructure.Configures
 {
     /// <summary>
@@ -139,7 +141,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public Task OnDisConnected(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        public virtual Task OnDisConnected(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
             if (DisConnectedEvent != null)
             {
