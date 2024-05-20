@@ -12,7 +12,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
     /// <summary>
     /// WebSocketRoute run parameter
     /// </summary>
-    public sealed class WebSocketRouteOption
+    public class WebSocketRouteOption
     {
         /// <summary>
         /// Dependency injection container provider,Set on UseWebSocketServer
@@ -107,7 +107,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public Task<bool> OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        public virtual Task<bool> OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
             if (BeforeConnectionEvent != null)
             {

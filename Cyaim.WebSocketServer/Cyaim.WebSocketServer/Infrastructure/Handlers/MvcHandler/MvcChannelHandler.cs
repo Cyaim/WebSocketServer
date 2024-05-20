@@ -168,7 +168,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 }
 
                                 //await wsReceiveReader.WriteAsync(buffer, 0, result.Count);
-                                await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count), connCts.Token);
+                                // ReSharper disable once MethodSupportsCancellation
+                                await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
                                 // 已经接受完数据了
                                 if (result.EndOfMessage || result.CloseStatus.HasValue)
                                 {
