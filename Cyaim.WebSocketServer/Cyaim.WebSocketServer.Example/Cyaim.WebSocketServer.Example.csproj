@@ -12,9 +12,4 @@
     <ProjectReference Include="..\Cyaim.WebSocketServer\Cyaim.WebSocketServer.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Dtos\" />
-  </ItemGroup>
-
-
 </Project>

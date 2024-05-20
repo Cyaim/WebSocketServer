@@ -1,7 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Reflection;
-using System.Text;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Configures
 {
@@ -39,6 +37,5 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// Endpoint where class
         /// </summary>
         public Type Class { get; set; }
-
     }
 }

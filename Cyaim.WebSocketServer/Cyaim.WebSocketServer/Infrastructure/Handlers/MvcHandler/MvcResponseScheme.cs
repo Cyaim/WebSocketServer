@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Runtime.Serialization;
-using System.Text;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 {
@@ -10,16 +7,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
     /// </summary>
     public class MvcResponseScheme : IMvcScheme
     {
-        /// <summary>
-        /// Response Id with request consistent 
-        /// </summary>
-        public string Id { get; set; }
-
-        /// <summary>
-        /// Target when responding to return requests 
-        /// </summary>
-        public string Target { get; set; }
-
         /// <summary>
         /// Response status.
         /// Success:0,Application Error:1,NotFoundTarget:2
@@ -37,15 +24,24 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         public long RequestTime { get; set; }
 
         /// <summary>
-        /// Handle complate time tick
+        /// Handle complete time tick
         /// </summary>
-        public long ComplateTime { get; set; }
+        public long CompleteTime { get; set; }
+
+        /// <summary>
+        /// Response Id with request consistent
+        /// </summary>
+        public string Id { get; set; }
+
+        /// <summary>
+        /// Target when responding to return requests
+        /// </summary>
+        public string Target { get; set; }
 
         /// <summary>
         /// Response body
         /// </summary>
         public object Body { get; set; }
-
     }
 
     /// <summary>
@@ -56,9 +52,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <summary>
         /// MvcResponseSchemeException
         /// </summary>
-        public MvcResponseSchemeException()
-        {
-        }
+        public MvcResponseSchemeException() { }
 
         /// <summary>
         /// MvcResponseSchemeException
@@ -79,14 +73,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             Msg = message;
         }
 
-
         /// <summary>
-        /// Response Id with request consistent 
+        /// Response Id with request consistent
         /// </summary>
         public string Id { get; set; }
 
         /// <summary>
-        /// Target when responding to return requests 
+        /// Target when responding to return requests
         /// </summary>
         public string Target { get; set; }
 
@@ -107,8 +100,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         public long RequestTime { get; set; }
 
         /// <summary>
-        /// Handle complate time tick
+        /// Handle complete time tick
         /// </summary>
-        public long ComplateTime { get; set; }
+        public long CompleteTime { get; set; }
     }
 }

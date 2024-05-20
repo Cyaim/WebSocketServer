@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Dynamic;
 using System.Reflection;
-using System.Text;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Configures
 {
@@ -18,7 +16,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         public string WatchAssemblyPath { get; set; }
 
         /// <summary>
-        /// Type in assemblys
+        /// Type in assemblies
         /// </summary>
         public List<Type> WatchAssemblyTypes { get; set; }
 
@@ -41,13 +39,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// Constructor parameter list
         /// K class type,V class constructor parameter list
         /// </summary>
-        public Dictionary<Type, ConstructorParameter[]> CoustructorParameters { get; set; }
+        public Dictionary<Type, ConstructorParameter[]> ConstructorParameters { get; set; }
 
         /// <summary>
         /// Constructor most parameter in class
         /// K Class type,V Constructor parameter
         /// </summary>
-        public Dictionary<Type, ConstructorParameter> MaxCoustructorParameters { get; set; }
+        public Dictionary<Type, ConstructorParameter> MaxConstructorParameters { get; set; }
 
         /// <summary>
         /// Method parameter list in class public method
