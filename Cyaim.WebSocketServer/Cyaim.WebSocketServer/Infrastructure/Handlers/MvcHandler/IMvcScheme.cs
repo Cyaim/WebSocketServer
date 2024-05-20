@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
+﻿namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 {
     /// <summary>
     /// MVC Scheme

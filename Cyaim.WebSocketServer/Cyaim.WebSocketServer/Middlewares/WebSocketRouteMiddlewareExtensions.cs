@@ -1,4 +1,5 @@
-﻿using Cyaim.WebSocketServer.Infrastructure.Cluster;
+﻿using Cyaim.WebSocketServer.Infrastructure;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -41,7 +42,7 @@ namespace Cyaim.WebSocketServer.Middlewares
             WebSocketRouteOption.ServerAddresses = address.Addresses.Select(x => x.Replace("https", "wss").Replace("http", "ws")).ToList();
             foreach (var item in WebSocketRouteOption.ServerAddresses)
             {
-                Console.WriteLine($"Now websocket on:{item}");
+                Console.WriteLine(I18nText.NowWebSocketOn + item);
             }
         }
 

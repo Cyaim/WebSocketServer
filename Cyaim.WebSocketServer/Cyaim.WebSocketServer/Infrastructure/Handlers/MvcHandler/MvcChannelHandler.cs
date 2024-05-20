@@ -6,12 +6,10 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Reflection;
-using System.Runtime.InteropServices.ComTypes;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -74,7 +72,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         public async Task ConnectionEntry(HttpContext context, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions)
         {
             this.logger = logger;
-            this.webSocketOption = webSocketOptions;
+            webSocketOption = webSocketOptions;
 
             WebSocketCloseStatus? webSocketCloseStatus = null;
             try
@@ -93,22 +91,27 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         return;
                     }
 
+                    // 配置最大连接数
+                    if ((ulong)Clients.LongCount() >= webSocketOptions.MaxConnectionLimit)
+                    {
+                        return;
+                    }
+
                     // 接受连接
                     using WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync();
                     try
                     {
                         logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_Connected));
                         bool succ = Clients.TryAdd(context.Connection.Id, webSocket);
-                        if (succ)
-                        {
-                            await MvcForward(context, webSocket);
-                        }
-                        else
+                        if (!succ && !webSocketOptions.AllowSameConnectionIdAccess)
                         {
                             // 如果配置了允许多连接
                             logger.LogDebug(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_ConnectionAlreadyExists));
+
+                            return;
                         }
 
+                        await MvcForward(context, webSocket);
                     }
                     catch (Exception ex)
                     {
@@ -116,6 +119,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     }
                     finally
                     {
+                        if (webSocket.CloseStatus == null && webSocket.State == WebSocketState.Open)
+                        {
+                            await webSocket.CloseAsync(WebSocketCloseStatus.PolicyViolation, string.Empty, CancellationToken.None).ConfigureAwait(false);
+                            webSocket.Abort();
+                        }
                         webSocketCloseStatus = webSocket.CloseStatus;
                     }
                 }
@@ -135,118 +143,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
 
         }
-
-        #region Old
-
-        ///// <summary>
-        ///// Forward by WebSocket transfer type
-        ///// </summary>
-        ///// <param name="context"></param>
-        ///// <param name="webSocket"></param>
-        ///// <returns></returns>
-        //private async Task MvcForward(HttpContext context, WebSocket webSocket)
-        //{
-        //    var buffer = new byte[ReceiveTextBufferSize];
-        //    ArraySegment<byte> bufferSeg = new ArraySegment<byte>(buffer);
-
-        //    try
-        //    {
-        //        WebSocketReceiveResult result = await webSocket.ReceiveAsync(bufferSeg, CancellationToken.None);
-        //        //switch (result.MessageType)
-        //        //{
-        //        //    case WebSocketMessageType.Binary:
-        //        //        await MvcBinaryForward(context, webSocket, result, buffer);
-        //        //        break;
-        //        //    case WebSocketMessageType.Text:
-        //        //        await MvcTextForward(webSocket, context, result, buffer);
-        //        //        break;
-        //        //}
-        //        await MvcForward(webSocket, context, result, bufferSeg);
-
-        //        //链接断开
-        //        await webSocket.CloseAsync(webSocket.CloseStatus == null ?
-        //            webSocket.State == WebSocketState.Aborted ?
-        //            WebSocketCloseStatus.InternalServerError : WebSocketCloseStatus.NormalClosure
-        //            : webSocket.CloseStatus.Value, result.CloseStatusDescription, CancellationToken.None);
-        //    }
-        //    catch (OperationCanceledException ex)
-        //    {
-        //        logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 终止接收数据({context.Connection.Id})\r\nStatus:{(webSocket.CloseStatus.HasValue ? webSocket.CloseStatus.ToString() : "ServerClose")}\r\n{ex.Message}");
-        //    }
-        //}
-
-        ///// <summary>
-        ///// Handle request content
-        ///// </summary>
-        ///// <param name="result"></param>
-        ///// <param name="buffer"></param>
-        ///// <param name="webSocket"></param>
-        ///// <param name="context"></param>
-        ///// <returns></returns>
-        //private async Task MvcForward(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, ArraySegment<byte> buffer)
-        //{
-
-        //    long requestTime = DateTime.Now.Ticks;
-        //    StringBuilder json = new StringBuilder();
-
-        //    //处理第一次返回的数据
-        //    json = json.Append(Encoding.UTF8.GetString(buffer[..result.Count]));
-
-        //    //第一次接受已经接受完数据了
-        //    if (result.EndOfMessage)
-        //    {
-        //        try
-        //        {
-        //            await MvcForwardSendData(webSocket, context, result, json, requestTime);
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            logger.LogError(ex, ex.Message);
-        //        }
-        //        finally
-        //        {
-        //            json = json.Clear();
-        //        }
-        //    }
-
-        //    //等待客户端发送数据，第二次接受数据
-        //    while (!result.CloseStatus.HasValue)
-        //    {
-        //        try
-        //        {
-        //            if (!(webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseSent))
-        //            {
-        //                break;
-        //            }
-
-        //            result = await webSocket.ReceiveAsync(buffer, CancellationToken.None);
-        //            requestTime = DateTime.Now.Ticks;
-
-        //            json = json.Append(Encoding.UTF8.GetString(buffer[..result.Count]));
-
-        //            if (!result.EndOfMessage || result.CloseStatus.HasValue)
-        //            {
-        //                continue;
-        //            }
-
-        //            await MvcForwardSendData(webSocket, context, result, json, requestTime);
-
-        //            json = json.Clear();
-        //        }
-        //        catch (OperationCanceledException ex)
-        //        {
-        //            logger.LogInformation($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> 终止接收数据({context.Connection.Id})\r\nStatus:{(webSocket.CloseStatus.HasValue ? webSocket.CloseStatus.ToString() : "ServerClose")}\r\n{ex.Message}");
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            logger.LogError(ex, ex.Message);
-        //        }
-
-        //    }
-
-
-        //}
-        #endregion
 
         /// <summary>
         /// Forward by WebSocket transfer type
@@ -532,238 +428,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
 
         }
-
-
-        #region Newtonsoft.Json
-
-        ///// <summary>
-        ///// Forward request to endpoint method
-        ///// </summary>
-        ///// <param name="webSocketOptions"></param>
-        ///// <param name="context"></param>
-        ///// <param name="webSocket"></param>
-        ///// <param name="request"></param>
-        ///// <param name="logger"></param>
-        ///// <returns></returns>
-        //public static async Task<MvcResponseScheme> MvcDistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, MvcRequestScheme request, ILogger<WebSocketRouteMiddleware> logger)
-        //{
-        //    long requestTime = DateTime.Now.Ticks;
-        //    string requestPath = request.Target.ToLower();
-        //    JObject requestBody = request.Body as JObject;
-        //    try
-        //    {
-        //        // 从键值对中获取对应的执行函数 
-        //        webSocketOptions.WatchAssemblyContext.WatchMethods.TryGetValue(requestPath, out MethodInfo method);
-
-        //        if (method == null)
-        //        {
-        //            goto NotFound;
-        //        }
-        //        Type clss = webSocketOptions.WatchAssemblyContext.WatchEndPoint.FirstOrDefault(x => x.MethodPath == requestPath)?.Class;
-        //        if (clss == null)
-        //        {
-        //            //找不到访问目标
-
-        //            goto NotFound;
-        //        }
-
-        //        #region 注入Socket的HttpContext和WebSocket客户端
-        //        PropertyInfo contextInfo = clss.GetProperty(webSocketOptions.InjectionHttpContextPropertyName);
-        //        PropertyInfo socketInfo = clss.GetProperty(webSocketOptions.InjectionWebSocketClientPropertyName);
-
-        //        webSocketOptions.WatchAssemblyContext.MaxCoustructorParameters.TryGetValue(clss, out ConstructorParameter constructorParameter);
-
-        //        object[] instanceParmas = new object[constructorParameter.ParameterInfos.Length];
-        //        // Scope 
-        //        var serviceScopeFactory = WebSocketRouteOption.ApplicationServices.GetService<IServiceScopeFactory>();
-        //        var serviceScope = serviceScopeFactory.CreateScope();
-        //        var scopeIocProvider = serviceScope.ServiceProvider;
-        //        for (int i = 0; i < constructorParameter.ParameterInfos.Length; i++)
-        //        {
-        //            ParameterInfo item = constructorParameter.ParameterInfos[i];
-
-        //            if (webSocketOptions.ApplicationServiceCollection == null)
-        //            {
-        //                logger.LogWarning("Cannot inject target constructor parameter because DI container WebSocketRouteOption.ApplicationServiceCollection is null.");
-        //                break;
-        //            }
-
-        //            ServiceDescriptor nonSingleton = webSocketOptions.ApplicationServiceCollection.FirstOrDefault(x => x.ServiceType == item.ParameterType);
-        //            if (nonSingleton == null || nonSingleton.Lifetime == ServiceLifetime.Singleton)
-        //            {
-        //                instanceParmas[i] = WebSocketRouteOption.ApplicationServices.GetService(item.ParameterType);
-        //            }
-        //            else
-        //            {
-        //                instanceParmas[i] = scopeIocProvider.GetService(item.ParameterType);
-        //            }
-        //        }
-
-        //        object inst = Activator.CreateInstance(clss, instanceParmas);
-
-        //        if (contextInfo != null && contextInfo.CanWrite)
-        //        {
-        //            contextInfo.SetValue(inst, context);
-        //        }
-        //        if (socketInfo != null && socketInfo.CanWrite)
-        //        {
-        //            socketInfo.SetValue(inst, webSocket);
-        //        }
-        //        #endregion
-
-        //        MvcResponseScheme mvcResponse = new MvcResponseScheme() { Status = 0, RequestTime = requestTime };
-        //        #region 注入调用方法参数
-        //        webSocketOptions.WatchAssemblyContext.MethodParameters.TryGetValue(method, out ParameterInfo[] methodParam);
-        //        object invokeResult = default;
-        //        if (requestBody == null)
-        //        {
-        //            object[] args = new object[0];
-        //            // 有参方法
-        //            if (methodParam.Length > 0)
-        //            {
-        //                args = new object[methodParam.LongLength];
-
-        //                // 为每个参数设置其类型的默认值
-        //                for (int i = 0; i < methodParam.Length; i++)
-        //                {
-        //                    ParameterInfo item = methodParam[i];
-        //                    if (item.HasDefaultValue)
-        //                    {
-        //                        args[i] = item.DefaultValue;
-        //                        continue;
-        //                    }
-        //                    // 如果参数类型是值类型，则使用类型的零值
-        //                    if (item.ParameterType.IsValueType)
-        //                    {
-        //                        args[i] = Activator.CreateInstance(item.ParameterType);
-        //                    }
-        //                    else
-        //                    {
-        //                        // 如果参数类型是引用类型，则使用 null
-        //                        args[i] = null;
-        //                    }
-        //                }
-        //            }
-        //            else if (methodParam.Length < 0)
-        //            {
-        //                throw new InvalidOperationException("请求的目标终结点参数异常");
-        //            }
-        //            invokeResult = method.Invoke(inst, args);
-        //        }
-        //        else
-        //        {
-        //            // 异步调用该方法 
-
-        //            Task<object> invoke = new Task<object>(() =>
-        //            {
-        //                object[] methodParm = new object[methodParam.Length];
-        //                for (int i = 0; i < methodParam.Length; i++)
-        //                {
-        //                    ParameterInfo item = methodParam[i];
-        //                    Type methodParmType = item.ParameterType;
-
-        //                    //检测方法中的参数是否是C#定义类型
-        //                    bool isBaseType = methodParmType.IsBasicType();
-        //                    object parmVal = null;
-        //                    try
-        //                    {
-        //                        if (isBaseType)
-        //                        {
-        //                            //C#定义数据类型，按参数名取json value
-        //                            bool hasVal = requestBody.TryGetValue(item.Name, out JToken jToken);
-        //                            if (hasVal)
-        //                            {
-        //                                try
-        //                                {
-        //                                    parmVal = jToken.ToObject(methodParmType);
-        //                                }
-        //                                catch (Exception ex)
-        //                                {
-        //                                    // containue format error.
-        //                                    logger.LogWarning($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> {requestPath} 请求的方法参数数据格式化异常\r\n{ex.Message}\r\n{ex.StackTrace}");
-        //                                }
-        //                            }
-        //                            else
-        //                            {
-        //                                continue;
-        //                            }
-        //                        }
-        //                        else
-        //                        {
-        //                            //自定义类，反序列化
-        //                            bool hasItemValue = requestBody.TryGetValue(item.Name, out JToken jToken);
-        //                            object classParmVal = null;
-        //                            if (hasItemValue)
-        //                            {
-        //                                try
-        //                                {
-        //                                    classParmVal = jToken.ToObject(methodParmType);
-        //                                }
-        //                                catch (ArgumentException)
-        //                                {
-        //                                    // Try use param name get value failure.
-        //                                    //throw;
-        //                                }
-        //                            }
-
-        //                            if (classParmVal == null)
-        //                            {
-        //                                classParmVal = JsonConvert.DeserializeObject(requestBody.ToString(), methodParmType);
-        //                            }
-        //                            parmVal = classParmVal;
-        //                        }
-        //                    }
-        //                    catch (JsonReaderException ex)
-        //                    {
-        //                        //反序列化失败
-        //                        //parmVal = null;
-        //                        logger.LogError($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> {requestPath} 请求反序列异常\r\n{ex.Message}\r\n{ex.StackTrace}");
-        //                    }
-        //                    catch (FormatException ex)
-        //                    {
-        //                        //jToken.ToObject 抛出 类型转换失败
-        //                        logger.LogError($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> {requestPath} 请求的方法参数数据格式化异常\r\n{ex.Message}\r\n{ex.StackTrace}");
-        //                    }
-        //                    methodParm[i] = parmVal;
-        //                }
-
-        //                return method.Invoke(inst, methodParm);
-        //            });
-        //            invoke.Start();
-
-        //            invokeResult = await invoke;
-        //        }
-
-        //        //async api support
-        //        if (invokeResult is Task)
-        //        {
-        //            dynamic invokeResultTask = invokeResult;
-        //            await invokeResultTask;
-
-        //            invokeResult = invokeResultTask.Result;
-        //        }
-        //        #endregion
-
-        //        // dispose ioc scope
-        //        serviceScope = null;
-        //        serviceScope?.Dispose();
-
-        //        mvcResponse.Id = request.Id;
-        //        mvcResponse.FromTarget = request.Target;
-        //        mvcResponse.Body = invokeResult;
-        //        mvcResponse.ComplateTime = DateTime.Now.Ticks;
-
-        //        return mvcResponse;
-
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        return new MvcResponseScheme() { Id = request.Id, Status = 1, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath}\r\n{ex.Message}\r\n{ex.StackTrace}", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
-        //    }
-
-        //NotFound: return new MvcResponseScheme() { Id = request.Id, Status = 2, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath} not found", RequestTime = requestTime, ComplateTime = DateTime.Now.Ticks };
-        //}
-        #endregion
 
         /// <summary>
         /// Forward request to endpoint method

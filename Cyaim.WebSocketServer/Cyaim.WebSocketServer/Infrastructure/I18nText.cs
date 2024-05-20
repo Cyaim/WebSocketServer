@@ -9,7 +9,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-#pragma warning disable CS1591 // 缺少对公共可见类型或成员的 XML 注释
 
 namespace Cyaim.WebSocketServer.Infrastructure
 {
@@ -92,12 +91,12 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// 国际化文件夹路径
         /// </summary>
         [JsonIgnore]
-        public static string I18nResourcePath = "i18n";
+        public static string I18nResourcePath { get; set; } = "i18n";
         /// <summary>
         /// 语言文件后缀
         /// </summary>
         [JsonIgnore]
-        public static string I18nResourceFileSuffix = ".json";
+        public static string I18nResourceFileSuffix { get; set; } = ".json";
 
         /// <summary>
         /// WebSocket 交互文本模板
@@ -132,6 +131,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
         public static readonly string MvcDistributeAsync_EmptyDI = "Cannot inject target constructor parameter because DI container WebSocketRouteOption.ApplicationServiceCollection is null.";
         public static readonly string OnDisconnected_Disconnected = "Disconnected." + Environment.NewLine;
 
+
+        public static readonly string NowWebSocketOn = "Now websocket on:";
+
     }
 }
-#pragma warning restore CS1591 // 缺少对公共可见类型或成员的 XML 注释

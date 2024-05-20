@@ -76,6 +76,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// </summary>
         public long? MaxRequestReceiveDataLimit { get; set; }
 
+        /// <summary>
+        /// true if the all identical IDs are allowed to connect and forward, false if the only one connection with the same Connection id is allowed and forwarded
+        /// </summary>
+        public bool AllowSameConnectionIdAccess { get; set; } = true;
+
+        /// <summary>
+        /// Maximum connection limit
+        /// </summary>
+        public ulong? MaxConnectionLimit { get; set; }
+
         #region Event
 
         /// <summary>
