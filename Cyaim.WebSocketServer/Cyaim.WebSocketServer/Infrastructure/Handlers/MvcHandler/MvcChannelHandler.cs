@@ -169,11 +169,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             }
                             else
                             {
-                                await Task.Delay(1000).ConfigureAwait(false);
+                                await Task.Delay(300).ConfigureAwait(false);
                                 goto CONTINUE;
                             }
 
                         }
+
+                        // Feature 要做流量控制 🔨🔨🔨
 
                         #region 接收数据
                         byte[] buffer = ArrayPool<byte>.Shared.Rent(ReceiveTextBufferSize);

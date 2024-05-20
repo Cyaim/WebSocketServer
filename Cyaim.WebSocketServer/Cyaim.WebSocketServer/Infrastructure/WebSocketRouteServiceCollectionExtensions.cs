@@ -55,7 +55,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 wsrOptions.WatchAssemblyContext = new WatchAssemblyContext();
             }
-
+            
             #region 计算WebSocketEndPoint
 
             var points = new List<WebSocketEndPoint>();
