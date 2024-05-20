@@ -25,10 +25,6 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
-	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-		<DocumentationFile>E:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Cyaim.WebSocketServer\Cyaim.WebSocketServer.xml</DocumentationFile>
-	</PropertyGroup>
-
 	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0'">
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 	</ItemGroup>

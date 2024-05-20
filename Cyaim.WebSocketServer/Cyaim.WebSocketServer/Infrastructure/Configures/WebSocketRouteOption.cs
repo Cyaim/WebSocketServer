@@ -4,9 +4,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Reflection;
-using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -15,7 +12,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
     /// <summary>
     /// WebSocketRoute run parameter
     /// </summary>
-    public class WebSocketRouteOption
+    public sealed class WebSocketRouteOption
     {
         /// <summary>
         /// Dependency injection container provider,Set on UseWebSocketServer
@@ -85,7 +82,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <param name="logger">logger</param>
         /// <param name="webSocketOptions">WebSocket configure option</param>
         /// <returns></returns>
-
         public delegate Task WebSocketChannelHandler(HttpContext context, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions);
 
         /// <summary>
@@ -111,7 +107,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public virtual Task<bool> OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        public Task<bool> OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
             if (BeforeConnectionEvent != null)
             {
@@ -120,61 +116,62 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
             return Task.FromResult(true);
         }
 
-
         /// <summary>
-        /// Close connectioned handler
+        /// Close Connected handler
         /// </summary>
         /// <param name="context"></param>
         /// <param name="webSocketOptions"></param>
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public delegate Task DisConnectionedHandler(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger);
+        public delegate Task DisConnectedHandler(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger);
 
         /// <summary>
-        /// Close connectioned call
+        /// Close Connected call
         /// </summary>
-        public event DisConnectionedHandler DisConnectionedEvent;
+        public event DisConnectedHandler DisConnectedEvent;
 
         /// <summary>
-        /// DisConnectionedEvent entry
+        /// DisConnectedEvent entry
         /// </summary>
         /// <param name="context"></param>
         /// <param name="webSocketOptions"></param>
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public virtual Task OnDisConnectioned(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        public Task OnDisConnected(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
-            if (DisConnectionedEvent != null)
+            if (DisConnectedEvent != null)
             {
-                return DisConnectionedEvent(context, webSocketOptions, channel, logger);
+                return DisConnectedEvent(context, webSocketOptions, channel, logger);
             }
             return Task.CompletedTask;
         }
+
         #endregion
 
-
         #region System.Text.Json Options
+
         /// <summary>
-        /// JsonSerialiazerOptions
+        /// JsonSerializerOptions
         /// </summary>
-        public JsonSerializerOptions DefaultRequestJsonSerialiazerOptions { get; set; } = new JsonSerializerOptions
+        public JsonSerializerOptions DefaultRequestJsonSerializerOptions { get; set; } = new JsonSerializerOptions
         {
             // 设置为 true 以忽略属性名称的大小写
             PropertyNameCaseInsensitive = true,
-            WriteIndented = false,
+            WriteIndented = false
         };
 
         /// <summary>
-        /// JsonSerialiazerOptions
+        /// JsonSerializerOptions
         /// </summary>
-        public JsonSerializerOptions DefaultResponseJsonSerialiazerOptions { get; set; } = new JsonSerializerOptions
+        public JsonSerializerOptions DefaultResponseJsonSerializerOptions { get; set; } = new JsonSerializerOptions
         {
             // 设置为 true 以忽略属性名称的大小写
             PropertyNameCaseInsensitive = true,
-            WriteIndented = false,
+            WriteIndented = false
         };
+
         #endregion
     }
 }

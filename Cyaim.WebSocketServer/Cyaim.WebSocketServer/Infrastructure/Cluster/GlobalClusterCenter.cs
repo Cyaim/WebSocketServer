@@ -1,8 +1,6 @@
 ﻿using Cyaim.WebSocketServer.Infrastructure.Configures;
-using System;
 using System.Collections.Generic;
 using System.Net.WebSockets;
-using System.Text;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 {
@@ -17,7 +15,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         public static ClusterOption ClusterContext { get; set; }
 
         /// <summary>
-        /// All nodes 
+        /// All nodes
         /// </summary>
         public static List<WebSocket> Nodes { get; set; }
     }
