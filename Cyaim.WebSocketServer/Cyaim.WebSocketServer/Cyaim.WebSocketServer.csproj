@@ -25,10 +25,6 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
-	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-		<DocumentationFile>E:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Cyaim.WebSocketServer\Cyaim.WebSocketServer.xml</DocumentationFile>
-	</PropertyGroup>
-
 	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0'">
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 	</ItemGroup>
@@ -42,10 +38,6 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.1" />
 		<PackageReference Include="Microsoft.AspNetCore.Hosting.Server.Abstractions" Version="2.1.1" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<!--<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />-->
 		<PackageReference Include="System.Text.Json" Version="8.0.3" />
 	</ItemGroup>
 

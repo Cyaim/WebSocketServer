@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Cyaim.WebSocketServer.Infrastructure.Configures
+﻿namespace Cyaim.WebSocketServer.Infrastructure.Configures
 {
     /// <summary>
     /// Cluster configure
@@ -30,9 +26,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// Only NodeLevel are valid for Master.
         /// </summary>
         public bool IsEnableLoadBalance { get; set; }
-
     }
-
 
     /// <summary>
     /// Service node
@@ -43,9 +37,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// Master node
         /// </summary>
         Master,
+
         /// <summary>
         /// Slave node
         /// </summary>
-        Slave,
+        Slave
     }
 }

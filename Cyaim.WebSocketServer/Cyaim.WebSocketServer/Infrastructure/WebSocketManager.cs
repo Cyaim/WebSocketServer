@@ -16,15 +16,16 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// <summary>
         /// Default send encoding
         /// </summary>
-        public static Encoding Encoding { get; set; } = Encoding.UTF8;
+        private static Encoding Encoding { get; } = Encoding.UTF8;
+
         /// <summary>
-        /// JsonSerialiazerOptions
+        /// JsonSerializerOptions
         /// </summary>
-        public static JsonSerializerOptions DefaultMvcJsonSerialiazerOptions { get; set; } = new JsonSerializerOptions
+        private static JsonSerializerOptions DefaultMvcJsonSerializerOptions { get; } = new JsonSerializerOptions
         {
             // 设置为 true 以忽略属性名称的大小写
             PropertyNameCaseInsensitive = true,
-            WriteIndented = false,
+            WriteIndented = false
         };
 
         /// <summary>
@@ -42,7 +43,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 return;
             }
-            ParallelLoopResult result = Parallel.ForEach(socket, async (s, state) =>
+            var result = Parallel.ForEach(socket, async (s, state) =>
             {
                 try
                 {
@@ -60,10 +61,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
                         //    await webSocket.SendAsync(segment, WebSocketMessageType.Text, true, CancellationToken.None);
                         //    sent += length;
                         //}
-
                         await s.SendAsync(buffer.GetBuffer(), messageType, endOfMessage, cancellationToken);
                     }
-
                 }
                 catch (AggregateException age)
                 {
@@ -72,18 +71,11 @@ namespace Cyaim.WebSocketServer.Infrastructure
                         Console.WriteLine(item.Message);
                     }
                 }
-                catch (Exception)
-                {
-
-                    throw;
-                }
             });
-
             while (!result.IsCompleted)
             {
-                await Task.Delay(TimeSpan.FromSeconds(10));
+                await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
             }
-
         }
 
         /// <summary>
@@ -101,7 +93,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 return;
             }
-            ParallelLoopResult result = Parallel.ForEach(socket, async (s, state) =>
+            var result = Parallel.ForEach(socket, async (s, state) =>
             {
                 try
                 {
@@ -114,7 +106,6 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     {
                         await s.SendAsync(buffer, messageType, endOfMessage, cancellationToken);
                     }
-
                 }
                 catch (AggregateException age)
                 {
@@ -123,18 +114,11 @@ namespace Cyaim.WebSocketServer.Infrastructure
                         Console.WriteLine(item.Message);
                     }
                 }
-                catch (Exception)
-                {
-
-                    throw;
-                }
             });
-
             while (!result.IsCompleted)
             {
-                await Task.Delay(TimeSpan.FromSeconds(10));
+                await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
             }
-
         }
 
         /// <summary>
@@ -155,7 +139,6 @@ namespace Cyaim.WebSocketServer.Infrastructure
             await SendAsync(encoding.GetBytes(data), messageType, true, CancellationToken.None, socket);
         }
 
-
         /// <summary>
         /// Sending serialized model text data without using a buffer
         /// </summary>
@@ -166,20 +149,11 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// <returns></returns>
         public static async Task SendAsync<T>(this T data, WebSocketMessageType messageType = WebSocketMessageType.Text, params WebSocket[] socket)
         {
-            try
+            if (data == null || socket == null || socket.LongLength < 1)
             {
-                if (data == null || socket == null || socket.LongLength < 1)
-                {
-                    return;
-                }
-
-                await SendAsync(JsonSerializer.Serialize(data, DefaultMvcJsonSerialiazerOptions), messageType, Encoding, socket);
+                return;
             }
-            catch (Exception)
-            {
-
-                throw;
-            }
+            await SendAsync(JsonSerializer.Serialize(data, DefaultMvcJsonSerializerOptions), messageType, Encoding, socket);
         }
 
         /// <summary>
@@ -192,22 +166,11 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// <returns></returns>
         public static async Task SendAsync<T>(this WebSocket socket, T data, WebSocketMessageType messageType = WebSocketMessageType.Text)
         {
-            try
+            if (data == null || socket == null)
             {
-                if (data == null || socket == null)
-                {
-                    return;
-                }
-
-                await SendAsync(JsonSerializer.Serialize(data, DefaultMvcJsonSerialiazerOptions), messageType, Encoding, socket);
+                return;
             }
-            catch (Exception)
-            {
-
-                throw;
-            }
+            await SendAsync(JsonSerializer.Serialize(data, DefaultMvcJsonSerializerOptions), messageType, Encoding, socket);
         }
-
-
     }
 }

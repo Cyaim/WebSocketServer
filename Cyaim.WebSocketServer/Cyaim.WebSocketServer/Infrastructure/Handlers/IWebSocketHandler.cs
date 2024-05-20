@@ -2,9 +2,6 @@
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers
@@ -37,7 +34,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <param name="webSocketOptions"></param>
         /// <returns></returns>
         Task ConnectionEntry(HttpContext context, ILogger<WebSocketRouteMiddleware> logger, WebSocketRouteOption webSocketOptions);
-
     }
 
     /// <summary>
@@ -46,7 +42,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
     public class WebSocketHandlerMetadata
     {
         /// <summary>
-        /// Describe the function of the handle and how to use it 
+        /// Describe the function of the handle and how to use it
         /// </summary>
         public string Describe { get; set; }
 
