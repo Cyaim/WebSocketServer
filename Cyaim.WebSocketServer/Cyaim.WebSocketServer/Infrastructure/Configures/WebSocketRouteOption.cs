@@ -136,12 +136,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public delegate Task DisConnectedHandler(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger);
+        public delegate Task DisconnectedHandler(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger);
 
         /// <summary>
         /// Close Connected call
         /// </summary>
-        public event DisConnectedHandler DisConnectedEvent;
+        public event DisconnectedHandler DisconnectedEvent;
 
         /// <summary>
         /// DisConnectedEvent entry
@@ -151,11 +151,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public virtual Task OnDisConnected(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        public virtual Task OnDisconnected(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
-            if (DisConnectedEvent != null)
+            if (DisconnectedEvent != null)
             {
-                return DisConnectedEvent(context, webSocketOptions, channel, logger);
+                return DisconnectedEvent(context, webSocketOptions, channel, logger);
             }
             return Task.CompletedTask;
         }
