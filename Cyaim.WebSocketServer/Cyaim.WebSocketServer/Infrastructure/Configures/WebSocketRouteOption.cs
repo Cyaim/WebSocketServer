@@ -81,7 +81,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         public bool AllowSameConnectionIdAccess { get; set; } = true;
 
         /// <summary>
-        /// Maximum connection limit
+        /// Maximum connection limit, but it will not overwrite the configuration of Kestrel.
+        /// How to configure Kestrel? Please read:https://learn.microsoft.com/zh-cn/aspnet/core/fundamentals/servers/kestrel/options?view=aspnetcore-8.0#maximum-client-connections
         /// </summary>
         public ulong? MaxConnectionLimit { get; set; }
 

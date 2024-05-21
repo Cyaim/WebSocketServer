@@ -223,9 +223,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                         // 处理请求的数据
                         //json = json.Append(Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
-                        //JsonDocument document = JsonDocument.Parse(wsReceiveReader.GetBuffer());
-                        MvcRequestScheme requestScheme;
-                        JsonObject requestBody;
+                        MvcRequestScheme requestScheme = null;
+                        JsonObject requestBody = null;
+
+                        //Console.WriteLine(Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
                         using (JsonDocument doc = JsonDocument.Parse(wsReceiveReader.GetBuffer()))
                         {
                             JsonElement root = doc.RootElement;
@@ -234,7 +235,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             {
                                 hasBody = root.TryGetProperty("body", out body);
                             }
-                                                                                              
+
                             requestScheme = doc.Deserialize<MvcRequestScheme>(webSocketOption.DefaultRequestJsonSerializerOptions);
                             requestBody = body.ValueKind == JsonValueKind.Undefined ? null : (JsonNode.Parse(body.GetRawText())?.AsObject());
                         }
@@ -246,7 +247,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     }
                     catch (Exception ex)
                     {
-                        logger.LogTrace(ex, ex.Message);
+                        logger.LogTrace(ex, ex.Message, Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
                     }
                     finally
                     {
@@ -462,7 +463,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 #region 注入Socket的HttpContext和WebSocket客户端
                 PropertyInfo contextInfo = clss.GetProperty(webSocketOptions.InjectionHttpContextPropertyName);
                 PropertyInfo socketInfo = clss.GetProperty(webSocketOptions.InjectionWebSocketClientPropertyName);
-                                                      
+
                 webSocketOptions.WatchAssemblyContext.MaxConstructorParameters.TryGetValue(clss, out ConstructorParameter constructorParameter);
 
                 object[] instanceParmas = new object[constructorParameter.ParameterInfos.Length];
@@ -562,7 +563,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 bool hasVal = requestBody.TryGetPropertyValue(item.Name, out JsonNode JProp);
                                 if (hasVal)
                                 {
-                                    parmVal = item.ParameterType.ConvertTo(requestBody[item.Name]);
+                                    parmVal = item.ParameterType.ConvertTo(JProp);
                                 }
                                 else
                                 {
