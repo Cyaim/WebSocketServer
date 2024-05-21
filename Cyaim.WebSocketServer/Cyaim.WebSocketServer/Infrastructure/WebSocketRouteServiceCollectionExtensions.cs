@@ -55,7 +55,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 wsrOptions.WatchAssemblyContext = new WatchAssemblyContext();
             }
-            
+
             #region 计算WebSocketEndPoint
 
             var points = new List<WebSocketEndPoint>();
@@ -144,7 +144,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
             //services.TryAddSingleton<IHttpContextAccessor, HttpContextAccessor>();
             foreach (var item in wsrOptions.WebSocketChannels.Keys)
             {
-                Console.WriteLine($"Define websocket channel on: {item}");
+                Console.WriteLine(I18nText.DefineWebSocketChannelOn + item);
             }
 
             // 获取当前线程的默认文化

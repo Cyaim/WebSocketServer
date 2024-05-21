@@ -132,7 +132,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
         public static readonly string OnDisconnected_Disconnected = "Disconnected." + Environment.NewLine;
 
 
-        public static readonly string NowWebSocketOn = "Now websocket on:";
+        public static readonly string NowWebSocketOn = "Now websocket on: ";
+        public static readonly string DefineWebSocketChannelOn = "Define websocket channel on: ";
 
     }
 }
