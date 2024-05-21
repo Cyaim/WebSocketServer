@@ -6,18 +6,18 @@
     public interface IMvcScheme
     {
         /// <summary>
-        /// Request Id
+        /// Request/Response Id
         /// In Multiplex, you need to keep the id of uniqueness
         /// </summary>
         public string Id { get; set; }
 
         /// <summary>
-        /// Request target
+        /// Target
         /// </summary>
         public string Target { get; set; }
 
         /// <summary>
-        /// Request context
+        /// Request/Response context
         /// </summary>
         public object Body { get; set; }
     }

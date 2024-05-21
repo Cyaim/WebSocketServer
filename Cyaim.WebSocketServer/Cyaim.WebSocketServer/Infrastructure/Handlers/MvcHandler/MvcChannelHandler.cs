@@ -287,6 +287,25 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
         }
 
+        public void ReadJson(byte[] ms)
+        {
+            var jsonReader = new Utf8JsonReader(ms);
+
+            while (jsonReader.Read())
+            {
+                // 处理每一行的 JSON 数据
+                if (jsonReader.TokenType == JsonTokenType.PropertyName && jsonReader.GetString() == "target")
+                {
+                    jsonReader.Read();
+                    if (jsonReader.TokenType == JsonTokenType.String)
+                    {
+                        string targetValue = jsonReader.GetString();
+                        Console.WriteLine($"Target value: {targetValue}");
+                    }
+                }
+            }
+        }
+
         /// <summary>
         /// MvcChannel forward data
         /// </summary>

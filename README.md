@@ -101,7 +101,7 @@ This request will be located at "WeatherForecastController" -> "Get" Method.
 	"Status": 0,
 	"Msg": null,
 	"RequestTime": 637395762382112345,
-	"ComplateTime": 637395762382134526,
+	"CompleteTime": 637395762382134526,
 	"Body": [{
 		"Date": "2020-10-30T13:50:38.2133285+08:00",
 		"TemperatureC": 43,
@@ -163,7 +163,7 @@ Request body will write invoke method parameter.
 	"Status": 0,
 	"Msg": null,
 	"RequestTime": 0,
-	"ComplateTime": 637395922139434966,
+	"CompleteTime": 637395922139434966,
 	"Body": [{
 		"Date": "0001-01-01T00:00:00",
 		"TemperatureC": 282,
