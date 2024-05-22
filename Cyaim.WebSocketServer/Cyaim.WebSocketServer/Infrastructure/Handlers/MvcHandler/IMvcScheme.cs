@@ -20,5 +20,7 @@
         /// Request/Response context
         /// </summary>
         public object Body { get; set; }
+
+        public const string VAR_TATGET = "target";
     }
 }

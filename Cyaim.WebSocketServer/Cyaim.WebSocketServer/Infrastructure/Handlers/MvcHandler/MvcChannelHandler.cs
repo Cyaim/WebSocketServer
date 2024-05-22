@@ -221,6 +221,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             wsReceiveReader.Capacity = (int)wsReceiveReader.Length;
                         }
 
+                        // 改异步转发
+
                         // 处理请求的数据
                         //json = json.Append(Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
                         MvcRequestScheme requestScheme = null;
@@ -233,7 +235,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             bool hasBody = root.TryGetProperty("Body", out JsonElement body);
                             if (!hasBody)
                             {
-                                hasBody = root.TryGetProperty("body", out body);
+                                _ = root.TryGetProperty("body", out body);
                             }
 
                             requestScheme = doc.Deserialize<MvcRequestScheme>(webSocketOption.DefaultRequestJsonSerializerOptions);
@@ -261,17 +263,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                 } while (!connCts.IsCancellationRequested);
 
-
-                //switch (result.MessageType)
-                //{
-                //    case WebSocketMessageType.Binary:
-                //        await MvcBinaryForward(context, webSocket, result, buffer);
-                //        break;
-                //    case WebSocketMessageType.Text:
-                //        await MvcTextForward(webSocket, context, result, buffer);
-                //        break;
-                //}
-
                 // 连接断开
                 if (webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseSent)
                 {
@@ -287,23 +278,29 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
         }
 
-        public void ReadJson(byte[] ms)
+        /// <summary>
+        /// Find target from JSON fragment
+        /// </summary>
+        /// <param name="jsonFragment"></param>
+        /// <returns></returns>
+        public string FindJsonPropertyValue(ReadOnlySpan<byte> jsonFragment, string PropertyName = IMvcScheme.VAR_TATGET)
         {
-            var jsonReader = new Utf8JsonReader(ms);
+            var jsonReader = new Utf8JsonReader(jsonFragment);
 
             while (jsonReader.Read())
             {
-                // 处理每一行的 JSON 数据
-                if (jsonReader.TokenType == JsonTokenType.PropertyName && jsonReader.GetString() == "target")
+                if (jsonReader.TokenType == JsonTokenType.PropertyName && jsonReader.GetString()?.ToLower() == PropertyName)
                 {
                     jsonReader.Read();
                     if (jsonReader.TokenType == JsonTokenType.String)
                     {
                         string targetValue = jsonReader.GetString();
-                        Console.WriteLine($"Target value: {targetValue}");
+                        return targetValue;
                     }
                 }
             }
+
+            return null;
         }
 
         /// <summary>
@@ -339,6 +336,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     Status = 1,
                     RequestTime = requsetTicks,
                     CompleteTime = DateTime.Now.Ticks,
+                    Target = request.Target,
                 };
                 logger.LogTrace(mvcRespEx, mvcRespEx.Message);
             }
@@ -567,46 +565,80 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 else
                 {
                     // 异步调用目标方法 
-                    Task<object> invoke = new Task<object>(() =>
+                    object[] methodParm = new object[methodParam.Length];
+                    for (int i = 0; i < methodParam.Length; i++)
                     {
-                        object[] methodParm = new object[methodParam.Length];
-                        for (int i = 0; i < methodParam.Length; i++)
+                        ParameterInfo item = methodParam[i];
+
+                        // 检测方法中的参数是否是C#定义的基本类型
+                        object parmVal = null;
+                        try
                         {
-                            ParameterInfo item = methodParam[i];
-
-                            // 检测方法中的参数是否是C#定义的基本类型
-                            object parmVal = null;
-                            try
+                            // 按参数名提取JsonNode
+                            bool hasVal = requestBody.TryGetPropertyValue(item.Name, out JsonNode JProp);
+                            if (hasVal)
                             {
-                                // 按参数名提取JsonNode
-                                bool hasVal = requestBody.TryGetPropertyValue(item.Name, out JsonNode JProp);
-                                if (hasVal)
-                                {
-                                    parmVal = item.ParameterType.ConvertTo(JProp);
-                                }
-                                else
-                                {
-                                    continue;
-                                }
+                                parmVal = item.ParameterType.ConvertTo(JProp);
                             }
-                            //catch (JsonException ex)
-                            //{
-                            //    // 反序列化失败
-                            //    logger.LogTrace($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> {requestPath} An exception occurred while operating the request data JSON\r\n{ex.Message}\r\n{ex.StackTrace}");
-                            //}
-                            catch (FormatException ex)
+                            else
                             {
-                                // ConvertTo 抛出 类型转换失败
-                                logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, $"{requestPath}.{item.Name}" + I18nText.MvcForwardSendData_RequestBodyParameterFormatError + ex.Message + Environment.NewLine + ex.StackTrace));
+                                continue;
                             }
-                            methodParm[i] = parmVal;
                         }
+                        catch (FormatException ex)
+                        {
+                            // ConvertTo 抛出 类型转换失败
+                            logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, $"{requestPath}.{item.Name}" + I18nText.MvcForwardSendData_RequestBodyParameterFormatError + ex.Message + Environment.NewLine + ex.StackTrace));
+                        }
+                        methodParm[i] = parmVal;
+                    }
 
-                        return method.Invoke(inst, methodParm);
-                    });
-                    invoke.Start();
+                    invokeResult = method.Invoke(inst, methodParm);
 
-                    invokeResult = await invoke;
+                    #region 套娃
+                    // 异步调用目标方法 
+                    //Task<object> invoke = new Task<object>(() =>
+                    //{
+                    //    object[] methodParm = new object[methodParam.Length];
+                    //    for (int i = 0; i < methodParam.Length; i++)
+                    //    {
+                    //        ParameterInfo item = methodParam[i];
+
+                    //        // 检测方法中的参数是否是C#定义的基本类型
+                    //        object parmVal = null;
+                    //        try
+                    //        {
+                    //            // 按参数名提取JsonNode
+                    //            bool hasVal = requestBody.TryGetPropertyValue(item.Name, out JsonNode JProp);
+                    //            if (hasVal)
+                    //            {
+                    //                parmVal = item.ParameterType.ConvertTo(JProp);
+                    //            }
+                    //            else
+                    //            {
+                    //                continue;
+                    //            }
+                    //        }
+                    //        //catch (JsonException ex)
+                    //        //{
+                    //        //    // 反序列化失败
+                    //        //    logger.LogTrace($"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> {requestPath} An exception occurred while operating the request data JSON\r\n{ex.Message}\r\n{ex.StackTrace}");
+                    //        //}
+                    //        catch (FormatException ex)
+                    //        {
+                    //            // ConvertTo 抛出 类型转换失败
+                    //            logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, $"{requestPath}.{item.Name}" + I18nText.MvcForwardSendData_RequestBodyParameterFormatError + ex.Message + Environment.NewLine + ex.StackTrace));
+                    //        }
+                    //        methodParm[i] = parmVal;
+                    //    }
+
+                    //    return method.Invoke(inst, methodParm);
+                    //    invokeResult = method.Invoke(inst, methodParm);
+                    //});
+                    //invoke.Start();
+
+                    //invokeResult = await invoke;
+                    #endregion
                 }
 
                 // Async api support
@@ -617,6 +649,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                     invokeResult = invokeResultTask.Result;
                 }
+
                 #endregion
 
                 // Dispose ioc scope
@@ -633,15 +666,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
             catch (Exception ex)
             {
-                var resp = new MvcResponseScheme() { Id = request.Id, Status = 1, RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
+                var resp = new MvcResponseScheme() { Id = request.Id, Status = 1, Target = request.Target, RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
                 if (webSocketOptions.IsDevelopment)
                 {
-                    resp.Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath}\r\n{ex.Message}\r\n{ex.StackTrace}";
+                    resp.Msg = string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcDistributeAsync_Target + requestPath + Environment.NewLine + ex.Message + Environment.NewLine + ex.StackTrace);
                 }
                 return resp;
             }
 
-        NotFound: return new MvcResponseScheme() { Id = request.Id, Status = 2, Msg = $@"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort} -> Target:{requestPath} not found", RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
+        NotFound: return new MvcResponseScheme() { Id = request.Id, Status = 2, Target = request.Target, RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
         }
 
         /// <summary>

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 {
@@ -39,118 +40,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// </summary>
         private const string Type_JsonValue = "System.Text.Json.JsonValue";
 
-        /// <summary>
-        /// JsonNode value to target type
-        /// </summary>
-        /// <param name="type">target type</param>
-        /// <param name="value"></param>
-        /// <returns></returns>
-        public static object ConvertTo(this Type type, JsonNode value)
-        {
-            return type.FullName switch
-            {
-                Type_String => value.GetValue<string>(),
-                Type_SByte => value.GetValue<sbyte>(),
-                Type_Byte => value.GetValue<byte>(),
-                Type_Short => value.GetValue<short>(),
-                Type_UShort => value.GetValue<ushort>(),
-                Type_Int => value.GetValue<int>(),
-                Type_UInt => value.GetValue<uint>(),
-                Type_Long => value.GetValue<long>(),
-                Type_ULong => value.GetValue<ulong>(),
-                Type_Float => value.GetValue<float>(),
-                Type_Double => value.GetValue<double>(),
-                Type_Bool => value.GetValue<bool>(),
-                Type_DateTime => value.GetValue<DateTime>(),
-                Type_DateTimeOffset => value.GetValue<DateTimeOffset>(),
-                Type_Char => value.GetValue<char>(),
-                Type_Decimal => value.GetValue<decimal>(),
-                _ => value.Deserialize(type)
-            };
-        }
-
-        /// <summary>
-        /// object to real type
-        /// </summary>
-        /// <param name="type">Target type</param>
-        /// <param name="value"></param>
-        /// <returns></returns>
-        public static object ConvertTo(this Type type, object value)
-        {
-            switch (type.FullName)
-            {
-                case Type_String:
-                    return Convert.ToString(value);
-                case Type_SByte:
-                    return Convert.ToSByte(value);
-                case Type_Byte:
-                    return Convert.ToByte(value);
-                case Type_Short:
-                    return Convert.ToInt16(value);
-                case Type_UShort:
-                    return Convert.ToUInt16(value);
-                case Type_Int:
-                    return Convert.ToInt32(value);
-                case Type_UInt:
-                    return Convert.ToUInt32(value);
-                case Type_Long:
-                    return Convert.ToInt64(value);
-                case Type_ULong:
-                    return Convert.ToUInt64(value);
-                case Type_Float:
-                    return Convert.ToSingle(value);
-                case Type_Double:
-                    return Convert.ToDouble(value);
-                case Type_Bool:
-                    return Convert.ToBoolean(value);
-                case Type_Char:
-                    return Convert.ToChar(value);
-                case Type_Decimal:
-                    return Convert.ToChar(value);
-                case Type_DateTime:
-                    return Convert.ToDateTime(value);
-                case Type_DateTimeOffset:
-                    return DateTimeOffset.Parse(value.ToString());
-                case Type_JsonNode:
-                case Type_JsonObject:
-                case Type_JsonArray:
-                case Type_JsonValue:
-                    return JsonNode.Parse(value.ToString());
-                default:
-                    return null;
-            }
-        }
-
-        /// <summary>
-        /// Check type is C# define type
-        /// </summary>
-        /// <param name="type"></param>
-        /// <returns></returns>
-        public static bool IsBasicType(this Type type)
-        {
-            switch (type.FullName)
-            {
-                case Type_String:
-                case Type_SByte:
-                case Type_Byte:
-                case Type_Short:
-                case Type_UShort:
-                case Type_Int:
-                case Type_UInt:
-                case Type_Long:
-                case Type_ULong:
-                case Type_Float:
-                case Type_Double:
-                case Type_Bool:
-                //case Type_DateTime:
-                //case Type_DateTimeOffset:
-                case Type_Char:
-                case Type_Decimal:
-                    return true;
-                default:
-                    return false;
-            }
-        }
 
         #region BaseType
 
@@ -225,5 +114,160 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         private const string Type_String = "System.String";
 
         #endregion
+
+        /// <summary>
+        /// JsonNode value to target type
+        /// </summary>
+        /// <param name="type">target type</param>
+        /// <param name="value"></param>
+        /// <returns></returns>
+        public static object ConvertTo(this Type type, JsonNode value)
+        {
+            try
+            {
+                return type.FullName switch
+                {
+                    Type_String => value.GetValue<string>(),
+                    Type_SByte => value.GetValue<sbyte>(),
+                    Type_Byte => value.GetValue<byte>(),
+                    Type_Short => value.GetValue<short>(),
+                    Type_UShort => value.GetValue<ushort>(),
+                    Type_Int => value.GetValue<int>(),
+                    Type_UInt => value.GetValue<uint>(),
+                    Type_Long => value.GetValue<long>(),
+                    Type_ULong => value.GetValue<ulong>(),
+                    Type_Float => value.GetValue<float>(),
+                    Type_Double => value.GetValue<double>(),
+                    Type_Bool => value.GetValue<bool>(),
+                    Type_DateTime => value.GetValue<DateTime>(),
+                    Type_DateTimeOffset => value.GetValue<DateTimeOffset>(),
+                    Type_Char => value.GetValue<char>(),
+                    Type_Decimal => value.GetValue<decimal>(),
+                    _ => value.Deserialize(type)
+                };
+            }
+            catch (Exception)
+            {
+
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// object to real type
+        /// </summary>
+        /// <param name="type">Target type</param>
+        /// <param name="value"></param>
+        /// <returns></returns>
+        public static object ConvertTo(this Type type, object value)
+        {
+            try
+            {
+                switch (type.FullName)
+                {
+                    case Type_String:
+                        return Convert.ToString(value);
+                    case Type_SByte:
+                        return Convert.ToSByte(value);
+                    case Type_Byte:
+                        return Convert.ToByte(value);
+                    case Type_Short:
+                        return Convert.ToInt16(value);
+                    case Type_UShort:
+                        return Convert.ToUInt16(value);
+                    case Type_Int:
+                        return Convert.ToInt32(value);
+                    case Type_UInt:
+                        return Convert.ToUInt32(value);
+                    case Type_Long:
+                        return Convert.ToInt64(value);
+                    case Type_ULong:
+                        return Convert.ToUInt64(value);
+                    case Type_Float:
+                        return Convert.ToSingle(value);
+                    case Type_Double:
+                        return Convert.ToDouble(value);
+                    case Type_Bool:
+                        return Convert.ToBoolean(value);
+                    case Type_Char:
+                        return Convert.ToChar(value);
+                    case Type_Decimal:
+                        return Convert.ToChar(value);
+                    case Type_DateTime:
+                        return Convert.ToDateTime(value);
+                    case Type_DateTimeOffset:
+                        return DateTimeOffset.Parse(value.ToString());
+                    case Type_JsonNode:
+                    case Type_JsonObject:
+                    case Type_JsonArray:
+                    case Type_JsonValue:
+                        return JsonNode.Parse(value.ToString());
+                    default:
+                        return Convert.ChangeType(value, type);
+                }
+            }
+            catch (Exception)
+            {
+
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Check type is C# define type
+        /// </summary>
+        /// <param name="type"></param>
+        /// <returns></returns>
+        public static bool IsBasicType(this Type type)
+        {
+            try
+            {
+                switch (type.FullName)
+                {
+                    case Type_String:
+                    case Type_SByte:
+                    case Type_Byte:
+                    case Type_Short:
+                    case Type_UShort:
+                    case Type_Int:
+                    case Type_UInt:
+                    case Type_Long:
+                    case Type_ULong:
+                    case Type_Float:
+                    case Type_Double:
+                    case Type_Bool:
+                    //case Type_DateTime:
+                    //case Type_DateTimeOffset:
+                    case Type_Char:
+                    case Type_Decimal:
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+            catch (Exception)
+            {
+
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Check type is Task<> or Task
+        /// </summary>
+        /// <param name="type"></param>
+        /// <returns></returns>
+        public static bool IsTaskType(Type type)
+        {
+            // 检查是否是泛型类型，并且其泛型定义是否与 Task 匹配
+            if (type.IsGenericType)
+            {
+                Type genericTypeDefinition = type.GetGenericTypeDefinition();
+                return genericTypeDefinition == typeof(Task<>) || genericTypeDefinition == typeof(Task);
+            }
+
+            // 对于非泛型类型，直接比较是否是 Task
+            return type == typeof(Task);
+        }
     }
 }

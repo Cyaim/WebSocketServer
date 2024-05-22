@@ -129,6 +129,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
         public static readonly string MvcForwardSendData_RequestBodyFormatError = "Request body format error." + Environment.NewLine;
         public static readonly string MvcForwardSendData_RequestBodyParameterFormatError = "Parameter data formatting exception in the request body." + Environment.NewLine;
         public static readonly string MvcDistributeAsync_EmptyDI = "Cannot inject target constructor parameter because DI container WebSocketRouteOption.ApplicationServiceCollection is null.";
+        public static readonly string MvcDistributeAsync_Target = "Target:";
         public static readonly string OnDisconnected_Disconnected = "Disconnected." + Environment.NewLine;
 
 
