@@ -86,6 +86,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// </summary>
         public ulong? MaxConnectionLimit { get; set; }
 
+        /// <summary>
+        /// true if the target requested by each websocket will wait for processing to complete, false if the parallel processing of targets for Websocket requests
+        /// </summary>
+        public bool EnableForwardTaskSyncProcessingMode { get; set; }
+
+        /// <summary>
+        /// Limit the number of tasks being forwarded globally
+        /// </summary>
+        public ulong? MaxParallelForwardLimit { get; set; }
+
         #region Event
 
         /// <summary>

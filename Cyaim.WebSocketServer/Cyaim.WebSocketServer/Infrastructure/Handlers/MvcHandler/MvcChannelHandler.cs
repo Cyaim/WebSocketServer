@@ -30,15 +30,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// Get instance
         /// </summary>
         /// <param name="receiveBufferSize"></param>
-        public MvcChannelHandler(int receiveBufferSize = 4 * 1024)
+        /// <param name="sendBufferSize"></param>
+        public MvcChannelHandler(int receiveBufferSize = 4 * 1024, int sendBufferSize = 4 * 1024)
         {
             ReceiveTextBufferSize = ReceiveBinaryBufferSize = receiveBufferSize;
+            SendTextBufferSize = SendBinaryBufferSize = sendBufferSize;
         }
 
-        /// <summary>
-        /// Connected clients by mvc channel
-        /// </summary>
-        public static ConcurrentDictionary<string, WebSocket> Clients { get; set; } = new ConcurrentDictionary<string, WebSocket>();
+
+        #region Base
 
         /// <summary>
         /// Metadata used when parsing the handler
@@ -54,11 +54,27 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// Receive message buffer
         /// </summary>
         public int ReceiveTextBufferSize { get; set; }
-
         /// <summary>
         /// Receive message buffer
         /// </summary>
         public int ReceiveBinaryBufferSize { get; set; }
+        /// <summary>
+        /// Send message buffer
+        /// </summary>
+        public int SendTextBufferSize { get; set; }
+        /// <summary>
+        /// Send message buffer
+        /// </summary>
+        public int SendBinaryBufferSize { get; set; }
+        #endregion
+
+
+        public TimeSpan ResponseSendTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// Connected clients by mvc channel
+        /// </summary>
+        public static ConcurrentDictionary<string, WebSocket> Clients { get; set; } = new ConcurrentDictionary<string, WebSocket>();
 
         /// <summary>
         /// Mvc Channel entry
@@ -221,8 +237,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             wsReceiveReader.Capacity = (int)wsReceiveReader.Length;
                         }
 
-                        // 改异步转发
-
                         // 处理请求的数据
                         //json = json.Append(Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
                         MvcRequestScheme requestScheme = null;
@@ -243,7 +257,17 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         //requestScheme = JsonSerializer.Deserialize<MvcRequestScheme>(wsReceiveReader.GetBuffer(), webSocketOption.DefaultRequestJsonSerialiazerOptions);
-                        await MvcForwardSendData(webSocket, context, result, requestScheme, requestBody, requestTime);
+                        // 改异步转发
+                        Task forwardTask = MvcForwardSendData(webSocket, context, result, requestScheme, requestBody, requestTime);
+                        // 是否串行
+                        if (webSocketOption.EnableForwardTaskSyncProcessingMode)
+                        {
+                            await forwardTask;
+                        }
+
+
+                    // 与Target绑定，全局限制目标正在处理的Task总数
+                    // 与连接绑定，限制连接请求正在处理的目标总数
 
                     CONTINUE:;
                     }
@@ -326,8 +350,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, requestBody, logger);
 
                 // 发送结果给客户端
-                string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
-                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
+                //string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
+                //await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
+
+                await invokeResult.SendAsync(webSocketOption.DefaultResponseJsonSerializerOptions, result.MessageType, timeout: ResponseSendTimeout, encoding: Encoding.UTF8, sendBufferSize: SendTextBufferSize, socket: webSocket).ConfigureAwait(false);
             }
             catch (JsonException ex)
             {
@@ -378,8 +404,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, requestBody, logger);
 
                 // 发送结果给客户端
-                string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
-                await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
+                //string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
+                //await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
+
+                await invokeResult.SendAsync(webSocketOption.DefaultResponseJsonSerializerOptions, result.MessageType, timeout: ResponseSendTimeout, encoding: Encoding.UTF8, sendBufferSize: SendTextBufferSize, socket: webSocket).ConfigureAwait(false);
             }
             catch (JsonException ex)
             {

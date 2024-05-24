@@ -17,14 +17,24 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         WebSocketHandlerMetadata Metadata { get; }
 
         /// <summary>
-        /// Text transfer buffer size
+        /// Text receive buffer size
         /// </summary>
         int ReceiveTextBufferSize { get; set; }
 
         /// <summary>
-        /// Binary transfer buffer size
+        /// Binary receive buffer size
         /// </summary>
         int ReceiveBinaryBufferSize { get; set; }
+
+        /// <summary>
+        /// Binary send buffer size
+        /// </summary>
+        int SendTextBufferSize { get; set; }
+
+        /// <summary>
+        /// Binary send buffer size
+        /// </summary>
+        int SendBinaryBufferSize { get; set; }
 
         /// <summary>
         /// Connection request entry
