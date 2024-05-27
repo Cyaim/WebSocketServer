@@ -77,6 +77,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         public static ConcurrentDictionary<string, WebSocket> Clients { get; set; } = new ConcurrentDictionary<string, WebSocket>();
 
         /// <summary>
+        /// Associated with the connection, limit the total number of forwarding requests being processed by the connection
+        /// WebSocketRouteOption.MaxParallelForwardLimit
+        /// </summary>
+        public SemaphoreSlim ParallelForwardLimitSlim = null;
+
+        /// <summary>
         /// Mvc Channel entry
         /// </summary>
         /// <param name="context"></param>
@@ -87,6 +93,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             this.logger = logger;
             webSocketOption = webSocketOptions;
+            // 配置并行转发上限
+            if (ParallelForwardLimitSlim == null && webSocketOptions.MaxConnectionParallelForwardLimit != null)
+            {
+                ParallelForwardLimitSlim = new SemaphoreSlim(0, (int)webSocketOptions.MaxConnectionParallelForwardLimit);
+            }
 
             WebSocketCloseStatus? webSocketCloseStatus = null;
             try
@@ -174,8 +185,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     long requestTime = DateTime.Now.Ticks;
                     WebSocketReceiveResult result = null;
+                    SemaphoreSlim endPointSlim = null;
                     try
                     {
+                        // Connection level restrictions
+                        if (ParallelForwardLimitSlim != null)
+                        {
+                            await ParallelForwardLimitSlim.WaitAsync().ConfigureAwait(false);
+                        }
+
                         if (!(webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseSent))
                         {
                             if (webSocket.State == WebSocketState.Aborted || webSocket.State == WebSocketState.CloseReceived || webSocket.State == WebSocketState.Closed)
@@ -231,6 +249,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             continue;
                         }
 
+                        // EndPoint level restrictions
+                        if (webSocketOption.MaxEndPointParallelForwardLimit != null)
+                        {
+                            string endpoint = FindJsonPropertyValue(wsReceiveReader.GetBuffer());
+                            if (webSocketOption.MaxEndPointParallelForwardLimit.TryGetValue(endpoint, out endPointSlim) && endPointSlim != null)
+                            {
+                                await endPointSlim.WaitAsync().ConfigureAwait(false);
+                            }
+                        }
+
                         // 缩小Capacity避免Getbuffer出现0x00
                         if (wsReceiveReader.Capacity > wsReceiveReader.Length)
                         {
@@ -238,7 +266,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         // 处理请求的数据
-                        //json = json.Append(Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
                         MvcRequestScheme requestScheme = null;
                         JsonObject requestBody = null;
 
@@ -266,9 +293,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
 
-                    // 与Target绑定，全局限制目标正在处理的Task总数
-                    // 与连接绑定，限制连接请求正在处理的目标总数
-
                     CONTINUE:;
                     }
                     catch (Exception ex)
@@ -283,6 +307,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         wsReceiveReader.SetLength(0);
                         wsReceiveReader.Seek(0, SeekOrigin.Begin);
                         wsReceiveReader.Position = 0;
+
+                        if (ParallelForwardLimitSlim != null)
+                        {
+                            ParallelForwardLimitSlim.Release();
+                        }
+                        if (endPointSlim != null)
+                        {
+                            endPointSlim.Release();
+                        }
                     }
 
                 } while (!connCts.IsCancellationRequested);
@@ -311,18 +344,26 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             var jsonReader = new Utf8JsonReader(jsonFragment);
 
-            while (jsonReader.Read())
+            try
             {
-                if (jsonReader.TokenType == JsonTokenType.PropertyName && jsonReader.GetString()?.ToLower() == PropertyName)
+                while (jsonReader.Read())
                 {
-                    jsonReader.Read();
-                    if (jsonReader.TokenType == JsonTokenType.String)
+                    try
                     {
-                        string targetValue = jsonReader.GetString();
-                        return targetValue;
+                        if (jsonReader.TokenType == JsonTokenType.PropertyName && jsonReader.GetString()?.ToLower() == PropertyName)
+                        {
+                            jsonReader.Read();
+                            if (jsonReader.TokenType == JsonTokenType.String)
+                            {
+                                string targetValue = jsonReader.GetString();
+                                return targetValue;
+                            }
+                        }
                     }
+                    catch (Exception) { }
                 }
             }
+            catch (Exception) { }
 
             return null;
         }
@@ -778,6 +819,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     Clients.TryRemove(context.Connection.Id, out var _);
                 }
+
+                ParallelForwardLimitSlim.Dispose();
+                ParallelForwardLimitSlim = null;
             }
         }
 

@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 // ReSharper disable ClassWithVirtualMembersNeverInherited.Global
@@ -92,9 +94,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         public bool EnableForwardTaskSyncProcessingMode { get; set; }
 
         /// <summary>
-        /// Limit the number of tasks being forwarded globally
+        /// Limit the number of tasks forwarded by each connection. If null, it means unrestricted
         /// </summary>
-        public ulong? MaxParallelForwardLimit { get; set; }
+        public uint? MaxConnectionParallelForwardLimit { get; set; }
+
+        /// <summary>
+        /// Limit the number of tasks forwarded by each endpoint.
+        /// Key: EndPoint Name, Value: SemaphoreSlim
+        /// </summary>
+        public ConcurrentDictionary<string, SemaphoreSlim> MaxEndPointParallelForwardLimit { get; set; }
+
 
         #region Event
 
