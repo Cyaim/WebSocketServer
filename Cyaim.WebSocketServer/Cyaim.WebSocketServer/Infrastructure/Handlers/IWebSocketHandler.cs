@@ -37,6 +37,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         int SendBinaryBufferSize { get; set; }
 
         /// <summary>
+        /// Specify the sub protocol name, which will be matched in the request header Sec-WebSocket-Protocol when requesting a connection
+        /// </summary>
+        string SubProtocol { get; }
+
+        /// <summary>
         /// Connection request entry
         /// </summary>
         /// <param name="context"></param>

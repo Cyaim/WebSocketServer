@@ -66,6 +66,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// Send message buffer
         /// </summary>
         public int SendBinaryBufferSize { get; set; }
+
+        /// <summary>
+        /// SubProtocol
+        /// </summary>
+        public string SubProtocol { get; }
         #endregion
 
 
@@ -123,7 +128,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     }
 
                     // 接受连接
-                    using WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                    using WebSocket webSocket = string.IsNullOrEmpty(SubProtocol) ? await context.WebSockets.AcceptWebSocketAsync() : await context.WebSockets.AcceptWebSocketAsync(SubProtocol);
                     try
                     {
                         logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_Connected));
@@ -264,6 +269,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         {
                             wsReceiveReader.Capacity = (int)wsReceiveReader.Length;
                         }
+
+                        // 请求处理管道 分阶段 接收数据前后 转发前后等
+
+
 
                         // 处理请求的数据
                         MvcRequestScheme requestScheme = null;
@@ -820,7 +829,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     Clients.TryRemove(context.Connection.Id, out var _);
                 }
 
-                ParallelForwardLimitSlim.Dispose();
+                ParallelForwardLimitSlim?.Dispose();
                 ParallelForwardLimitSlim = null;
             }
         }
