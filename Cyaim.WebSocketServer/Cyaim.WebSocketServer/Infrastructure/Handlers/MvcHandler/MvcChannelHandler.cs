@@ -71,9 +71,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// SubProtocol
         /// </summary>
         public string SubProtocol { get; }
+
         #endregion
 
-
+        /// <summary>
+        /// Time out when sending response data
+        /// </summary>
         public TimeSpan ResponseSendTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
         /// <summary>
@@ -82,7 +85,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         public static ConcurrentDictionary<string, WebSocket> Clients { get; set; } = new ConcurrentDictionary<string, WebSocket>();
 
         /// <summary>
-        /// Associated with the connection, limit the total number of forwarding requests being processed by the connection
+        /// Request handler pipeline
+        /// </summary>
+        public ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> RequestPipeline { get; } = new ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>>();
+
+        /// <summary>
+        /// Associated with the connection, limit the total number of forwarding requests being processed by the connection.
         /// WebSocketRouteOption.MaxParallelForwardLimit
         /// </summary>
         public SemaphoreSlim ParallelForwardLimitSlim = null;
@@ -141,7 +149,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             return;
                         }
 
-                        await MvcForward(context, webSocket);
+                        // 执行BeforeReceivingData管道
+                        _ = InvokePipeline(RequestPipelineStage.Connected, context, webSocket, null, null);
+
+                        await MvcForward(context, webSocket, webSocketOptions);
                     }
                     catch (Exception ex)
                     {
@@ -170,6 +181,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             finally
             {
                 await MvcChannel_OnDisconnected(context, webSocketCloseStatus, webSocketOptions, logger);
+
+                // 执行BeforeReceivingData管道
+                _ = InvokePipeline(RequestPipelineStage.Disconnected, context, webSocketOptions);
             }
         }
 
@@ -179,7 +193,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="context"></param>
         /// <param name="webSocket"></param>
         /// <returns></returns>
-        private async Task MvcForward(HttpContext context, WebSocket webSocket)
+        private async Task MvcForward(HttpContext context, WebSocket webSocket, WebSocketRouteOption webSocketOptions)
         {
             try
             {
@@ -203,6 +217,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         {
                             if (webSocket.State == WebSocketState.Aborted || webSocket.State == WebSocketState.CloseReceived || webSocket.State == WebSocketState.Closed)
                             {
+                                // exit
                                 connCts.Cancel();
                                 goto CONTINUE;
                             }
@@ -215,6 +230,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         // Feature 要做流量控制 🔨🔨🔨
+
+                        // 执行BeforeReceivingData管道
+                        _ = InvokePipeline(RequestPipelineStage.BeforeReceivingData, context, webSocket, null, null);
 
                         #region 接收数据
                         byte[] buffer = ArrayPool<byte>.Shared.Rent(ReceiveTextBufferSize);
@@ -232,6 +250,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                                 //await wsReceiveReader.WriteAsync(buffer, 0, result.Count);
                                 await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
+
+                                // 执行ReceivingData管道
+                                _ = InvokePipeline(RequestPipelineStage.ReceivingData, context, webSocket, result, buffer);
+
                                 // 已经接受完数据了
                                 if (result.EndOfMessage || result.CloseStatus.HasValue)
                                 {
@@ -247,7 +269,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 ArrayPool<byte>.Shared.Return(buffer);
                             }
                         }
+                        // 缩小Capacity避免Getbuffer出现0x00
+                        if (wsReceiveReader.Capacity > wsReceiveReader.Length)
+                        {
+                            wsReceiveReader.Capacity = (int)wsReceiveReader.Length;
+                        }
                         #endregion
+
+                        // 执行AfterReceivingData管道
+                        _ = InvokePipeline(RequestPipelineStage.ReceivingData, context, webSocket, result, wsReceiveReader.GetBuffer());
 
                         if (result == null)
                         {
@@ -264,15 +294,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             }
                         }
 
-                        // 缩小Capacity避免Getbuffer出现0x00
-                        if (wsReceiveReader.Capacity > wsReceiveReader.Length)
-                        {
-                            wsReceiveReader.Capacity = (int)wsReceiveReader.Length;
-                        }
-
                         // 请求处理管道 分阶段 接收数据前后 转发前后等
-
-
 
                         // 处理请求的数据
                         MvcRequestScheme requestScheme = null;
@@ -292,6 +314,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             requestBody = body.ValueKind == JsonValueKind.Undefined ? null : (JsonNode.Parse(body.GetRawText())?.AsObject());
                         }
 
+                        // 执行管道 BeforeForwardingData
+                        _ = InvokePipeline(RequestPipelineStage.BeforeForwardingData, context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody);
+
                         //requestScheme = JsonSerializer.Deserialize<MvcRequestScheme>(wsReceiveReader.GetBuffer(), webSocketOption.DefaultRequestJsonSerialiazerOptions);
                         // 改异步转发
                         Task forwardTask = MvcForwardSendData(webSocket, context, result, requestScheme, requestBody, requestTime);
@@ -301,6 +326,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             await forwardTask;
                         }
 
+                        // 执行管道 BeforeForwardingData
+                        _ = InvokePipeline(RequestPipelineStage.AfterForwardingData, context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody);
 
                     CONTINUE:;
                     }
@@ -344,38 +371,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
         }
 
-        /// <summary>
-        /// Find target from JSON fragment
-        /// </summary>
-        /// <param name="jsonFragment"></param>
-        /// <returns></returns>
-        public string FindJsonPropertyValue(ReadOnlySpan<byte> jsonFragment, string PropertyName = IMvcScheme.VAR_TATGET)
-        {
-            var jsonReader = new Utf8JsonReader(jsonFragment);
-
-            try
-            {
-                while (jsonReader.Read())
-                {
-                    try
-                    {
-                        if (jsonReader.TokenType == JsonTokenType.PropertyName && jsonReader.GetString()?.ToLower() == PropertyName)
-                        {
-                            jsonReader.Read();
-                            if (jsonReader.TokenType == JsonTokenType.String)
-                            {
-                                string targetValue = jsonReader.GetString();
-                                return targetValue;
-                            }
-                        }
-                    }
-                    catch (Exception) { }
-                }
-            }
-            catch (Exception) { }
-
-            return null;
-        }
 
         /// <summary>
         /// MvcChannel forward data
@@ -424,6 +419,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
 
         }
+
+        #region Forward Other
 
         /// <summary>
         /// MvcChannel forward data
@@ -523,6 +520,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
 
         }
+        #endregion
 
         /// <summary>
         /// Forward request to endpoint method
@@ -859,6 +857,102 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             await Task.CompletedTask;
         }
+
+
+        /// <summary>
+        /// Find target from JSON fragment
+        /// </summary>
+        /// <param name="jsonFragment"></param>
+        /// <returns></returns>
+        public string FindJsonPropertyValue(ReadOnlySpan<byte> jsonFragment, string PropertyName = IMvcScheme.VAR_TATGET)
+        {
+            var jsonReader = new Utf8JsonReader(jsonFragment);
+
+            try
+            {
+                while (jsonReader.Read())
+                {
+                    try
+                    {
+                        if (jsonReader.TokenType == JsonTokenType.PropertyName && jsonReader.GetString()?.ToLower() == PropertyName)
+                        {
+                            jsonReader.Read();
+                            if (jsonReader.TokenType == JsonTokenType.String)
+                            {
+                                string targetValue = jsonReader.GetString();
+                                return targetValue;
+                            }
+                        }
+                    }
+                    catch (Exception) { }
+                }
+            }
+            catch (Exception) { }
+
+            return null;
+        }
+
+
+
+        #region Invoke pipeline
+
+        private ConcurrentQueue<PipelineItem> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer, MvcRequestScheme request, JsonObject requestBody)
+        {
+            ConcurrentQueue<PipelineItem> inovkes;
+            RequestPipeline.TryGetValue(requestStage, out inovkes);
+            inovkes?.OrderBy(x => x.Order).Select(async (x, index) =>
+            {
+                try
+                {
+                    await (x.Item as RequestForwardPipeline)?.Invoke?.Invoke(context, webSocket, result, buffer, request, requestBody);
+                }
+                catch (Exception ex)
+                {
+                    x.Exception = ex;
+                    x.ExceptionItem = x;
+                }
+            });
+            return inovkes;
+        }
+
+        private ConcurrentQueue<PipelineItem> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
+        {
+            ConcurrentQueue<PipelineItem> inovkes;
+            RequestPipeline.TryGetValue(requestStage, out inovkes);
+            inovkes?.OrderBy(x => x.Order).Select(async (x, index) =>
+            {
+                try
+                {
+                    await (x.Item as RequestReceivePipeline)?.Invoke?.Invoke(context, webSocket, result, buffer);
+                }
+                catch (Exception ex)
+                {
+                    x.Exception = ex;
+                    x.ExceptionItem = x;
+                }
+            });
+            return inovkes;
+        }
+
+        private ConcurrentQueue<PipelineItem> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocketRouteOption webSocketOptions)
+        {
+            ConcurrentQueue<PipelineItem> inovkes;
+            RequestPipeline.TryGetValue(requestStage, out inovkes);
+            inovkes?.OrderBy(x => x.Order).Select(async (x, index) =>
+            {
+                try
+                {
+                    await x.Item?.Invoke?.Invoke(context, webSocketOptions);
+                }
+                catch (Exception ex)
+                {
+                    x.Exception = ex;
+                    x.ExceptionItem = x;
+                }
+            });
+            return inovkes;
+        }
+        #endregion
 
     }
 }

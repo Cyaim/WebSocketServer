@@ -2,6 +2,9 @@
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Net.WebSockets;
 using System.Threading.Tasks;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers
@@ -42,6 +45,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         string SubProtocol { get; }
 
         /// <summary>
+        /// Request pipeline
+        /// </summary>
+        public ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> RequestPipeline { get; }
+
+        /// <summary>
         /// Connection request entry
         /// </summary>
         /// <param name="context"></param>
@@ -71,4 +79,5 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// </summary>
         public bool CanHandleText { get; set; }
     }
+
 }
