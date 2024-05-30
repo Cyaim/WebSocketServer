@@ -10,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -72,6 +73,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// </summary>
         public string SubProtocol { get; }
 
+        /// <summary>
+        /// Request handler pipeline
+        /// </summary>
+        public ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> RequestPipeline { get; } = new ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>>();
         #endregion
 
         /// <summary>
@@ -84,10 +89,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// </summary>
         public static ConcurrentDictionary<string, WebSocket> Clients { get; set; } = new ConcurrentDictionary<string, WebSocket>();
 
-        /// <summary>
-        /// Request handler pipeline
-        /// </summary>
-        public ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> RequestPipeline { get; } = new ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>>();
 
         /// <summary>
         /// Associated with the connection, limit the total number of forwarding requests being processed by the connection.
@@ -150,7 +151,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         // 执行BeforeReceivingData管道
-                        _ = InvokePipeline(RequestPipelineStage.Connected, context, webSocket, null, null);
+                        _ = await InvokePipeline(RequestPipelineStage.Connected, context, webSocket, null, null);
 
                         await MvcForward(context, webSocket, webSocketOptions);
                     }
@@ -183,7 +184,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 await MvcChannel_OnDisconnected(context, webSocketCloseStatus, webSocketOptions, logger);
 
                 // 执行BeforeReceivingData管道
-                _ = InvokePipeline(RequestPipelineStage.Disconnected, context, webSocketOptions);
+                _ = await InvokePipeline(RequestPipelineStage.Disconnected, context, webSocketOptions);
             }
         }
 
@@ -232,7 +233,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         // Feature 要做流量控制 🔨🔨🔨
 
                         // 执行BeforeReceivingData管道
-                        _ = InvokePipeline(RequestPipelineStage.BeforeReceivingData, context, webSocket, null, null);
+                        _ = await InvokePipeline(RequestPipelineStage.BeforeReceivingData, context, webSocket, null, null);
 
                         #region 接收数据
                         byte[] buffer = ArrayPool<byte>.Shared.Rent(ReceiveTextBufferSize);
@@ -252,7 +253,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
 
                                 // 执行ReceivingData管道
-                                _ = InvokePipeline(RequestPipelineStage.ReceivingData, context, webSocket, result, buffer);
+                                _ = await InvokePipeline(RequestPipelineStage.ReceivingData, context, webSocket, result, buffer);
 
                                 // 已经接受完数据了
                                 if (result.EndOfMessage || result.CloseStatus.HasValue)
@@ -277,7 +278,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         #endregion
 
                         // 执行AfterReceivingData管道
-                        _ = InvokePipeline(RequestPipelineStage.ReceivingData, context, webSocket, result, wsReceiveReader.GetBuffer());
+                        _ = await InvokePipeline(RequestPipelineStage.ReceivingData, context, webSocket, result, wsReceiveReader.GetBuffer());
 
                         if (result == null)
                         {
@@ -315,7 +316,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         // 执行管道 BeforeForwardingData
-                        _ = InvokePipeline(RequestPipelineStage.BeforeForwardingData, context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody);
+                        _ = await InvokePipeline(RequestPipelineStage.BeforeForwardingData, context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody);
 
                         //requestScheme = JsonSerializer.Deserialize<MvcRequestScheme>(wsReceiveReader.GetBuffer(), webSocketOption.DefaultRequestJsonSerialiazerOptions);
                         // 改异步转发
@@ -327,12 +328,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         // 执行管道 BeforeForwardingData
-                        _ = InvokePipeline(RequestPipelineStage.AfterForwardingData, context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody);
+                        _ = await InvokePipeline(RequestPipelineStage.AfterForwardingData, context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody);
 
                     CONTINUE:;
                     }
                     catch (Exception ex)
                     {
+                        Console.WriteLine(Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
                         logger.LogTrace(ex, ex.Message, Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
                     }
                     finally
@@ -893,65 +895,105 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         }
 
 
-
         #region Invoke pipeline
 
-        private ConcurrentQueue<PipelineItem> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer, MvcRequestScheme request, JsonObject requestBody)
+        private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer, MvcRequestScheme request, JsonObject requestBody)
         {
             ConcurrentQueue<PipelineItem> inovkes;
             RequestPipeline.TryGetValue(requestStage, out inovkes);
-            inovkes?.OrderBy(x => x.Order).Select(async (x, index) =>
+            var order = inovkes?.OrderBy(x => x.Order);
+            if (order == null)
+            {
+                return null;
+            }
+            foreach (PipelineItem x in order)
             {
                 try
                 {
-                    await (x.Item as RequestForwardPipeline)?.Invoke?.Invoke(context, webSocket, result, buffer, request, requestBody);
+                    var p = (x.Item as RequestForwardPipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + "RequestForwardPipeline");
+                    await p?.Invoke?.Invoke(context, webSocket, result, buffer, request, requestBody);
                 }
                 catch (Exception ex)
                 {
                     x.Exception = ex;
                     x.ExceptionItem = x;
                 }
-            });
+            }
             return inovkes;
         }
 
-        private ConcurrentQueue<PipelineItem> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
+        private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
         {
             ConcurrentQueue<PipelineItem> inovkes;
             RequestPipeline.TryGetValue(requestStage, out inovkes);
-            inovkes?.OrderBy(x => x.Order).Select(async (x, index) =>
+            var order = inovkes?.OrderBy(x => x.Order);
+            if (order == null)
+            {
+                return null;
+            }
+            foreach (PipelineItem x in order)
             {
                 try
                 {
-                    await (x.Item as RequestReceivePipeline)?.Invoke?.Invoke(context, webSocket, result, buffer);
+                    var p = (x.Item as RequestReceivePipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + "RequestReceivePipeline");
+                    await p?.Invoke?.Invoke(context, webSocket, result, buffer);
                 }
                 catch (Exception ex)
                 {
                     x.Exception = ex;
                     x.ExceptionItem = x;
                 }
-            });
+            }
             return inovkes;
         }
 
-        private ConcurrentQueue<PipelineItem> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocketRouteOption webSocketOptions)
+        private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocketRouteOption webSocketOptions)
         {
             ConcurrentQueue<PipelineItem> inovkes;
             RequestPipeline.TryGetValue(requestStage, out inovkes);
-            inovkes?.OrderBy(x => x.Order).Select(async (x, index) =>
+            var order = inovkes?.OrderBy(x => x.Order);
+            if (order == null)
+            {
+                return null;
+            }
+            foreach (PipelineItem x in order)
             {
                 try
                 {
-                    await x.Item?.Invoke?.Invoke(context, webSocketOptions);
+                    var p = x.Item ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + "RequestPipeline");
+                    await p?.Invoke?.Invoke(context, webSocketOptions);
                 }
                 catch (Exception ex)
                 {
                     x.Exception = ex;
                     x.ExceptionItem = x;
                 }
-            });
+            }
             return inovkes;
         }
+
+
+        #region Add request middleware to RequestPipeline
+
+        /// <summary>
+        /// Add request middleware to RequestPipeline
+        /// </summary>
+        /// <param name="requestPipelineStage"></param>
+        /// <param name="handler"></param>
+        /// <returns></returns>
+        public ConcurrentQueue<PipelineItem> AddRequestMiddleware(RequestPipelineStage requestPipelineStage, PipelineItem handler)
+        {
+            if (!RequestPipeline.ContainsKey(requestPipelineStage))
+            {
+                RequestPipeline[requestPipelineStage] = new ConcurrentQueue<PipelineItem>();
+            }
+
+            RequestPipeline[requestPipelineStage].Enqueue(handler);
+
+            return RequestPipeline[requestPipelineStage];
+        }
+        #endregion
+
         #endregion
 
     }

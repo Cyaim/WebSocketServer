@@ -13,8 +13,17 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
     /// <summary>
     /// Request handler from pipeline
     /// </summary>
-    public abstract class RequestPipeline
+    public class RequestPipeline
     {
+        public RequestPipeline(RequestPipelineDelegate invoke)
+        {
+            Invoke = invoke;
+        }
+
+        public RequestPipeline()
+        {
+        }
+
         public delegate Task RequestPipelineDelegate(HttpContext context, WebSocketRouteOption webSocketOptions);
 
         public RequestPipelineDelegate Invoke { get; set; }
@@ -26,6 +35,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
     /// </summary>
     public class RequestReceivePipeline : RequestPipeline
     {
+        public RequestReceivePipeline(RequestPipelineDelegate invoke)
+        {
+            Invoke = invoke;
+        }
+
+        public RequestReceivePipeline()
+        {
+        }
+
         public new delegate Task RequestPipelineDelegate(HttpContext context, WebSocket webSocket, WebSocketReceiveResult receiveResult, byte[] data);
 
         public new RequestPipelineDelegate Invoke { get; set; }
@@ -36,6 +54,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
     /// </summary>
     public class RequestForwardPipeline : RequestPipeline
     {
+        public RequestForwardPipeline(RequestPipelineDelegate invoke)
+        {
+            Invoke = invoke;
+        }
+
         public new delegate Task RequestPipelineDelegate(HttpContext context, WebSocket webSocket, WebSocketReceiveResult receiveResult, byte[] data, MvcRequestScheme request, JsonObject requestBody);
 
         public new RequestPipelineDelegate Invoke { get; set; }

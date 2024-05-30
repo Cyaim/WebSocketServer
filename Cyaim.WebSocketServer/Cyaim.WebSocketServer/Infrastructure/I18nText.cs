@@ -136,5 +136,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
         public static readonly string NowWebSocketOn = "Now websocket on: ";
         public static readonly string DefineWebSocketChannelOn = "Define websocket channel on: ";
 
+
+        public static readonly string AtThisStagePipelineNotSupport = "This pipeline type is not supported at this stage and cannot be null. It should be: ";
+
     }
 }
