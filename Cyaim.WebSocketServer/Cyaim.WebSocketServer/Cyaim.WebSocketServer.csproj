@@ -11,15 +11,8 @@
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
 		<RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
 		<Copyright>Copyright © Cyaim Studio</Copyright>
-		<Version>1.7</Version>
-		<PackageReleaseNotes>1, perf: WebSocketManager uses channel processing when executing send tasks to avoid parallel execution of individual WebSocket objects.
-2, perf: Optimize sending performance.
-3, feat: WebSocketManager adds forwarding streams.
-4, feat: Add a synchronization switch for forwarding task processing at Option
-5, feat: Add connection level restrictions
-6, feat: EndPoint level restrictions
-7, feat: add sub protocol support.
-8, feat: There are 6 different moments for adding a request pipeline.</PackageReleaseNotes>
+		<Version>1.7.1</Version>
+		<PackageReleaseNotes>1, fix: Fixed several known bugs</PackageReleaseNotes>
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
 		<Description>
 			WebSocketServer is lightweight and high performance WebSocket library.support route, full duplex communication.

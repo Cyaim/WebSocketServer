@@ -7,7 +7,7 @@
   "targets": {
     ".NETStandard,Version=v2.1": {},
     ".NETStandard,Version=v2.1/": {
-      "Cyaim.WebSocketServer/1.7": {
+      "Cyaim.WebSocketServer/1.7.1": {
         "dependencies": {
           "Microsoft.AspNetCore.Hosting.Server.Abstractions": "2.1.1",
           "Microsoft.AspNetCore.Http.Abstractions": "2.1.1",
@@ -216,7 +216,7 @@
     }
   },
   "libraries": {
-    "Cyaim.WebSocketServer/1.7": {
+    "Cyaim.WebSocketServer/1.7.1": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
