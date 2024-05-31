@@ -183,7 +183,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 await MvcChannel_OnDisconnected(context, webSocketCloseStatus, webSocketOptions, logger);
 
-                // 执行BeforeReceivingData管道
+                // 执行管道 Disconnected
                 _ = await InvokePipeline(RequestPipelineStage.Disconnected, context, webSocketOptions);
             }
         }
@@ -909,7 +909,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             var order = inovkes?.OrderBy(x => x.Order);
             if (order == null)
             {
-                return null;
+                return await Task.FromResult<ConcurrentQueue<PipelineItem>>(null);
             }
             foreach (PipelineItem x in order)
             {
@@ -934,7 +934,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             var order = inovkes?.OrderBy(x => x.Order);
             if (order == null)
             {
-                return null;
+                return await Task.FromResult<ConcurrentQueue<PipelineItem>>(null);
             }
             foreach (PipelineItem x in order)
             {
@@ -959,7 +959,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             var order = inovkes?.OrderBy(x => x.Order);
             if (order == null)
             {
-                return null;
+                return await Task.FromResult<ConcurrentQueue<PipelineItem>>(null);
             }
             foreach (PipelineItem x in order)
             {
