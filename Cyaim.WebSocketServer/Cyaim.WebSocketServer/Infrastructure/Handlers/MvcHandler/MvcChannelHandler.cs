@@ -270,6 +270,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 ArrayPool<byte>.Shared.Return(buffer);
                             }
                         }
+                        // 如果接收到的消息是Close时，断开连接
+                        if (result.MessageType == WebSocketMessageType.Close)
+                        {
+                            break;
+                        }
                         // 缩小Capacity避免Getbuffer出现0x00
                         if (wsReceiveReader.Capacity > wsReceiveReader.Length)
                         {
