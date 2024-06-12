@@ -2,6 +2,7 @@
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Buffers;
@@ -112,6 +113,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 ParallelForwardLimitSlim = new SemaphoreSlim(0, (int)webSocketOptions.MaxConnectionParallelForwardLimit);
             }
+            IHostApplicationLifetime appLifetime = WebSocketRouteOption.ApplicationServices.GetRequiredService<IHostApplicationLifetime>();
 
             WebSocketCloseStatus? webSocketCloseStatus = null;
             try
@@ -153,7 +155,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         // 执行BeforeReceivingData管道
                         _ = await InvokePipeline(RequestPipelineStage.Connected, context, webSocket, null, null);
 
-                        await MvcForward(context, webSocket, webSocketOptions);
+                        await MvcForward(context, webSocket, webSocketOptions, appLifetime);
                     }
                     catch (Exception ex)
                     {
@@ -194,11 +196,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="context"></param>
         /// <param name="webSocket"></param>
         /// <returns></returns>
-        private async Task MvcForward(HttpContext context, WebSocket webSocket, WebSocketRouteOption webSocketOptions)
+        private async Task MvcForward(HttpContext context, WebSocket webSocket, WebSocketRouteOption webSocketOptions, IHostApplicationLifetime appLifetime)
         {
             try
             {
-                CancellationTokenSource connCts = new CancellationTokenSource();
                 string wsCloseDesc = string.Empty;
                 using MemoryStream wsReceiveReader = new MemoryStream(ReceiveTextBufferSize);
                 do
@@ -219,13 +220,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             if (webSocket.State == WebSocketState.Aborted || webSocket.State == WebSocketState.CloseReceived || webSocket.State == WebSocketState.Closed)
                             {
                                 // exit
-                                connCts.Cancel();
-                                goto CONTINUE;
+                                break;
                             }
                             else
                             {
                                 await Task.Delay(300).ConfigureAwait(false);
-                                goto CONTINUE;
+                                continue;
                             }
 
                         }
@@ -246,7 +246,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 {
                                     logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
 
-                                    goto CONTINUE;
+                                    goto CONTINUE_RECEIVE;
                                 }
 
                                 //await wsReceiveReader.WriteAsync(buffer, 0, result.Count);
@@ -332,10 +332,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             await forwardTask;
                         }
 
-                        // 执行管道 BeforeForwardingData
+                        // 执行管道 AfterForwardingData
                         _ = await InvokePipeline(RequestPipelineStage.AfterForwardingData, context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody);
 
-                    CONTINUE:;
+                    CONTINUE_RECEIVE:;
                     }
                     catch (Exception ex)
                     {
@@ -361,7 +361,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
                     }
 
-                } while (!connCts.IsCancellationRequested);
+                } while (!appLifetime.ApplicationStopping.IsCancellationRequested);
 
                 // 连接断开
                 if (webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseSent)
@@ -609,11 +609,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 #region 注入调用方法参数
                 webSocketOptions.WatchAssemblyContext.MethodParameters.TryGetValue(method, out ParameterInfo[] methodParam);
 
+                object[] args = Array.Empty<object>();
                 object invokeResult = default;
                 if (requestBody == null || requestBody.Count <= 0)
                 {
-                    object[] args = Array.Empty<object>();
-                    // 有参方法
+                    // 如果目标是有参方法，设置默认值
                     if (methodParam.Length > 0)
                     {
                         args = new object[methodParam.LongLength];
@@ -643,12 +643,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     {
                         throw new InvalidOperationException("请求的目标终结点参数异常");
                     }
-                    invokeResult = method.Invoke(inst, args);
+                    //invokeResult = method.Invoke(inst, args);
                 }
                 else
                 {
-                    // 异步调用目标方法 
-                    object[] methodParm = new object[methodParam.Length];
+                    // 有参方法
+                    //object[] args = new object[methodParam.Length];
+                    args = new object[methodParam.LongLength];
                     for (int i = 0; i < methodParam.Length; i++)
                     {
                         ParameterInfo item = methodParam[i];
@@ -673,10 +674,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             // ConvertTo 抛出 类型转换失败
                             logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, $"{requestPath}.{item.Name}" + I18nText.MvcForwardSendData_RequestBodyParameterFormatError + ex.Message + Environment.NewLine + ex.StackTrace));
                         }
-                        methodParm[i] = parmVal;
+                        args[i] = parmVal;
                     }
-
-                    invokeResult = method.Invoke(inst, methodParm);
+                    //invokeResult = method.Invoke(inst, methodParm);
 
                     #region 套娃
                     // 异步调用目标方法 
@@ -723,6 +723,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     //invokeResult = await invoke;
                     #endregion
                 }
+
+                // 使用lifetime实现直接结束执行/等待执行完成后再结束
+
+                // 调用目标方法 
+                invokeResult = method.Invoke(inst, args);
 
                 // Async api support
                 if (invokeResult is Task)

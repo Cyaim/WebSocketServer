@@ -1,6 +1,8 @@
 ﻿using Cyaim.WebSocketServer.Infrastructure.Attributes;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -30,6 +32,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 throw new ArgumentNullException(nameof(setupAction));
             }
+            services.TryAddSingleton<IHostApplicationLifetime>();
+
             var wsrOptions = new WebSocketRouteOption();
             setupAction(wsrOptions);
             if (wsrOptions.ApplicationServiceCollection == null)
