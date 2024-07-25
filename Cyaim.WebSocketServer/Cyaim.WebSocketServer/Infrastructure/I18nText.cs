@@ -123,7 +123,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
         public static readonly string ConnectionEntry_DisconnectedInternalExceptions = "Connection disconnected due to one or more internal exceptions." + Environment.NewLine;
         public static readonly string ConnectionEntry_ConnectionDenied = "Connection denied:request header error.";
         public static readonly string ConnectionEntry_RequestSizeMaximumLimit = "Request size exceeds maximum limit.";
-        public static readonly string ConnectionEntry_ReceivingClientDataException = "An exception occurred while receiving client data." + Environment.NewLine;
+        public static readonly string ConnectionEntry_ReceivingClientDataException = "An exception occurred while receiving client data.";
         public static readonly string ConnectionEntry_AbortedReceivingData = "Aborted receiving data." + Environment.NewLine;
         public static readonly string MvcForwardSendData_RequestParsingError = "Request parsing error." + Environment.NewLine;
         public static readonly string MvcForwardSendData_RequestBodyFormatError = "Request body format error." + Environment.NewLine;
@@ -138,6 +138,9 @@ namespace Cyaim.WebSocketServer.Infrastructure
 
 
         public static readonly string AtThisStagePipelineNotSupport = "This pipeline type is not supported at this stage and cannot be null. It should be: ";
+
+        public static readonly string MvcDistributeAsync_EndPointNotFound = "Endpoint not found: ";
+
 
     }
 }

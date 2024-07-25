@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Text.Json.Serialization;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 {
@@ -24,5 +25,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// Request context
         /// </summary>
         public object Body { get; set; }
+
+        /// <summary>
+        /// List used to obtain body
+        /// </summary>
+        [JsonIgnore]
+        public static string[] BODY_NAMES = { "Body", "body" };
     }
 }

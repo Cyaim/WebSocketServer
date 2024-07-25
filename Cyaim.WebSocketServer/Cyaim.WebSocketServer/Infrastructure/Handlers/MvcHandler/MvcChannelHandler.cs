@@ -113,7 +113,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 ParallelForwardLimitSlim = new SemaphoreSlim(0, (int)webSocketOptions.MaxConnectionParallelForwardLimit);
             }
-            IHostApplicationLifetime appLifetime = WebSocketRouteOption.ApplicationServices.GetRequiredService<IHostApplicationLifetime>();
 
             WebSocketCloseStatus? webSocketCloseStatus = null;
             try
@@ -155,6 +154,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         // 执行BeforeReceivingData管道
                         _ = await InvokePipeline(RequestPipelineStage.Connected, context, webSocket, null, null);
 
+                        IHostApplicationLifetime appLifetime = WebSocketRouteOption.ApplicationServices.GetRequiredService<IHostApplicationLifetime>();
+
                         await MvcForward(context, webSocket, webSocketOptions, appLifetime);
                     }
                     catch (Exception ex)
@@ -179,7 +180,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
             catch (Exception ex)
             {
-                logger.LogTrace(ex, ex.Message);
+                logger.LogInformation(ex, ex.Message + Environment.NewLine + ex.StackTrace);
             }
             finally
             {
@@ -244,7 +245,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 // 请求大小限制
                                 if (wsReceiveReader.Length > webSocketOption.MaxRequestReceiveDataLimit)
                                 {
-                                    logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
+                                    logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
 
                                     goto CONTINUE_RECEIVE;
                                 }
@@ -263,7 +264,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             }
                             catch (Exception ex)
                             {
-                                logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_ReceivingClientDataException + ex.Message + Environment.NewLine + ex.StackTrace));
+                                logger.LogDebug(
+                                    string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE,
+                                            context.Connection.RemoteIpAddress,
+                                            context.Connection.RemotePort,
+                                            context.Connection.Id,
+                                            I18nText.ConnectionEntry_ReceivingClientDataException + Environment.NewLine + ex.Message + Environment.NewLine + ex.StackTrace
+                                        )
+                                    );
                             }
                             finally
                             {
@@ -310,10 +318,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         using (JsonDocument doc = JsonDocument.Parse(wsReceiveReader.GetBuffer()))
                         {
                             JsonElement root = doc.RootElement;
-                            bool hasBody = root.TryGetProperty("Body", out JsonElement body);
-                            if (!hasBody)
+                            JsonElement body = default;
+                            bool hasBody = false;
+                            foreach (string name in MvcRequestScheme.BODY_NAMES)
                             {
-                                _ = root.TryGetProperty("body", out body);
+                                hasBody = root.TryGetProperty(name, out body);
+                                if (hasBody) break;
                             }
 
                             requestScheme = doc.Deserialize<MvcRequestScheme>(webSocketOption.DefaultRequestJsonSerializerOptions);
@@ -325,7 +335,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                         //requestScheme = JsonSerializer.Deserialize<MvcRequestScheme>(wsReceiveReader.GetBuffer(), webSocketOption.DefaultRequestJsonSerialiazerOptions);
                         // 改异步转发
-                        Task forwardTask = MvcForwardSendData(webSocket, context, result, requestScheme, requestBody, requestTime);
+                        Task forwardTask = MvcForwardSendData(webSocket, context, result, requestScheme, requestBody, requestTime, appLifetime);
                         // 是否串行
                         if (webSocketOption.EnableForwardTaskSyncProcessingMode)
                         {
@@ -339,8 +349,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine(Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
-                        logger.LogTrace(ex, ex.Message, Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
+                        logger.LogInformation(ex, ex.Message, Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
                     }
                     finally
                     {
@@ -389,7 +398,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="requestBody"></param>
         /// <param name="requsetTicks"></param>
         /// <returns></returns>
-        private async Task MvcForwardSendData(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, MvcRequestScheme request, JsonObject requestBody, long requsetTicks)
+        private async Task MvcForwardSendData(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, MvcRequestScheme request, JsonObject requestBody, long requsetTicks, IHostApplicationLifetime appLifetime)
         {
             try
             {
@@ -399,7 +408,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 }
 
                 //按节点请求转发
-                object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, requestBody, logger);
+                object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, requestBody, logger, appLifetime);
 
                 // 发送结果给客户端
                 //string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
@@ -416,7 +425,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     CompleteTime = DateTime.Now.Ticks,
                     Target = request.Target,
                 };
-                logger.LogTrace(mvcRespEx, mvcRespEx.Message);
+                logger.LogInformation(mvcRespEx, mvcRespEx.Message);
             }
             catch (Exception)
             {
@@ -438,7 +447,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="request"></param>
         /// <param name="requsetTicks"></param>
         /// <returns></returns>
-        private async Task MvcForwardSendData(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, MvcRequestScheme request, long requsetTicks)
+        private async Task MvcForwardSendData(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, MvcRequestScheme request, long requsetTicks, IHostApplicationLifetime appLifetime)
         {
             try
             {
@@ -455,7 +464,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     requestBody = requestJsonNode.AsObject();
                 }
-                object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, requestBody, logger);
+                object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, requestBody, logger, appLifetime);
 
                 // 发送结果给客户端
                 //string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
@@ -471,7 +480,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     RequestTime = requsetTicks,
                     CompleteTime = DateTime.Now.Ticks,
                 };
-                logger.LogTrace(mvcRespEx, mvcRespEx.Message);
+                logger.LogInformation(mvcRespEx, mvcRespEx.Message);
             }
             catch (Exception)
             {
@@ -491,7 +500,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="json"></param>
         /// <param name="requsetTicks"></param>
         /// <returns></returns>
-        private async Task MvcForwardSendData(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, StringBuilder json, long requsetTicks)
+        private async Task MvcForwardSendData(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, StringBuilder json, long requsetTicks, IHostApplicationLifetime appLifetime)
         {
             try
             {
@@ -503,11 +512,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 MvcRequestScheme request = JsonSerializer.Deserialize<MvcRequestScheme>(json.ToString(), webSocketOption.DefaultRequestJsonSerializerOptions);
                 if (request == null)
                 {
-                    logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestBodyFormatError + json));
+                    logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestBodyFormatError + json));
                     return;
                 }
 
-                await MvcForwardSendData(webSocket, context, result, request, requsetTicks).ConfigureAwait(false);
+                await MvcForwardSendData(webSocket, context, result, request, requsetTicks, appLifetime).ConfigureAwait(false);
             }
             catch (JsonException ex)
             {
@@ -517,7 +526,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     RequestTime = requsetTicks,
                     CompleteTime = DateTime.Now.Ticks,
                 };
-                logger.LogTrace(mvcRespEx, mvcRespEx.Message);
+                logger.LogInformation(mvcRespEx, mvcRespEx.Message);
             }
             catch (Exception)
             {
@@ -539,7 +548,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <param name="requestBody"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public static async Task<MvcResponseScheme> MvcDistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, MvcRequestScheme request, JsonObject requestBody, ILogger<WebSocketRouteMiddleware> logger)
+        public static async Task<MvcResponseScheme> MvcDistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, MvcRequestScheme request, JsonObject requestBody, ILogger<WebSocketRouteMiddleware> logger, IHostApplicationLifetime appLifetime)
         {
             long requestTime = DateTime.Now.Ticks;
             string requestPath = request.Target.ToLower();
@@ -567,7 +576,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 webSocketOptions.WatchAssemblyContext.MaxConstructorParameters.TryGetValue(clss, out ConstructorParameter constructorParameter);
 
                 object[] instanceParmas = new object[constructorParameter.ParameterInfos.Length];
-                // 从Scope从DI容器提取目标类构造函数所需的对象 
+                // 从Scope DI容器提取目标类构造函数所需的对象 
                 var serviceScopeFactory = WebSocketRouteOption.ApplicationServices.GetService<IServiceScopeFactory>();
                 var serviceScope = serviceScopeFactory.CreateScope();
                 var scopeIocProvider = serviceScope.ServiceProvider;
@@ -639,11 +648,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             }
                         }
                     }
-                    else if (methodParam.Length < 0)
-                    {
-                        throw new InvalidOperationException("请求的目标终结点参数异常");
-                    }
-                    //invokeResult = method.Invoke(inst, args);
                 }
                 else
                 {
@@ -725,6 +729,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 }
 
                 // 使用lifetime实现直接结束执行/等待执行完成后再结束
+                appLifetime.ApplicationStopping.ThrowIfCancellationRequested();
 
                 // 调用目标方法 
                 invokeResult = method.Invoke(inst, args);
@@ -733,7 +738,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 if (invokeResult is Task)
                 {
                     dynamic invokeResultTask = invokeResult;
-                    await invokeResultTask;
+                    //await invokeResultTask;
+                    await Task.WhenAll(invokeResultTask, appLifetime.ApplicationStopping);
 
                     invokeResult = invokeResultTask.Result;
                 }
@@ -750,19 +756,23 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 mvcResponse.CompleteTime = DateTime.Now.Ticks;
 
                 return mvcResponse;
-
             }
             catch (Exception ex)
             {
                 var resp = new MvcResponseScheme() { Id = request.Id, Status = 1, Target = request.Target, RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
-                if (webSocketOptions.IsDevelopment)
-                {
-                    resp.Msg = string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcDistributeAsync_Target + requestPath + Environment.NewLine + ex.Message + Environment.NewLine + ex.StackTrace);
-                }
+                resp.Msg = string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcDistributeAsync_Target + requestPath + Environment.NewLine + ex.Message + Environment.NewLine + ex.StackTrace);
+
+                logger.LogInformation(resp.Msg);
+
+                if (webSocketOptions.IsDevelopment) resp = null;
+
                 return resp;
             }
 
-        NotFound: return new MvcResponseScheme() { Id = request.Id, Status = 2, Target = request.Target, RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
+        NotFound:
+            logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcDistributeAsync_EndPointNotFound + requestPath));
+
+            return new MvcResponseScheme() { Id = request.Id, Status = 2, Target = request.Target, RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
         }
 
         /// <summary>
