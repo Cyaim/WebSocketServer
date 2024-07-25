@@ -42,3 +42,5 @@
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer/bin
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer/bin/Release
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer/bin
+/Cyaim.WebSocketServer/TestAOT/bin
+/Cyaim.WebSocketServer/TestAOT/obj
