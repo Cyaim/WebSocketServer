@@ -11,8 +11,10 @@
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
 		<RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
 		<Copyright>Copyright © Cyaim Studio</Copyright>
-		<Version>1.7.1</Version>
-		<PackageReleaseNotes>1, fix: Fixed several known bugs</PackageReleaseNotes>
+		<Version>1.7.2</Version>
+		<PackageReleaseNotes>perf: 
+1,Optimize the rationality of logs.
+2,Optimize the issue of program exit time being too long due to ongoing connection exection.</PackageReleaseNotes>
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
 		<Description>
 			WebSocketServer is lightweight and high performance WebSocket library.support route, full duplex communication.
