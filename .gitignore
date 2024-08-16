@@ -44,3 +44,6 @@
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer/bin
 /Cyaim.WebSocketServer/TestAOT/bin
 /Cyaim.WebSocketServer/TestAOT/obj
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example.Wpf/bin/Debug/net8.0-windows
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example.Wpf/obj
+*.user
