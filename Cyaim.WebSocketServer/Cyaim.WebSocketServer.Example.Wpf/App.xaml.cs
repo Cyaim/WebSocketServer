@@ -35,6 +35,7 @@ namespace Cyaim.WebSocketServer.Example.Wpf
 
         private IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
+                // 使用UseStartup就不用在这里写
                 .ConfigureServices((context, services) =>
                 {
                     // 配置WebSocketServer的Handler
@@ -63,6 +64,8 @@ namespace Cyaim.WebSocketServer.Example.Wpf
                     webBuilder.UseKestrel()
                               .UseUrls("http://localhost:5000")
                               //.UseStartup<Startup>();
+
+                              // 使用UseStartup就不用在这里写
                               .Configure(app =>
                               {
                                   // 启用Kestral的WebSocket
