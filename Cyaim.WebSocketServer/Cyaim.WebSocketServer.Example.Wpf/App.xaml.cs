@@ -1,4 +1,10 @@
-﻿using Microsoft.AspNetCore.Hosting;
+﻿using Cyaim.WebSocketServer.Infrastructure;
+using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+using Cyaim.WebSocketServer.Middlewares;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Configuration;
@@ -29,6 +35,21 @@ namespace Cyaim.WebSocketServer.Example.Wpf
 
         private IHostBuilder CreateHostBuilder(string[] args) =>
             Host.CreateDefaultBuilder(args)
+                .ConfigureServices((context, services) =>
+                {
+                    // 配置WebSocketServer的Handler
+                    services.ConfigureWebSocketRoute(x =>
+                    {
+                        var mvcHandler = new MvcChannelHandler();
+                        //Define channels
+                        x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
+                        {
+                            { "/ws", mvcHandler.ConnectionEntry}
+                        };
+                        //x.WatchAssemblyNamespacePrefix = "可以自定义被扫描特性的完整限定命名空间，默认是本程序集的Controllers";
+                        x.ApplicationServiceCollection = services;
+                    });
+                })
                 // 配置日志
                 .ConfigureLogging(logging =>
                 {
@@ -41,7 +62,18 @@ namespace Cyaim.WebSocketServer.Example.Wpf
                 {
                     webBuilder.UseKestrel()
                               .UseUrls("http://localhost:5000")
-                              .UseStartup<Startup>();
+                              //.UseStartup<Startup>();
+                              .Configure(app =>
+                              {
+                                  // 启用Kestral的WebSocket
+                                  var webSocketOptions = new WebSocketOptions()
+                                  {
+                                      KeepAliveInterval = TimeSpan.FromSeconds(120),
+                                  };
+                                  app.UseWebSockets(webSocketOptions);
+                                  // 启用WebSocketServer
+                                  app.UseWebSocketServer();
+                              });
                 });
 
         protected override async void OnExit(ExitEventArgs e)
