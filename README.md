@@ -28,6 +28,8 @@ services.ConfigureWebSocketRoute(x =>
 var webSocketOptions = new WebSocketOptions()
 {
     KeepAliveInterval = TimeSpan.FromSeconds(120),
+
+    // This configuration has been deprecated
     ReceiveBufferSize = 4 * 1024
 };
 app.UseWebSockets(webSocketOptions);
