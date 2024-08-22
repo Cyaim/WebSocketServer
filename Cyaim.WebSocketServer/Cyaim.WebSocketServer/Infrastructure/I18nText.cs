@@ -64,7 +64,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 if (File.Exists(i18nResourcePath))
                 {
-                    var textKV = JsonSerializer.Deserialize<Dictionary<string, string>>(i18nResourcePath);
+                    string json = File.ReadAllText(i18nResourcePath);
+                    var textKV = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
 
                     // 公开、静态的没有标记JsonIgnore的字段作为i18n的文本字段
                     var fields = typeof(I18nText).GetFields(BindingFlags.Public | BindingFlags.Static).Where(x => !x.GetCustomAttributes<JsonIgnoreAttribute>().Any());
