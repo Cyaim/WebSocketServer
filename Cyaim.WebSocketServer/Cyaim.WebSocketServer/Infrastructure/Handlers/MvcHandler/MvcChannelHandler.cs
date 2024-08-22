@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
@@ -96,6 +97,17 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// WebSocketRouteOption.MaxParallelForwardLimit
         /// </summary>
         public SemaphoreSlim ParallelForwardLimitSlim = null;
+
+
+        #region Pipeline
+
+        const string PipeStr_RequestForwardPipeline = "RequestForwardPipeline";
+
+        const string PipeStr_RequestReceivePipeline = "RequestReceivePipeline";
+
+        const string PipeStr_RequestPipeline = "RequestPipeline";
+
+        #endregion
 
         /// <summary>
         /// Mvc Channel entry
@@ -917,6 +929,17 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
         #region Invoke pipeline
 
+        /// <summary>
+        /// Call request forwarding pipeline
+        /// </summary>
+        /// <param name="requestStage"></param>
+        /// <param name="context"></param>
+        /// <param name="webSocket"></param>
+        /// <param name="result"></param>
+        /// <param name="buffer"></param>
+        /// <param name="request"></param>
+        /// <param name="requestBody"></param>
+        /// <returns></returns>
         private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer, MvcRequestScheme request, JsonObject requestBody)
         {
             ConcurrentQueue<PipelineItem> inovkes;
@@ -930,7 +953,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 try
                 {
-                    var p = (x.Item as RequestForwardPipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + "RequestForwardPipeline");
+                    var p = (x.Item as RequestForwardPipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestForwardPipeline);
                     await p?.Invoke?.Invoke(context, webSocket, result, buffer, request, requestBody);
                 }
                 catch (Exception ex)
@@ -942,6 +965,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             return inovkes;
         }
 
+        /// <summary>
+        /// Call the request receiving pipeline
+        /// </summary>
+        /// <param name="requestStage"></param>
+        /// <param name="context"></param>
+        /// <param name="webSocket"></param>
+        /// <param name="result"></param>
+        /// <param name="buffer"></param>
+        /// <returns></returns>
         private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
         {
             ConcurrentQueue<PipelineItem> inovkes;
@@ -955,7 +987,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 try
                 {
-                    var p = (x.Item as RequestReceivePipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + "RequestReceivePipeline");
+                    var p = (x.Item as RequestReceivePipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestReceivePipeline);
                     await p?.Invoke?.Invoke(context, webSocket, result, buffer);
                 }
                 catch (Exception ex)
@@ -967,6 +999,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             return inovkes;
         }
 
+        /// <summary>
+        /// Call the basic request pipeline
+        /// </summary>
+        /// <param name="requestStage"></param>
+        /// <param name="context"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <returns></returns>
         private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocketRouteOption webSocketOptions)
         {
             ConcurrentQueue<PipelineItem> inovkes;
@@ -980,7 +1019,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 try
                 {
-                    var p = x.Item ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + "RequestPipeline");
+                    var p = x.Item ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestPipeline);
                     await p?.Invoke?.Invoke(context, webSocketOptions);
                 }
                 catch (Exception ex)
@@ -998,20 +1037,71 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <summary>
         /// Add request middleware to RequestPipeline
         /// </summary>
-        /// <param name="requestPipelineStage"></param>
-        /// <param name="handler"></param>
+        /// <param name="requestPipelineStage">Pipeline processing stage</param>
+        /// <param name="handler">Processing program.The Stage in the handler will be overwritten by the requestPipeStage parameter.</param>
         /// <returns></returns>
         public ConcurrentQueue<PipelineItem> AddRequestMiddleware(RequestPipelineStage requestPipelineStage, PipelineItem handler)
         {
-            if (!RequestPipeline.ContainsKey(requestPipelineStage))
+            if (!RequestPipeline.TryGetValue(requestPipelineStage, out ConcurrentQueue<PipelineItem> value))
             {
-                RequestPipeline[requestPipelineStage] = new ConcurrentQueue<PipelineItem>();
+                value = new ConcurrentQueue<PipelineItem>();
+                RequestPipeline.TryAdd(requestPipelineStage, value);
             }
 
-            RequestPipeline[requestPipelineStage].Enqueue(handler);
+            handler.Stage = requestPipelineStage;
+            value.Enqueue(handler);
 
-            return RequestPipeline[requestPipelineStage];
+            return value;
         }
+
+        /// <summary>
+        /// Add request middleware to RequestPipeline
+        /// </summary>
+        /// <param name="handler">processing program</param>
+        /// <returns></returns>
+        public ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> AddRequestMiddleware(PipelineItem handler)
+        {
+            if (!RequestPipeline.TryGetValue(handler.Stage, out ConcurrentQueue<PipelineItem> value))
+            {
+                value = new ConcurrentQueue<PipelineItem>();
+                RequestPipeline.TryAdd(handler.Stage, value);
+            }
+
+            value.Enqueue(handler);
+
+            return RequestPipeline;
+        }
+
+        /// <summary>
+        /// Add request middleware to RequestPipeline
+        /// </summary>
+        /// <param name="stage">Pipeline processing stage</param>
+        /// <param name="invoke"></param>
+        /// <param name="order">If it is null, add 1 on the largest order in the current stage queue. If there is no data in the current queue, the order is 0.</param>
+        /// <returns></returns>
+        public ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> AddRequestMiddleware(RequestPipelineStage stage, RequestPipeline invoke, float? order = null)
+        {
+            if (!RequestPipeline.TryGetValue(stage, out ConcurrentQueue<PipelineItem> value))
+            {
+                value = new ConcurrentQueue<PipelineItem>();
+                RequestPipeline.TryAdd(stage, value);
+            }
+
+            if (order == null)
+            {
+                order = value.IsEmpty ? 0 : value.Max(x => x.Order) + 1;
+            }
+
+            value.Enqueue(new PipelineItem()
+            {
+                Item = invoke,
+                Order = order.Value,
+                Stage = stage
+            });
+
+            return RequestPipeline;
+        }
+
         #endregion
 
         #endregion

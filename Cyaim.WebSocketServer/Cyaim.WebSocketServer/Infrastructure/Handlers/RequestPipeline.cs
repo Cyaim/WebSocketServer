@@ -2,6 +2,7 @@
 using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
 using Microsoft.AspNetCore.Http;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Text;
@@ -69,12 +70,29 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
     /// </summary>
     public class PipelineItem
     {
+        /// <summary>
+        /// Pipeline delegation
+        /// </summary>
         public RequestPipeline Item { get; set; }
 
+        /// <summary>
+        /// Request pipeline stage
+        /// </summary>
+        public RequestPipelineStage Stage { get; set; }
+
+        /// <summary>
+        /// The order in the pipeline, from small to large
+        /// </summary>
         public float Order { get; set; }
 
+        /// <summary>
+        /// Exception occurred when calling the pipeline
+        /// </summary>
         public Exception Exception { get; set; }
 
+        /// <summary>
+        /// Exception pipeline objects that occurred
+        /// </summary>
         public PipelineItem ExceptionItem { get; set; }
     }
 
@@ -118,5 +136,28 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// 客户端断开连接
         /// </summary>
         Disconnected
+    }
+
+
+    public static class RequestPipelineMiddlewareExtensions
+    {
+
+        /// <summary>
+        /// Add request middleware to RequestPipeline
+        /// </summary>
+        /// <param name="pipeline">Pipeline</param>
+        /// <param name="handler">Processing program</param>
+        /// <returns></returns>
+        public static ConcurrentQueue<PipelineItem> AddRequestMiddleware(this ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> pipeline, PipelineItem handler)
+        {
+            if (!pipeline.TryGetValue(handler.Stage, out ConcurrentQueue<PipelineItem> value))
+            {
+                value = new ConcurrentQueue<PipelineItem>();
+                pipeline.TryAdd(handler.Stage, value);
+            }
+            value.Enqueue(handler);
+
+            return value;
+        }
     }
 }
