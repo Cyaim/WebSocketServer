@@ -11,14 +11,15 @@
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
 		<RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
 		<Copyright>Copyright © Cyaim Studio</Copyright>
-		<Version>1.7.2</Version>
-		<PackageReleaseNotes>perf: 
-1,Optimize the rationality of logs.
-2,Optimize the issue of program exit time being too long due to ongoing connection exection.</PackageReleaseNotes>
+		<Version>1.7.3</Version>
+		<PackageReleaseNotes>
+			feat: Request to add 3 quick operation methods to the processing pipeline.
+			fix: Resolve the issue of i18n finding JSON file errors.
+		</PackageReleaseNotes>
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
 		<Description>
-			WebSocketServer is lightweight and high performance WebSocket library.support route, full duplex communication.
-			WebSocketServer 是一个轻量级、高性能WebSocket库。支持 WebApi 路由、多路复用等。
+			WebSocketServer is lightweight and high performance WebSocket server library.Support route, full duplex communication, multiplexing, pipeline, encryption.
+			WebSocketServer 是一个轻量级、高性能WebSocket服务端库。支持 WebApi 路由、全双工通信、多路复用、管道、加密等。
 		</Description>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
