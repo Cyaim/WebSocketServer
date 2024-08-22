@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Example.Common.Redis;
 using Cyaim.WebSocketServer.Infrastructure;
@@ -12,6 +14,7 @@ using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpsPolicy;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -44,10 +47,40 @@ namespace Cyaim.WebSocketServer.Example
 
             services.ConfigureWebSocketRoute(x =>
             {
+                var mvcHandler = new MvcChannelHandler();
+                mvcHandler.AddRequestMiddleware(RequestPipelineStage.Connected, new PipelineItem()
+                {
+                    Item = new((c, o) => Task.CompletedTask)
+                });
+
+                mvcHandler.AddRequestMiddleware(new PipelineItem()
+                {
+                    Stage = RequestPipelineStage.Disconnected,
+                    Item = new((c, o) => Task.CompletedTask)
+                });
+
+                mvcHandler.AddRequestMiddleware(
+                    RequestPipelineStage.BeforeForwardingData,
+                    new RequestForwardPipeline((context, webSocket, receiveResult, data, request, requestBody) =>
+                    {
+                        return Task.CompletedTask;
+                    }));
+
+                mvcHandler.RequestPipeline.AddRequestMiddleware(new PipelineItem()
+                {
+                    Stage = RequestPipelineStage.BeforeReceivingData,
+                    Item = new RequestReceivePipeline((context, webSocket, receiveResult, data) => Task.CompletedTask)
+                });
+
+
+                mvcHandler.RequestPipeline.AddRequestMiddleware(RequestPipelineStage.ReceivingData, 
+                    new RequestReceivePipeline((context, webSocket, receiveResult, data) => Task.CompletedTask));
+
+
                 //Define channels
                 x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
                 {
-                    { "/im",new MvcChannelHandler(4*1024).ConnectionEntry}
+                    { "/im",mvcHandler.ConnectionEntry}
                 };
                 x.ApplicationServiceCollection = services;
             });
@@ -81,7 +114,7 @@ namespace Cyaim.WebSocketServer.Example
             };
 
             app.UseWebSockets(webSocketOptions);
-            app.UseWebSocketServer(app.ApplicationServices);
+            app.UseWebSocketServer();
             //---------------------END---------------------
         }
 

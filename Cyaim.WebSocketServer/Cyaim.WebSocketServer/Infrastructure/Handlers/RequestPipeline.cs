@@ -148,7 +148,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <param name="pipeline">Pipeline</param>
         /// <param name="handler">Processing program</param>
         /// <returns></returns>
-        public static ConcurrentQueue<PipelineItem> AddRequestMiddleware(this ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> pipeline, PipelineItem handler)
+        public static ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> AddRequestMiddleware(this ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> pipeline, PipelineItem handler)
         {
             if (!pipeline.TryGetValue(handler.Stage, out ConcurrentQueue<PipelineItem> value))
             {
@@ -157,7 +157,32 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             }
             value.Enqueue(handler);
 
-            return value;
+            return pipeline;
+        }
+
+        /// <summary>
+        /// Add request middleware to RequestPipeline
+        /// </summary>
+        /// <param name="pipeline"></param>
+        /// <param name="stage"></param>
+        /// <param name="invoke"></param>
+        /// <param name="order">If it is null, add 1 on the largest order in the current stage queue. If there is no data in the current queue, the order is 0.</param>
+        /// <returns></returns>
+        public static ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> AddRequestMiddleware(this ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> pipeline, RequestPipelineStage stage, RequestPipeline invoke, float? order = null)
+        {
+            if (!pipeline.TryGetValue(stage, out ConcurrentQueue<PipelineItem> value))
+            {
+                value = new ConcurrentQueue<PipelineItem>();
+                pipeline.TryAdd(stage, value);
+            }
+            value.Enqueue(new PipelineItem()
+            {
+                Item = invoke,
+                Order = order.Value,
+                Stage = stage
+            });
+
+            return pipeline;
         }
     }
 }
