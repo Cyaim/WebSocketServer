@@ -16,7 +16,7 @@ jobs:
     - name: Setup .NET Core
       uses: actions/setup-dotnet@v1
       with:
-        dotnet-version: 3.1.301
+        dotnet-version: 8.0.304
     - name: ls
       run: ls /home/runner/work/WebSocketServer/WebSocketServer
     - name: cd
