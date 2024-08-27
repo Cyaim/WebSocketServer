@@ -3,7 +3,7 @@
 |--|--|--|--|--|--|
 [![996.icu](https://img.shields.io/badge/link-996.icu-red.svg)](https://996.icu)|[![](https://img.shields.io/badge/.NET%20Standard-2.1-violet.svg)![](https://img.shields.io/badge/.NET%206+-black%20.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)|[![](https://img.shields.io/nuget/v/Cyaim.WebSocketServer.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)[![NuGet](https://img.shields.io/nuget/dt/Cyaim.WebSocketServer.svg)](https://www.nuget.org/packages/Cyaim.WebSocketServer)|[![](https://github.com/Cyaim/WebSocketServer/workflows/.NET%20Core/badge.svg)](https://github.com/Cyaim/WebSocketServer)|[![Code size](https://img.shields.io/github/languages/code-size/Cyaim/WebSocketServer?logo=github&logoColor=white)](https://github.com/Cyaim/WebSocketServer)|[![License](https://img.shields.io/github/license/Cyaim/WebSocketServer?logo=open-source-initiative&logoColor=green)](https://github.com/Cyaim/WebSocketServer/blob/master/LICENSE)[![LICENSE](https://img.shields.io/badge/license-Anti%20996-blue.svg)](https://github.com/996icu/996.ICU/blob/master/LICENSE)
 
-> WebSocketServer is lightweight and high performance WebSocket library.support route, full duplex communication.
+> WebSocketServer is lightweight and high performance WebSocket library.Support route, full duplex communication.
 
 # QuickStart
 
