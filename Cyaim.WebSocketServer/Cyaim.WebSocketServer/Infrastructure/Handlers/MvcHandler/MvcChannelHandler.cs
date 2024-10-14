@@ -682,6 +682,24 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             }
                             else
                             {
+                                // 全小写
+                                hasVal = requestBody.TryGetPropertyValue(item.Name.ToLowerInvariant(), out JProp);
+                                if (hasVal)
+                                {
+                                    parmVal = item.ParameterType.ConvertTo(JProp);
+                                    goto GetPropertyTo;
+                                }
+                                else
+                                {
+                                    // 全大写
+                                    hasVal = requestBody.TryGetPropertyValue(item.Name.ToUpperInvariant(), out JProp);
+                                    if (hasVal)
+                                    {
+                                        parmVal = item.ParameterType.ConvertTo(JProp);
+                                        goto GetPropertyTo;
+                                    }
+                                }
+
                                 continue;
                             }
                         }
@@ -690,7 +708,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             // ConvertTo 抛出 类型转换失败
                             logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, $"{requestPath}.{item.Name}" + I18nText.MvcForwardSendData_RequestBodyParameterFormatError + ex.Message + Environment.NewLine + ex.StackTrace));
                         }
-                        args[i] = parmVal;
+                    GetPropertyTo: args[i] = parmVal;
                     }
                     //invokeResult = method.Invoke(inst, methodParm);
 
@@ -751,7 +769,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     dynamic invokeResultTask = invokeResult;
                     //await invokeResultTask;
-                    await Task.WhenAll(invokeResultTask, appLifetime.ApplicationStopping);
+                    await Task.WhenAll(invokeResultTask);
 
                     invokeResult = invokeResultTask.Result;
                 }
