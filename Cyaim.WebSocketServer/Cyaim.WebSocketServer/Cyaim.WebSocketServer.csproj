@@ -11,10 +11,9 @@
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
 		<RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
 		<Copyright>Copyright © Cyaim Studio</Copyright>
-		<Version>1.7.3</Version>
+		<Version>1.7.4</Version>
 		<PackageReleaseNotes>
-			feat: Request to add 3 quick operation methods to the processing pipeline.
-			fix: Resolve the issue of i18n finding JSON file errors.
+			fix: serious error.
 		</PackageReleaseNotes>
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
 		<Description>
