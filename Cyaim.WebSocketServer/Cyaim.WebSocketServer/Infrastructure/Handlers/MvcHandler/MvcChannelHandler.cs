@@ -663,53 +663,69 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 }
                 else
                 {
+                    IDictionary<string, JsonNode> requestBodyDict = requestBody;
                     // 有参方法
                     //object[] args = new object[methodParam.Length];
                     args = new object[methodParam.LongLength];
-                    for (int i = 0; i < methodParam.Length; i++)
+                    if (methodParam.Length == 1)
                     {
-                        ParameterInfo item = methodParam[i];
-
-                        // 检测方法中的参数是否是C#定义的基本类型
-                        object parmVal = null;
-                        try
+                        ParameterInfo item = methodParam[0];
+                        PropertyInfo[] typeProp = item.ParameterType.GetProperties();
+                        object typePropInst = Activator.CreateInstance(item.ParameterType);
+                        foreach (var propInfo in typeProp)
                         {
                             // 按参数名提取JsonNode
-                            bool hasVal = requestBody.TryGetPropertyValue(item.Name, out JsonNode JProp);
+                            bool hasVal = requestBody.TryGetPropertyValue(propInfo.Name, out JsonNode jProp);
                             if (hasVal)
                             {
-                                parmVal = item.ParameterType.ConvertTo(JProp);
+                                propInfo.SetValue(typePropInst, propInfo.PropertyType.ConvertTo(jProp));
                             }
                             else
                             {
-                                // 全小写
-                                hasVal = requestBody.TryGetPropertyValue(item.Name.ToLowerInvariant(), out JProp);
+                                jProp = requestBodyDict.FirstOrDefault(x => x.Key.Equals(propInfo.Name, StringComparison.OrdinalIgnoreCase)).Value;
+
+                                if (jProp == null) continue;
+
+                                propInfo.SetValue(typePropInst, propInfo.PropertyType.ConvertTo(jProp));
+                            }
+                        }
+                        args[0] = typePropInst;
+
+                    }
+                    else
+                    {
+                        for (int i = 0; i < methodParam.Length; i++)
+                        {
+                            ParameterInfo item = methodParam[i];
+
+                            // 检测方法中的参数是否是C#定义的基本类型
+                            object parmVal = null;
+                            try
+                            {
+                                // 按参数名提取JsonNode
+                                bool hasVal = requestBody.TryGetPropertyValue(item.Name, out JsonNode jProp);
                                 if (hasVal)
                                 {
-                                    parmVal = item.ParameterType.ConvertTo(JProp);
-                                    goto GetPropertyTo;
+                                    parmVal = item.ParameterType.ConvertTo(jProp);
                                 }
                                 else
                                 {
-                                    // 全大写
-                                    hasVal = requestBody.TryGetPropertyValue(item.Name.ToUpperInvariant(), out JProp);
-                                    if (hasVal)
-                                    {
-                                        parmVal = item.ParameterType.ConvertTo(JProp);
-                                        goto GetPropertyTo;
-                                    }
-                                }
+                                    jProp = requestBodyDict.FirstOrDefault(x => x.Key.Equals(item.Name, StringComparison.OrdinalIgnoreCase)).Value;
 
-                                continue;
+                                    if (jProp == null) continue;
+
+                                    parmVal = item.ParameterType.ConvertTo(jProp);
+                                }
                             }
+                            catch (FormatException ex)
+                            {
+                                // ConvertTo 抛出 类型转换失败
+                                logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, $"{requestPath}.{item.Name}" + I18nText.MvcForwardSendData_RequestBodyParameterFormatError + ex.Message + Environment.NewLine + ex.StackTrace));
+                            }
+                            args[i] = parmVal;
                         }
-                        catch (FormatException ex)
-                        {
-                            // ConvertTo 抛出 类型转换失败
-                            logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, $"{requestPath}.{item.Name}" + I18nText.MvcForwardSendData_RequestBodyParameterFormatError + ex.Message + Environment.NewLine + ex.StackTrace));
-                        }
-                    GetPropertyTo: args[i] = parmVal;
                     }
+
                     //invokeResult = method.Invoke(inst, methodParm);
 
                     #region 套娃
