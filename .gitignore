@@ -47,3 +47,4 @@
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example.Wpf/bin/Debug/net8.0-windows
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example.Wpf/obj
 *.user
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.DebugUI/bin
