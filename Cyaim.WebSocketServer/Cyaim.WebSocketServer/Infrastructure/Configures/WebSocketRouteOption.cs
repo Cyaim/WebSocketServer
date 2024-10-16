@@ -164,7 +164,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         public event DisconnectedHandler DisconnectedEvent;
 
         /// <summary>
-        /// DisConnectedEvent entry
+        /// Disconnected Event entry
         /// </summary>
         /// <param name="context"></param>
         /// <param name="webSocketOptions"></param>
@@ -178,6 +178,43 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
                 return DisconnectedEvent(context, webSocketOptions, channel, logger);
             }
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Call when an exception occurs during forwarding to the target
+        /// </summary>
+        /// <param name="exception">Abnormalities occurring internally</param>
+        /// <param name="exceptionResponse">Abnormal response, if there is no need to respond to client information, pass null</param>
+        /// <param name="context"></param>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="channel">Channel of occurrence</param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
+        public delegate Task<Handlers.MvcHandler.MvcResponseScheme> ExceptionHandler(Exception exception, Handlers.MvcHandler.MvcRequestScheme request, Handlers.MvcHandler.MvcResponseScheme exceptionResponse, HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger);
+
+        /// <summary>
+        /// Call when an exception occurs during forwarding to the target
+        /// </summary>
+        public event ExceptionHandler ExceptionEvent;
+
+        /// <summary>
+        /// Target exception occurred entry
+        /// </summary>
+        /// <param name="exception">Target exception occurred</param>
+        /// <param name="request">Request Body</param>
+        /// <param name="exceptionResponse">Abnormal response to client content</param>
+        /// <param name="context">Abnormal HttpContext</param>
+        /// <param name="webSocketOptions"></param>
+        /// <param name="channel">Channel with abnormal occurrence</param>
+        /// <param name="logger"></param>
+        /// <returns></returns>
+        public virtual Task<Handlers.MvcHandler.MvcResponseScheme> OnException(Exception exception, Handlers.MvcHandler.MvcRequestScheme request, Handlers.MvcHandler.MvcResponseScheme exceptionResponse, HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        {
+            if (ExceptionEvent != null)
+            {
+                return ExceptionEvent(exception, request, exceptionResponse, context, webSocketOptions, channel, logger);
+            }
+            return Task.FromResult(exceptionResponse);
         }
 
         #endregion
