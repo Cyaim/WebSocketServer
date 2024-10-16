@@ -797,7 +797,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     dynamic invokeResultTask = invokeResult;
                     //await invokeResultTask;
-                    await Task.WhenAll(invokeResultTask);
+                    await Task.WhenAny(invokeResultTask, Task.Delay(Timeout.Infinite, appLifetime.ApplicationStopping));
 
                     invokeResult = invokeResultTask.Result;
                 }
