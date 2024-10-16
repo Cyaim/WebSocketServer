@@ -822,7 +822,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                 logger.LogInformation(resp.Msg);
 
-                if (webSocketOptions.IsDevelopment) resp = null;
+                if (!webSocketOptions.IsDevelopment) resp = null;
 
                 return resp;
             }
