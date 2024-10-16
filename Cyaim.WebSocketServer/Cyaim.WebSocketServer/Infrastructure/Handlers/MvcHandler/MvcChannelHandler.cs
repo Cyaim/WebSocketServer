@@ -670,36 +670,37 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     // 如果目标方法只有1个参数并且是对象或者接口
                     if (methodParam.Length == 1 && (methodParam[0].ParameterType.IsClass || methodParam[0].ParameterType.IsInterface))
                     {
-                        ParameterInfo item = methodParam[0];
+                        ParameterInfo targetBindParam = methodParam[0];
                         // 先是直接按形参参数名提取，从Json提取不到则进行参数展开
-                        bool hasVal = requestBody.TryGetPropertyValue(item.Name, out JsonNode jProp);
+                        bool hasVal = requestBody.TryGetPropertyValue(targetBindParam.Name, out JsonNode jProp);
                         if (hasVal)
                         {
-                            args[0] = item.ParameterType.ConvertTo(jProp);
+                            args[0] = targetBindParam.ParameterType.ConvertTo(jProp);
                         }
                         else
                         {
-                            PropertyInfo[] typeProp = item.ParameterType.GetProperties();
+                            PropertyInfo[] targetProp = targetBindParam.ParameterType.GetProperties();
 
-                            object typePropInst = Activator.CreateInstance(item.ParameterType);
-                            foreach (var propInfo in typeProp)
+                            object targetPropInst = Activator.CreateInstance(targetBindParam.ParameterType);
+                            foreach (var propInfo in targetProp)
                             {
                                 // 按参数名提取JsonNode
                                 hasVal = requestBody.TryGetPropertyValue(propInfo.Name, out jProp);
                                 if (hasVal)
                                 {
-                                    propInfo.SetValue(typePropInst, propInfo.PropertyType.ConvertTo(jProp));
+                                    propInfo.SetValue(targetPropInst, propInfo.PropertyType.ConvertTo(jProp));
                                 }
                                 else
                                 {
+                                    // 忽略大小写再提取一次
                                     jProp = requestBodyDict.FirstOrDefault(x => x.Key.Equals(propInfo.Name, StringComparison.OrdinalIgnoreCase)).Value;
 
                                     if (jProp == null) continue;
 
-                                    propInfo.SetValue(typePropInst, propInfo.PropertyType.ConvertTo(jProp));
+                                    propInfo.SetValue(targetPropInst, propInfo.PropertyType.ConvertTo(jProp));
                                 }
                             }
-                            args[0] = typePropInst;
+                            args[0] = targetPropInst;
                         }
 
                     }
