@@ -11,10 +11,9 @@
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
 		<RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
 		<Copyright>Copyright © Cyaim Studio</Copyright>
-		<Version>1.7.5</Version>
+		<Version>1.7.7</Version>
 		<PackageReleaseNotes>
-			feat: upgrade package.
-			fix: serious error.
+			perf: Exception information will be displayed internally.
 		</PackageReleaseNotes>
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
 		<Description>
