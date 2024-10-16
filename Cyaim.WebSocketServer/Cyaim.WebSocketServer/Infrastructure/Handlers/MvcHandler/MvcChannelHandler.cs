@@ -667,29 +667,40 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     // 有参方法
                     //object[] args = new object[methodParam.Length];
                     args = new object[methodParam.LongLength];
-                    if (methodParam.Length == 1)
+                    // 如果目标方法只有1个参数并且是对象或者接口
+                    if (methodParam.Length == 1 && (methodParam[0].ParameterType.IsClass || methodParam[0].ParameterType.IsInterface))
                     {
                         ParameterInfo item = methodParam[0];
-                        PropertyInfo[] typeProp = item.ParameterType.GetProperties();
-                        object typePropInst = Activator.CreateInstance(item.ParameterType);
-                        foreach (var propInfo in typeProp)
+                        // 先是直接按形参参数名提取，从Json提取不到则进行参数展开
+                        bool hasVal = requestBody.TryGetPropertyValue(item.Name, out JsonNode jProp);
+                        if (hasVal)
                         {
-                            // 按参数名提取JsonNode
-                            bool hasVal = requestBody.TryGetPropertyValue(propInfo.Name, out JsonNode jProp);
-                            if (hasVal)
-                            {
-                                propInfo.SetValue(typePropInst, propInfo.PropertyType.ConvertTo(jProp));
-                            }
-                            else
-                            {
-                                jProp = requestBodyDict.FirstOrDefault(x => x.Key.Equals(propInfo.Name, StringComparison.OrdinalIgnoreCase)).Value;
-
-                                if (jProp == null) continue;
-
-                                propInfo.SetValue(typePropInst, propInfo.PropertyType.ConvertTo(jProp));
-                            }
+                            args[0] = item.ParameterType.ConvertTo(jProp);
                         }
-                        args[0] = typePropInst;
+                        else
+                        {
+                            PropertyInfo[] typeProp = item.ParameterType.GetProperties();
+
+                            object typePropInst = Activator.CreateInstance(item.ParameterType);
+                            foreach (var propInfo in typeProp)
+                            {
+                                // 按参数名提取JsonNode
+                                hasVal = requestBody.TryGetPropertyValue(propInfo.Name, out jProp);
+                                if (hasVal)
+                                {
+                                    propInfo.SetValue(typePropInst, propInfo.PropertyType.ConvertTo(jProp));
+                                }
+                                else
+                                {
+                                    jProp = requestBodyDict.FirstOrDefault(x => x.Key.Equals(propInfo.Name, StringComparison.OrdinalIgnoreCase)).Value;
+
+                                    if (jProp == null) continue;
+
+                                    propInfo.SetValue(typePropInst, propInfo.PropertyType.ConvertTo(jProp));
+                                }
+                            }
+                            args[0] = typePropInst;
+                        }
 
                     }
                     else
