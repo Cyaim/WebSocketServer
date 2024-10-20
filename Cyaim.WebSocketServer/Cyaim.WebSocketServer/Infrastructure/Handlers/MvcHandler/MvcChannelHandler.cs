@@ -1,6 +1,7 @@
 ﻿using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
+using Microsoft.CSharp.RuntimeBinder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -801,7 +802,19 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     //await invokeResultTask;
                     await Task.WhenAny(invokeResultTask, Task.Delay(Timeout.Infinite, appLifetime.ApplicationStopping));
 
-                    invokeResult = invokeResultTask.Result;
+                    if (invokeResultTask.Exception != null)
+                    {
+                        throw invokeResultTask.Exception;
+                    }
+
+                    try
+                    {
+                        invokeResult = invokeResultTask.Result;
+                    }
+                    catch (RuntimeBinderException)
+                    {
+                        invokeResult = null;
+                    }
                 }
 
                 #endregion

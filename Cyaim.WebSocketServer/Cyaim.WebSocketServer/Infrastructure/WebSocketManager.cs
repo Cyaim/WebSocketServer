@@ -80,7 +80,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
 
         static WebSocketManager()
         {
-            // start listen channel
+            // Start listen channel
             _ = ListenSendChannel();
         }
 
@@ -197,7 +197,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     await Task.WhenAll(sendTasks1);
                 }
                 catch (Exception)
-                {}
+                { }
             }
         }
 
@@ -397,6 +397,9 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 Sockets = sockets.Where(x => x != null && x.State == WebSocketState.Open).Select(x => KeyValuePair.Create(x, (messageType, cancellationToken))).ToList(),
                 SendBufferSize = sendBufferSize,
             };
+            if (sendItem.Sockets.Count < 1)
+                throw new ArgumentNullException(nameof(sendItem.Sockets));
+
             await sendChannel.Writer.WriteAsync(sendItem, cancellationToken).ConfigureAwait(false);
 
             await sendItem.SendCompletedSemaphore.WaitAsync(timeout ?? Timeout.InfiniteTimeSpan, cancellationToken);
@@ -517,4 +520,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
             await SendAsync(JsonSerializer.Serialize(data, options), messageType, cancellationToken ?? CancellationToken.None, timeout, encoding, sendBufferSize, socket);
         }
     }
+
+
+
 }

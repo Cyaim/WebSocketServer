@@ -11,8 +11,9 @@
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
 		<RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
 		<Copyright>Copyright © Cyaim Studio</Copyright>
-		<Version>1.7.7</Version>
+		<Version>1.7.8</Version>
 		<PackageReleaseNotes>
+			fix: When fixing a Task type with no return value as the target endpoint, an exception will be thrown.
 			perf: Exception information will be displayed internally.
 		</PackageReleaseNotes>
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
