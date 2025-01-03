@@ -11,7 +11,9 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Cyaim.WebSocketServer.Debug
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TestAOT", "TestAOT\TestAOT.csproj", "{9866B605-224B-4D0B-9199-1303E5D8ED93}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cyaim.WebSocketServer.Example.Wpf", "Cyaim.WebSocketServer.Example.Wpf\Cyaim.WebSocketServer.Example.Wpf.csproj", "{CEB68441-FAF4-48F1-99AF-CBA188FB26BF}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Cyaim.WebSocketServer.Example.Wpf", "Cyaim.WebSocketServer.Example.Wpf\Cyaim.WebSocketServer.Example.Wpf.csproj", "{CEB68441-FAF4-48F1-99AF-CBA188FB26BF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cyaim.WebSocketServer.Client", "Cyaim.WebSocketServer.Client\Cyaim.WebSocketServer.Client.csproj", "{734514D9-35AF-48F1-9EC1-5405E7323274}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -39,6 +41,10 @@ Global
 		{CEB68441-FAF4-48F1-99AF-CBA188FB26BF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CEB68441-FAF4-48F1-99AF-CBA188FB26BF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CEB68441-FAF4-48F1-99AF-CBA188FB26BF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{734514D9-35AF-48F1-9EC1-5405E7323274}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{734514D9-35AF-48F1-9EC1-5405E7323274}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{734514D9-35AF-48F1-9EC1-5405E7323274}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{734514D9-35AF-48F1-9EC1-5405E7323274}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
