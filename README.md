@@ -179,3 +179,25 @@ Request body will write invoke method parameter.
 	}]
 }
 ```
+
+
+
+
+
+> 集群
+首先需要各个ws服务器之间可以通信，可以使用redis、rabbitmq等中间件来实现
+然后在各个ws服务器上配置相同的频道名称
+```C#
+services.ConfigureWebSocketRoute(x =>
+{
+	//Define channels
+	x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
+	{
+		{ "/ws",new MvcChannelHandler(4*1024).ConnectionEntry}
+	};
+	x.ApplicationServiceCollection = services;
+	//Enable cluster
+	x.EnableCluster = true;
+	//Use redis as message broker
+	x.ClusterProvider = new RedisClusterProvider(
+```

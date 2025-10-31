@@ -11,9 +11,20 @@
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer/obj
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer/Properties
 
+
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer.Client/bin
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer.Client/obj
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer.Client/Properties
+
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.RabbitMQ/bin
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.RabbitMQ/obj
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.RabbitMQ/Properties
+
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.StackExchangeRedis/bin
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.StackExchangeRedis/obj
+/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.StackExchangeRedis/Properties
+
+
 
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer.DebugUI/bin
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer.DebugUI/obj

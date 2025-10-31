@@ -995,105 +995,69 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         #region Invoke pipeline
 
         /// <summary>
-        /// Call request forwarding pipeline
+        /// 通用的管道调用入口：统一排序与异常记录
         /// </summary>
-        /// <param name="requestStage"></param>
-        /// <param name="context"></param>
-        /// <param name="webSocket"></param>
-        /// <param name="result"></param>
-        /// <param name="buffer"></param>
-        /// <param name="request"></param>
-        /// <param name="requestBody"></param>
+        /// <param name="requestStage">处理阶段</param>
+        /// <param name="invoker">对每个管道项的具体调用逻辑</param>
         /// <returns></returns>
-        private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer, MvcRequestScheme request, JsonObject requestBody)
+        private async Task<ConcurrentQueue<PipelineItem>> InvokePipelineInternal(RequestPipelineStage requestStage, Func<PipelineItem, Task> invoker)
         {
-            ConcurrentQueue<PipelineItem> inovkes;
-            RequestPipeline.TryGetValue(requestStage, out inovkes);
-            var order = inovkes?.OrderBy(x => x.Order);
-            if (order == null)
+            if (!RequestPipeline.TryGetValue(requestStage, out ConcurrentQueue<PipelineItem> invokes) || invokes == null)
             {
                 return await Task.FromResult<ConcurrentQueue<PipelineItem>>(null);
             }
-            foreach (PipelineItem x in order)
+
+            var ordered = invokes.OrderBy(x => x.Order);
+            foreach (PipelineItem item in ordered)
             {
                 try
                 {
-                    var p = (x.Item as RequestForwardPipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestForwardPipeline);
-                    await p?.Invoke?.Invoke(context, webSocket, result, buffer, request, requestBody);
+                    await invoker(item);
                 }
                 catch (Exception ex)
                 {
-                    x.Exception = ex;
-                    x.ExceptionItem = x;
+                    item.Exception = ex;
+                    item.ExceptionItem = item;
                 }
             }
-            return inovkes;
+
+            return invokes;
         }
 
         /// <summary>
-        /// Call the request receiving pipeline
+        /// 调用请求转发阶段的管道
         /// </summary>
-        /// <param name="requestStage"></param>
-        /// <param name="context"></param>
-        /// <param name="webSocket"></param>
-        /// <param name="result"></param>
-        /// <param name="buffer"></param>
-        /// <returns></returns>
-        private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
+        private Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer, MvcRequestScheme request, JsonObject requestBody)
         {
-            ConcurrentQueue<PipelineItem> inovkes;
-            RequestPipeline.TryGetValue(requestStage, out inovkes);
-            var order = inovkes?.OrderBy(x => x.Order);
-            if (order == null)
+            return InvokePipelineInternal(requestStage, async x =>
             {
-                return await Task.FromResult<ConcurrentQueue<PipelineItem>>(null);
-            }
-            foreach (PipelineItem x in order)
-            {
-                try
-                {
-                    var p = (x.Item as RequestReceivePipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestReceivePipeline);
-                    await p?.Invoke?.Invoke(context, webSocket, result, buffer);
-                }
-                catch (Exception ex)
-                {
-                    x.Exception = ex;
-                    x.ExceptionItem = x;
-                }
-            }
-            return inovkes;
+                var p = (x.Item as RequestForwardPipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestForwardPipeline);
+                await p?.Invoke?.Invoke(context, webSocket, result, buffer, request, requestBody);
+            });
         }
 
         /// <summary>
-        /// Call the basic request pipeline
+        /// 调用请求接收阶段的管道
         /// </summary>
-        /// <param name="requestStage"></param>
-        /// <param name="context"></param>
-        /// <param name="webSocketOptions"></param>
-        /// <returns></returns>
-        private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocketRouteOption webSocketOptions)
+        private Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
         {
-            ConcurrentQueue<PipelineItem> inovkes;
-            RequestPipeline.TryGetValue(requestStage, out inovkes);
-            var order = inovkes?.OrderBy(x => x.Order);
-            if (order == null)
+            return InvokePipelineInternal(requestStage, async x =>
             {
-                return await Task.FromResult<ConcurrentQueue<PipelineItem>>(null);
-            }
-            foreach (PipelineItem x in order)
+                var p = (x.Item as RequestReceivePipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestReceivePipeline);
+                await p?.Invoke?.Invoke(context, webSocket, result, buffer);
+            });
+        }
+
+        /// <summary>
+        /// 调用基础阶段的管道
+        /// </summary>
+        private Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocketRouteOption webSocketOptions)
+        {
+            return InvokePipelineInternal(requestStage, async x =>
             {
-                try
-                {
-                    var p = x.Item ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestPipeline);
-                    await p?.Invoke?.Invoke(context, webSocketOptions);
-                }
-                catch (Exception ex)
-                {
-                    x.Exception = ex;
-                    x.ExceptionItem = x;
-                }
-            }
-            return inovkes;
+                var p = x.Item ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestPipeline);
+                await p?.Invoke?.Invoke(context, webSocketOptions);
+            });
         }
 
 
