@@ -1,0 +1,93 @@
+{
+	"$schema": "https://inlang.com/schema/inlang-message-format",
+	"dashboard": {
+		"title": "WebSocketServer 仪表板",
+		"nav": {
+			"overview": "概览",
+			"nodes": "节点",
+			"clients": "客户端",
+			"bandwidth": "带宽",
+			"dataflow": "数据流",
+			"send": "发送消息"
+		},
+		"overview": {
+			"title": "集群概览",
+			"totalNodes": "总节点数",
+			"connectedNodes": "已连接节点数",
+			"totalConnections": "总连接数",
+			"localConnections": "本地连接数",
+			"currentNode": "当前节点",
+			"isLeader": "是否为领导者",
+			"yes": "是",
+			"no": "否",
+			"nodes": "节点",
+			"nodeId": "节点 ID",
+			"state": "状态",
+			"connections": "连接数",
+			"term": "任期",
+			"connected": "已连接",
+			"leader": "领导者"
+		},
+		"clients": {
+			"title": "客户端连接",
+			"total": "总计",
+			"connectionId": "连接 ID",
+			"nodeId": "节点 ID",
+			"state": "状态",
+			"bytesSent": "发送字节数",
+			"bytesReceived": "接收字节数",
+			"messagesSent": "发送消息数",
+			"messagesReceived": "接收消息数",
+			"noClients": "没有客户端连接",
+			"loading": "加载客户端中..."
+		},
+		"bandwidth": {
+			"title": "带宽统计",
+			"totalSent": "总发送",
+			"totalReceived": "总接收",
+			"sentPerSec": "发送/秒",
+			"receivedPerSec": "接收/秒",
+			"messagesSent": "发送消息数",
+			"messagesReceived": "接收消息数",
+			"msgSentPerSec": "消息发送/秒",
+			"msgReceivedPerSec": "消息接收/秒",
+			"overTime": "带宽趋势"
+		},
+		"dataflow": {
+			"title": "数据流",
+			"autoScroll": "自动滚动",
+			"clear": "清空",
+			"inbound": "入站",
+			"outbound": "出站",
+			"text": "文本",
+			"binary": "二进制",
+			"connection": "连接",
+			"size": "大小",
+			"bytes": "字节"
+		},
+		"send": {
+			"title": "发送消息",
+			"connectionId": "连接 ID",
+			"connectionIdPlaceholder": "输入连接 ID 或从列表中选择",
+			"messageType": "消息类型",
+			"content": "消息内容",
+			"contentPlaceholder": "输入消息内容...",
+			"send": "发送消息",
+			"sending": "发送中...",
+			"success": "消息发送成功",
+			"error": "错误",
+			"availableConnections": "可用连接",
+			"noConnections": "没有客户端连接",
+			"connectionIdRequired": "连接 ID 是必需的",
+			"contentRequired": "消息内容是必需的"
+		},
+		"common": {
+			"loading": "加载中...",
+			"error": "错误",
+			"refresh": "刷新",
+			"close": "关闭",
+			"save": "保存",
+			"cancel": "取消"
+		}
+	}
+}

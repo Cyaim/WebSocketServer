@@ -1,0 +1,114 @@
+[
+  {
+    "ContainingType": "Cyaim.WebSocketServer.Dashboard.Controllers.DashboardApiController",
+    "Method": "GetBandwidth",
+    "RelativePath": "api/dashboard/bandwidth",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": [
+      {
+        "Type": "Cyaim.WebSocketServer.Dashboard.Models.ApiResponse\u00601[[Cyaim.WebSocketServer.Dashboard.Models.BandwidthStatistics, Cyaim.WebSocketServer.Dashboard, Version=1.7.8.0, Culture=neutral, PublicKeyToken=null]]",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "Cyaim.WebSocketServer.Dashboard.Controllers.DashboardApiController",
+    "Method": "GetClients",
+    "RelativePath": "api/dashboard/clients",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "nodeId",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": [
+      {
+        "Type": "Cyaim.WebSocketServer.Dashboard.Models.ApiResponse\u00601[[System.Collections.Generic.List\u00601[[Cyaim.WebSocketServer.Dashboard.Models.ClientConnectionInfo, Cyaim.WebSocketServer.Dashboard, Version=1.7.8.0, Culture=neutral, PublicKeyToken=null]], System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "Cyaim.WebSocketServer.Dashboard.Controllers.DashboardApiController",
+    "Method": "GetNodes",
+    "RelativePath": "api/dashboard/cluster/nodes",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": [
+      {
+        "Type": "Cyaim.WebSocketServer.Dashboard.Models.ApiResponse\u00601[[System.Collections.Generic.List\u00601[[Cyaim.WebSocketServer.Dashboard.Models.NodeStatusInfo, Cyaim.WebSocketServer.Dashboard, Version=1.7.8.0, Culture=neutral, PublicKeyToken=null]], System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "Cyaim.WebSocketServer.Dashboard.Controllers.DashboardApiController",
+    "Method": "GetClusterOverview",
+    "RelativePath": "api/dashboard/cluster/overview",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": [
+      {
+        "Type": "Cyaim.WebSocketServer.Dashboard.Models.ApiResponse\u00601[[Cyaim.WebSocketServer.Dashboard.Models.ClusterOverview, Cyaim.WebSocketServer.Dashboard, Version=1.7.8.0, Culture=neutral, PublicKeyToken=null]]",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "Cyaim.WebSocketServer.Dashboard.Controllers.DashboardApiController",
+    "Method": "SendMessage",
+    "RelativePath": "api/dashboard/send",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "Cyaim.WebSocketServer.Dashboard.Models.SendMessageRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": [
+      {
+        "Type": "Cyaim.WebSocketServer.Dashboard.Models.ApiResponse\u00601[[System.Boolean, System.Private.CoreLib, Version=8.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  }
+]

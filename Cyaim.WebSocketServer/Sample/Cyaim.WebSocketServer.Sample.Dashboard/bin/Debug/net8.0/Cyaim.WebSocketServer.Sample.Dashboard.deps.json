@@ -1,0 +1,56 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "Cyaim.WebSocketServer.Sample.Dashboard/1.0.0": {
+        "dependencies": {
+          "Cyaim.WebSocketServer": "1.7.8",
+          "Cyaim.WebSocketServer.Dashboard": "1.7.8"
+        },
+        "runtime": {
+          "Cyaim.WebSocketServer.Sample.Dashboard.dll": {}
+        }
+      },
+      "Cyaim.WebSocketServer/1.7.8": {
+        "runtime": {
+          "Cyaim.WebSocketServer.dll": {
+            "assemblyVersion": "1.7.8.0",
+            "fileVersion": "1.7.8.0"
+          }
+        }
+      },
+      "Cyaim.WebSocketServer.Dashboard/1.7.8": {
+        "dependencies": {
+          "Cyaim.WebSocketServer": "1.7.8"
+        },
+        "runtime": {
+          "Cyaim.WebSocketServer.Dashboard.dll": {
+            "assemblyVersion": "1.7.8.0",
+            "fileVersion": "1.7.8.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Cyaim.WebSocketServer.Sample.Dashboard/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Cyaim.WebSocketServer/1.7.8": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Cyaim.WebSocketServer.Dashboard/1.7.8": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

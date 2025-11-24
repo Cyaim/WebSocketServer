@@ -178,7 +178,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
             value.Enqueue(new PipelineItem()
             {
                 Item = invoke,
-                Order = order.Value,
+                Order = order ?? 0,
                 Stage = stage
             });
 

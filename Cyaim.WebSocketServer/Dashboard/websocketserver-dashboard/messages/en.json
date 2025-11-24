@@ -1,0 +1,93 @@
+{
+	"$schema": "https://inlang.com/schema/inlang-message-format",
+	"dashboard": {
+		"title": "WebSocketServer Dashboard",
+		"nav": {
+			"overview": "Overview",
+			"nodes": "Nodes",
+			"clients": "Clients",
+			"bandwidth": "Bandwidth",
+			"dataflow": "Data Flow",
+			"send": "Send Message"
+		},
+		"overview": {
+			"title": "Cluster Overview",
+			"totalNodes": "Total Nodes",
+			"connectedNodes": "Connected Nodes",
+			"totalConnections": "Total Connections",
+			"localConnections": "Local Connections",
+			"currentNode": "Current Node",
+			"isLeader": "Is Leader",
+			"yes": "Yes",
+			"no": "No",
+			"nodes": "Nodes",
+			"nodeId": "Node ID",
+			"state": "State",
+			"connections": "Connections",
+			"term": "Term",
+			"connected": "Connected",
+			"leader": "Leader"
+		},
+		"clients": {
+			"title": "Client Connections",
+			"total": "Total",
+			"connectionId": "Connection ID",
+			"nodeId": "Node ID",
+			"state": "State",
+			"bytesSent": "Bytes Sent",
+			"bytesReceived": "Bytes Received",
+			"messagesSent": "Messages Sent",
+			"messagesReceived": "Messages Received",
+			"noClients": "No clients connected",
+			"loading": "Loading clients..."
+		},
+		"bandwidth": {
+			"title": "Bandwidth Statistics",
+			"totalSent": "Total Sent",
+			"totalReceived": "Total Received",
+			"sentPerSec": "Sent/Sec",
+			"receivedPerSec": "Received/Sec",
+			"messagesSent": "Messages Sent",
+			"messagesReceived": "Messages Received",
+			"msgSentPerSec": "Msg Sent/Sec",
+			"msgReceivedPerSec": "Msg Received/Sec",
+			"overTime": "Bandwidth Over Time"
+		},
+		"dataflow": {
+			"title": "Data Flow",
+			"autoScroll": "Auto-scroll",
+			"clear": "Clear",
+			"inbound": "Inbound",
+			"outbound": "Outbound",
+			"text": "Text",
+			"binary": "Binary",
+			"connection": "Connection",
+			"size": "Size",
+			"bytes": "bytes"
+		},
+		"send": {
+			"title": "Send Message",
+			"connectionId": "Connection ID",
+			"connectionIdPlaceholder": "Enter connection ID or select from list",
+			"messageType": "Message Type",
+			"content": "Message Content",
+			"contentPlaceholder": "Enter message content...",
+			"send": "Send Message",
+			"sending": "Sending...",
+			"success": "Message sent successfully",
+			"error": "Error",
+			"availableConnections": "Available Connections",
+			"noConnections": "No clients connected",
+			"connectionIdRequired": "Connection ID is required",
+			"contentRequired": "Content is required"
+		},
+		"common": {
+			"loading": "Loading...",
+			"error": "Error",
+			"refresh": "Refresh",
+			"close": "Close",
+			"save": "Save",
+			"cancel": "Cancel"
+		}
+	}
+}

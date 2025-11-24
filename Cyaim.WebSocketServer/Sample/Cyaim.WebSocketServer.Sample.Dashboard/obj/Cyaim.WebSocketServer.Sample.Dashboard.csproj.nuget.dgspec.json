@@ -1,0 +1,522 @@
+{
+  "format": 1,
+  "restore": {
+    "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Sample.Dashboard\\Cyaim.WebSocketServer.Sample.Dashboard.csproj": {}
+  },
+  "projects": {
+    "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+      "version": "1.7.8",
+      "restore": {
+        "projectUniqueName": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj",
+        "projectName": "Cyaim.WebSocketServer",
+        "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj",
+        "packagesPath": "C:\\Users\\DELL\\.nuget\\packages\\",
+        "outputPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\obj\\",
+        "projectStyle": "PackageReference",
+        "crossTargeting": true,
+        "fallbackFolders": [
+          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        ],
+        "configFilePaths": [
+          "C:\\Users\\DELL\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "net6.0",
+          "net7.0",
+          "net8.0",
+          "net9.0",
+          "netstandard2.1"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "C:\\Program Files\\dotnet\\library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net6.0": {
+            "targetAlias": "net6.0",
+            "projectReferences": {}
+          },
+          "net7.0": {
+            "targetAlias": "net7.0",
+            "projectReferences": {}
+          },
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          },
+          "net9.0": {
+            "targetAlias": "net9.0",
+            "projectReferences": {}
+          },
+          "netstandard2.1": {
+            "targetAlias": "netstandard2.1",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net6.0": {
+          "targetAlias": "net6.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.AspNetCore.App": {
+              "privateAssets": "none"
+            },
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100\\RuntimeIdentifierGraph.json"
+        },
+        "net7.0": {
+          "targetAlias": "net7.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.AspNetCore.App": {
+              "privateAssets": "none"
+            },
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100\\RuntimeIdentifierGraph.json"
+        },
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.AspNetCore.App": {
+              "privateAssets": "none"
+            },
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100/PortableRuntimeIdentifierGraph.json"
+        },
+        "net9.0": {
+          "targetAlias": "net9.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.AspNetCore.App": {
+              "privateAssets": "none"
+            },
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100/PortableRuntimeIdentifierGraph.json"
+        },
+        "netstandard2.1": {
+          "targetAlias": "netstandard2.1",
+          "dependencies": {
+            "Microsoft.AspNetCore.Hosting.Server.Abstractions": {
+              "target": "Package",
+              "version": "[2.3.0, )"
+            },
+            "Microsoft.AspNetCore.Http.Abstractions": {
+              "target": "Package",
+              "version": "[2.3.0, )"
+            },
+            "Microsoft.CSharp": {
+              "target": "Package",
+              "version": "[4.7.0, )"
+            },
+            "Microsoft.Extensions.DependencyInjection": {
+              "target": "Package",
+              "version": "[9.0.10, )"
+            },
+            "Microsoft.Extensions.DependencyInjection.Abstractions": {
+              "target": "Package",
+              "version": "[9.0.10, )"
+            },
+            "Microsoft.Extensions.Hosting.Abstractions": {
+              "target": "Package",
+              "version": "[9.0.10, )"
+            },
+            "Microsoft.Extensions.Logging.Abstractions": {
+              "target": "Package",
+              "version": "[9.0.10, )"
+            },
+            "System.Text.Json": {
+              "target": "Package",
+              "version": "[9.0.10, )"
+            },
+            "System.Threading.Channels": {
+              "target": "Package",
+              "version": "[9.0.10, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "NETStandard.Library": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100\\RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\Cyaim.WebSocketServer.Dashboard.csproj": {
+      "version": "1.7.8",
+      "restore": {
+        "projectUniqueName": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\Cyaim.WebSocketServer.Dashboard.csproj",
+        "projectName": "Cyaim.WebSocketServer.Dashboard",
+        "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\Cyaim.WebSocketServer.Dashboard.csproj",
+        "packagesPath": "C:\\Users\\DELL\\.nuget\\packages\\",
+        "outputPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\obj\\",
+        "projectStyle": "PackageReference",
+        "crossTargeting": true,
+        "fallbackFolders": [
+          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        ],
+        "configFilePaths": [
+          "C:\\Users\\DELL\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "net6.0",
+          "net7.0",
+          "net8.0",
+          "net9.0",
+          "netstandard2.1"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "C:\\Program Files\\dotnet\\library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net6.0": {
+            "targetAlias": "net6.0",
+            "projectReferences": {
+              "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+                "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
+              }
+            }
+          },
+          "net7.0": {
+            "targetAlias": "net7.0",
+            "projectReferences": {
+              "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+                "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
+              }
+            }
+          },
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {
+              "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+                "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
+              }
+            }
+          },
+          "net9.0": {
+            "targetAlias": "net9.0",
+            "projectReferences": {
+              "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+                "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
+              }
+            }
+          },
+          "netstandard2.1": {
+            "targetAlias": "netstandard2.1",
+            "projectReferences": {
+              "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+                "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net6.0": {
+          "targetAlias": "net6.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.AspNetCore.App": {
+              "privateAssets": "none"
+            },
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100\\RuntimeIdentifierGraph.json"
+        },
+        "net7.0": {
+          "targetAlias": "net7.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.AspNetCore.App": {
+              "privateAssets": "none"
+            },
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100\\RuntimeIdentifierGraph.json"
+        },
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.AspNetCore.App": {
+              "privateAssets": "none"
+            },
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100/PortableRuntimeIdentifierGraph.json"
+        },
+        "net9.0": {
+          "targetAlias": "net9.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.AspNetCore.App": {
+              "privateAssets": "none"
+            },
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100/PortableRuntimeIdentifierGraph.json"
+        },
+        "netstandard2.1": {
+          "targetAlias": "netstandard2.1",
+          "dependencies": {
+            "Microsoft.AspNetCore.Http.Abstractions": {
+              "target": "Package",
+              "version": "[2.3.0, )"
+            },
+            "Microsoft.AspNetCore.Mvc.Core": {
+              "target": "Package",
+              "version": "[2.2.5, )"
+            },
+            "Microsoft.AspNetCore.Routing": {
+              "target": "Package",
+              "version": "[2.2.2, )"
+            },
+            "Microsoft.Extensions.Logging.Abstractions": {
+              "target": "Package",
+              "version": "[9.0.10, )"
+            },
+            "System.Text.Json": {
+              "target": "Package",
+              "version": "[9.0.10, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "NETStandard.Library": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100\\RuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Sample.Dashboard\\Cyaim.WebSocketServer.Sample.Dashboard.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Sample.Dashboard\\Cyaim.WebSocketServer.Sample.Dashboard.csproj",
+        "projectName": "Cyaim.WebSocketServer.Sample.Dashboard",
+        "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Sample.Dashboard\\Cyaim.WebSocketServer.Sample.Dashboard.csproj",
+        "packagesPath": "C:\\Users\\DELL\\.nuget\\packages\\",
+        "outputPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Sample.Dashboard\\obj\\",
+        "projectStyle": "PackageReference",
+        "fallbackFolders": [
+          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        ],
+        "configFilePaths": [
+          "C:\\Users\\DELL\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "C:\\Program Files\\dotnet\\library-packs": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {
+              "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+                "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
+              },
+              "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\Cyaim.WebSocketServer.Dashboard.csproj": {
+                "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\Cyaim.WebSocketServer.Dashboard.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "10.0.100"
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.AspNetCore.App": {
+              "privateAssets": "none"
+            },
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}
