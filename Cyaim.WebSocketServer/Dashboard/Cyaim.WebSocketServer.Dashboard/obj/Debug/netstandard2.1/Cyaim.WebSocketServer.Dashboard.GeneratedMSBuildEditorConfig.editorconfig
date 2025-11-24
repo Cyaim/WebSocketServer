@@ -1,6 +1,6 @@
 is_global = true
 build_property.RootNamespace = Cyaim.WebSocketServer.Dashboard
-build_property.ProjectDir = E:\OneDrive\Work\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\
+build_property.ProjectDir = D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\
 build_property.EnableComHosting = 
 build_property.EnableGeneratedComInterfaceComImportInterop = 
 build_property.CsWinRTUseWindowsUIXamlProjections = false

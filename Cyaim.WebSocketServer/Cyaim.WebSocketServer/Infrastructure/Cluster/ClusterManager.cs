@@ -48,6 +48,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         }
 
         /// <summary>
+        /// Get connection routing table (read-only) / 获取连接路由表（只读）
+        /// </summary>
+        public IReadOnlyDictionary<string, string> ConnectionRoutes => _router.ConnectionRoutes;
+
+        /// <summary>
         /// Set WebSocket connection provider
         /// 设置 WebSocket 连接提供者
         /// </summary>

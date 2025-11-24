@@ -1,10 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "HEqUWnFxA+8=",
+  "dgSpecHash": "Na7yVC2HU7I=",
   "success": true,
-  "projectFilePath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Sample.Dashboard\\Cyaim.WebSocketServer.Sample.Dashboard.csproj",
+  "projectFilePath": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Sample.Dashboard\\Cyaim.WebSocketServer.Sample.Dashboard.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\DELL\\.nuget\\packages\\cyaim.websocketserver\\1.7.8\\cyaim.websocketserver.1.7.8.nupkg.sha512"
+    "C:\\Users\\lbhdr\\.nuget\\packages\\cyaim.websocketserver\\1.7.8\\cyaim.websocketserver.1.7.8.nupkg.sha512"
   ],
   "logs": []
 }

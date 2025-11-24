@@ -103,7 +103,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
         }
 
         /// <summary>
-        /// Get client connections / 获取客户端连接
+        /// Get all client connections from cluster / 获取集群中全部客户端连接
         /// </summary>
         /// <param name="nodeId">Optional node ID filter / 可选的节点 ID 过滤器</param>
         /// <returns>Client connections / 客户端连接</returns>
@@ -113,37 +113,61 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
             try
             {
                 var clients = new List<ClientConnectionInfo>();
+                var clusterManager = GlobalClusterCenter.ClusterManager;
+                var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "unknown";
 
-                // Get local connections / 获取本地连接
-                if (MvcChannelHandler.Clients != null)
+                // Get all connections from cluster routing table / 从集群路由表获取所有连接
+                var allConnections = GetAllClusterConnections();
+
+                foreach (var connectionRoute in allConnections)
                 {
-                    foreach (var kvp in MvcChannelHandler.Clients)
+                    var connectionId = connectionRoute.Key;
+                    var targetNodeId = connectionRoute.Value;
+
+                    // Apply node filter if specified / 如果指定了节点过滤器则应用
+                    if (!string.IsNullOrEmpty(nodeId) && targetNodeId != nodeId)
                     {
-                        var connectionId = kvp.Key;
-                        var webSocket = kvp.Value;
+                        continue;
+                    }
 
-                        // Skip if node filter is specified and doesn't match / 如果指定了节点过滤器且不匹配则跳过
-                        if (!string.IsNullOrEmpty(nodeId))
+                    // Get connection info / 获取连接信息
+                    ClientConnectionInfo clientInfo = null;
+
+                    // If connection is on current node, get detailed info / 如果连接在当前节点，获取详细信息
+                    if (targetNodeId == currentNodeId && MvcChannelHandler.Clients != null)
+                    {
+                        if (MvcChannelHandler.Clients.TryGetValue(connectionId, out var webSocket))
                         {
-                            // In a real implementation, you'd check which node this connection belongs to
-                            // 在实际实现中，您需要检查此连接属于哪个节点
-                            continue;
+                            var stats = _statisticsService.GetConnectionStats(connectionId);
+                            clientInfo = new ClientConnectionInfo
+                            {
+                                ConnectionId = connectionId,
+                                NodeId = targetNodeId,
+                                State = webSocket.State.ToString(),
+                                BytesSent = stats?.BytesSent ?? 0,
+                                BytesReceived = stats?.BytesReceived ?? 0,
+                                MessagesSent = stats?.MessagesSent ?? 0,
+                                MessagesReceived = stats?.MessagesReceived ?? 0
+                            };
                         }
+                    }
 
-                        var stats = _statisticsService.GetConnectionStats(connectionId);
-                        var clientInfo = new ClientConnectionInfo
+                    // If not found locally or on remote node, create basic info / 如果未在本地找到或在远程节点，创建基本信息
+                    if (clientInfo == null)
+                    {
+                        clientInfo = new ClientConnectionInfo
                         {
                             ConnectionId = connectionId,
-                            NodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "unknown",
-                            State = webSocket.State.ToString(),
-                            BytesSent = stats?.BytesSent ?? 0,
-                            BytesReceived = stats?.BytesReceived ?? 0,
-                            MessagesSent = stats?.MessagesSent ?? 0,
-                            MessagesReceived = stats?.MessagesReceived ?? 0
+                            NodeId = targetNodeId,
+                            State = "Unknown", // Remote connections state is unknown / 远程连接状态未知
+                            BytesSent = 0,
+                            BytesReceived = 0,
+                            MessagesSent = 0,
+                            MessagesReceived = 0
                         };
-
-                        clients.Add(clientInfo);
                     }
+
+                    clients.Add(clientInfo);
                 }
 
                 return Ok(new ApiResponse<List<ClientConnectionInfo>>
@@ -191,7 +215,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
         }
 
         /// <summary>
-        /// Send message to connection / 向连接发送消息
+        /// Send text message to connection in cluster / 向集群中的连接发送文本消息
         /// </summary>
         /// <param name="request">Send message request / 发送消息请求</param>
         /// <returns>Send result / 发送结果</returns>
@@ -218,45 +242,82 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                     });
                 }
 
-                // Try to get WebSocket connection / 尝试获取 WebSocket 连接
-                if (MvcChannelHandler.Clients == null || !MvcChannelHandler.Clients.TryGetValue(request.ConnectionId, out var webSocket))
+                var clusterManager = GlobalClusterCenter.ClusterManager;
+                var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "unknown";
+
+                // Prepare message data / 准备消息数据
+                var messageType = request.MessageType == "Binary"
+                    ? WebSocketMessageType.Binary
+                    : WebSocketMessageType.Text;
+
+                var data = Encoding.UTF8.GetBytes(request.Content);
+                var messageTypeInt = (int)messageType;
+
+                // Try local connection first / 首先尝试本地连接
+                if (MvcChannelHandler.Clients != null && MvcChannelHandler.Clients.TryGetValue(request.ConnectionId, out var localWebSocket))
                 {
+                    if (localWebSocket.State == WebSocketState.Open)
+                    {
+                        // Send to local connection / 发送到本地连接
+                        await localWebSocket.SendAsync(
+                            new ArraySegment<byte>(data),
+                            messageType,
+                            true,
+                            System.Threading.CancellationToken.None);
+
+                        // Record statistics / 记录统计信息
+                        _statisticsService.RecordBytesSent(request.ConnectionId, data.Length);
+
+                        return Ok(new ApiResponse<bool>
+                        {
+                            Success = true,
+                            Data = true
+                        });
+                    }
+                    else
+                    {
+                        return BadRequest(new ApiResponse<bool>
+                        {
+                            Success = false,
+                            Error = "WebSocket is not open"
+                        });
+                    }
+                }
+
+                // If not found locally, try to route through cluster / 如果本地未找到，尝试通过集群路由
+                if (clusterManager != null)
+                {
+                    var routed = await clusterManager.RouteMessageAsync(request.ConnectionId, data, messageTypeInt);
+
+                    if (routed)
+                    {
+                        // Record statistics if connection is tracked / 如果连接被跟踪则记录统计信息
+                        _statisticsService.RecordBytesSent(request.ConnectionId, data.Length);
+
+                        return Ok(new ApiResponse<bool>
+                        {
+                            Success = true,
+                            Data = true
+                        });
+                    }
+                    else
+                    {
+                        return NotFound(new ApiResponse<bool>
+                        {
+                            Success = false,
+                            Error = "Connection not found in cluster"
+                        });
+                    }
+                }
+                else
+                {
+                    // No cluster manager, connection not found / 没有集群管理器，连接未找到
                     return NotFound(new ApiResponse<bool>
                     {
                         Success = false,
                         Error = "Connection not found"
                     });
                 }
-
-                if (webSocket.State != WebSocketState.Open)
-                {
-                    return BadRequest(new ApiResponse<bool>
-                    {
-                        Success = false,
-                        Error = "WebSocket is not open"
-                    });
-                }
-
-                // Send message / 发送消息
-                var messageType = request.MessageType == "Binary" 
-                    ? WebSocketMessageType.Binary 
-                    : WebSocketMessageType.Text;
-                
-                var data = Encoding.UTF8.GetBytes(request.Content);
-                await webSocket.SendAsync(
-                    new ArraySegment<byte>(data),
-                    messageType,
-                    true,
-                    System.Threading.CancellationToken.None);
-
-                // Record statistics / 记录统计信息
-                _statisticsService.RecordBytesSent(request.ConnectionId, data.Length);
-
-                return Ok(new ApiResponse<bool>
-                {
-                    Success = true,
-                    Data = true
-                });
             }
             catch (Exception ex)
             {
@@ -267,6 +328,38 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                     Error = ex.Message
                 });
             }
+        }
+
+        /// <summary>
+        /// Get all connections from cluster routing table / 从集群路由表获取所有连接
+        /// </summary>
+        /// <returns>Dictionary of connection ID to node ID / 连接ID到节点ID的字典</returns>
+        private Dictionary<string, string> GetAllClusterConnections()
+        {
+            var connections = new Dictionary<string, string>();
+            var clusterManager = GlobalClusterCenter.ClusterManager;
+            var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "unknown";
+
+            // Get local connections / 获取本地连接
+            if (MvcChannelHandler.Clients != null)
+            {
+                foreach (var kvp in MvcChannelHandler.Clients)
+                {
+                    connections[kvp.Key] = currentNodeId;
+                }
+            }
+
+            // Get connections from cluster routing table / 从集群路由表获取连接
+            if (clusterManager != null && clusterManager.ConnectionRoutes != null)
+            {
+                foreach (var kvp in clusterManager.ConnectionRoutes)
+                {
+                    // Merge with local connections, cluster routes take precedence / 与本地连接合并，集群路由优先
+                    connections[kvp.Key] = kvp.Value;
+                }
+            }
+
+            return connections;
         }
 
         /// <summary>

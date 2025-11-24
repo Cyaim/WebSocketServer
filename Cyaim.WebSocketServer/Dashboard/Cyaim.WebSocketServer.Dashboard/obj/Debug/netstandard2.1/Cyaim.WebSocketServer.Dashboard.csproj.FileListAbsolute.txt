@@ -26,3 +26,17 @@ E:\OneDrive\Work\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyai
 E:\OneDrive\Work\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\bin\Debug\netstandard2.1\Cyaim.WebSocketServer.dll
 E:\OneDrive\Work\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\bin\Debug\netstandard2.1\Cyaim.WebSocketServer.pdb
 E:\OneDrive\Work\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\obj\Debug\netstandard2.1\Cyaim.We.36640AF4.Up2Date
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\bin\Debug\netstandard2.1\Cyaim.WebSocketServer.Dashboard.deps.json
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\bin\Debug\netstandard2.1\Cyaim.WebSocketServer.Dashboard.dll
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\bin\Debug\netstandard2.1\Cyaim.WebSocketServer.Dashboard.pdb
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\bin\Debug\netstandard2.1\Cyaim.WebSocketServer.dll
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\bin\Debug\netstandard2.1\Cyaim.WebSocketServer.pdb
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\obj\Debug\netstandard2.1\Cyaim.WebSocketServer.Dashboard.csproj.AssemblyReference.cache
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\obj\Debug\netstandard2.1\Cyaim.WebSocketServer.Dashboard.GeneratedMSBuildEditorConfig.editorconfig
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\obj\Debug\netstandard2.1\Cyaim.WebSocketServer.Dashboard.AssemblyInfoInputs.cache
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\obj\Debug\netstandard2.1\Cyaim.WebSocketServer.Dashboard.AssemblyInfo.cs
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\obj\Debug\netstandard2.1\Cyaim.WebSocketServer.Dashboard.csproj.CoreCompileInputs.cache
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\obj\Debug\netstandard2.1\Cyaim.WebSocketServer.Dashboard.sourcelink.json
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\obj\Debug\netstandard2.1\Cyaim.We.36640AF4.Up2Date
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\obj\Debug\netstandard2.1\Cyaim.WebSocketServer.Dashboard.dll
+D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\obj\Debug\netstandard2.1\Cyaim.WebSocketServer.Dashboard.pdb

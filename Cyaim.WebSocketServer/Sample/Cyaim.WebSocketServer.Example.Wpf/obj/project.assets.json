@@ -1766,23 +1766,23 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\DELL\\.nuget\\packages\\": {},
+    "C:\\Users\\lbhdr\\.nuget\\packages\\": {},
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Example.Wpf\\Cyaim.WebSocketServer.Example.Wpf.csproj",
+      "projectUniqueName": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Example.Wpf\\Cyaim.WebSocketServer.Example.Wpf.csproj",
       "projectName": "Cyaim.WebSocketServer.Example.Wpf",
-      "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Example.Wpf\\Cyaim.WebSocketServer.Example.Wpf.csproj",
-      "packagesPath": "C:\\Users\\DELL\\.nuget\\packages\\",
-      "outputPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Example.Wpf\\obj\\",
+      "projectPath": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Example.Wpf\\Cyaim.WebSocketServer.Example.Wpf.csproj",
+      "packagesPath": "C:\\Users\\lbhdr\\.nuget\\packages\\",
+      "outputPath": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Sample\\Cyaim.WebSocketServer.Example.Wpf\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
       ],
       "configFilePaths": [
-        "C:\\Users\\DELL\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Users\\lbhdr\\AppData\\Roaming\\NuGet\\NuGet.Config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
       ],

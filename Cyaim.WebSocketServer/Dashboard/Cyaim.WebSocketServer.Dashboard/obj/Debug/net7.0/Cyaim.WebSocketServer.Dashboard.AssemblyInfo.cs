@@ -18,7 +18,7 @@ using System.Reflection;
     "ebSocket server and cluster\r\n            WebSocketServer 仪表板，用于监控和管�?WebSocket 服" +
     "务器和集群\r\n        ")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.7.8.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.7.8+76d12ba738fea0df7da05c0a72a197bdfbd56c42")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.7.8+88cdc00a27b1921225bfcb589651725d50026884")]
 [assembly: System.Reflection.AssemblyProductAttribute("Cyaim.WebSocketServer.Dashboard")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Cyaim.WebSocketServer.Dashboard")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.7.8.0")]

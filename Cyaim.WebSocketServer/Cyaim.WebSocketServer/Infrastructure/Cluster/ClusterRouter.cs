@@ -28,6 +28,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// </summary>
         private readonly ConcurrentDictionary<string, string> _connectionRoutes;
 
+        /// <summary>
+        /// Get connection routing table (read-only) / 获取连接路由表（只读）
+        /// </summary>
+        public IReadOnlyDictionary<string, string> ConnectionRoutes => _connectionRoutes;
+
         // Node connection counts: nodeId -> count / 节点连接数：节点ID -> 数量
         /// <summary>
         /// Node connection counts / 节点连接数统计

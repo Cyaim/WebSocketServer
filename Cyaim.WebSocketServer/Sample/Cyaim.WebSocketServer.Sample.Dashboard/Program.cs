@@ -3,8 +3,11 @@ using Cyaim.WebSocketServer.Infrastructure;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
 using Cyaim.WebSocketServer.Middlewares;
+using Cyaim.WebSocketServer.Sample.Dashboard.Interfaces;
+using Cyaim.WebSocketServer.Sample.Dashboard.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using System.Net.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,6 +16,23 @@ builder.Services.AddControllers();
 
 // Add Dashboard services / 添加 Dashboard 服务
 builder.Services.AddWebSocketDashboard();
+
+// Add HTTP client for test API / 为测试 API 添加 HTTP 客户端
+builder.Services.AddHttpClient();
+
+// Register WebSocket Cluster Test API / 注册 WebSocket 集群测试 API
+builder.Services.AddSingleton<IWebSocketClusterTestApi>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<WebSocketClusterTestApi>>();
+    var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
+    var httpClient = httpClientFactory.CreateClient();
+    // 设置基础地址为当前应用地址
+    var baseUrl = builder.Configuration["TestApi:BaseUrl"] ?? "/api/dashboard";
+    return new WebSocketClusterTestApi(logger, httpClient, baseUrl);
+});
+
+// Register Cluster Test Service / 注册集群测试服务
+builder.Services.AddScoped<ClusterTestService>();
 
 // Configure WebSocketServer / 配置 WebSocketServer
 builder.Services.ConfigureWebSocketRoute(x =>

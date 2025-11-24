@@ -4722,24 +4722,24 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\DELL\\.nuget\\packages\\": {},
+    "C:\\Users\\lbhdr\\.nuget\\packages\\": {},
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
     "version": "1.7.8",
     "restore": {
-      "projectUniqueName": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\Cyaim.WebSocketServer.Dashboard.csproj",
+      "projectUniqueName": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\Cyaim.WebSocketServer.Dashboard.csproj",
       "projectName": "Cyaim.WebSocketServer.Dashboard",
-      "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\Cyaim.WebSocketServer.Dashboard.csproj",
-      "packagesPath": "C:\\Users\\DELL\\.nuget\\packages\\",
-      "outputPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\obj\\",
+      "projectPath": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\Cyaim.WebSocketServer.Dashboard.csproj",
+      "packagesPath": "C:\\Users\\lbhdr\\.nuget\\packages\\",
+      "outputPath": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Dashboard\\Cyaim.WebSocketServer.Dashboard\\obj\\",
       "projectStyle": "PackageReference",
       "crossTargeting": true,
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
       ],
       "configFilePaths": [
-        "C:\\Users\\DELL\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Users\\lbhdr\\AppData\\Roaming\\NuGet\\NuGet.Config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
       ],
@@ -4759,40 +4759,40 @@
         "net6.0": {
           "targetAlias": "net6.0",
           "projectReferences": {
-            "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
-              "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
+            "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+              "projectPath": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
             }
           }
         },
         "net7.0": {
           "targetAlias": "net7.0",
           "projectReferences": {
-            "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
-              "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
+            "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+              "projectPath": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
             }
           }
         },
         "net8.0": {
           "targetAlias": "net8.0",
           "projectReferences": {
-            "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
-              "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
+            "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+              "projectPath": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
             }
           }
         },
         "net9.0": {
           "targetAlias": "net9.0",
           "projectReferences": {
-            "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
-              "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
+            "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+              "projectPath": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
             }
           }
         },
         "netstandard2.1": {
           "targetAlias": "netstandard2.1",
           "projectReferences": {
-            "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
-              "projectPath": "E:\\OneDrive\\Work\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
+            "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj": {
+              "projectPath": "D:\\WorkSpaces\\WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer\\Cyaim.WebSocketServer.csproj"
             }
           }
         }

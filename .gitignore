@@ -25,18 +25,17 @@
 /Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.StackExchangeRedis/Properties
 
 
+/Cyaim.WebSocketServer/Dashboard/Cyaim.WebSocketServer.Dashboard/obj
+/Cyaim.WebSocketServer/Dashboard/Cyaim.WebSocketServer.Dashboard/bin
+/Cyaim.WebSocketServer/Dashboard/Cyaim.WebSocketServer.Dashboard/Properties
 
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.DebugUI/bin
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.DebugUI/obj
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.DebugUI/Properties
+/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Sample.Dashboard/obj
+/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Sample.Dashboard/bin
+/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Sample.Dashboard/Properties
 
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example/obj
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example/bin
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example/Properties
-
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example.Wpf/bin
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example.Wpf/obj
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Example.Wpf/Properties
+/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Example.Wpf/bin
+/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Example.Wpf/obj
+/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Example.Wpf/Properties
 
 
 /Cyaim.WebSocketServer/TestAOT/bin
