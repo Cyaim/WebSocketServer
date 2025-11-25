@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Cyaim.WebSocketServer.Example.Wpf")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+88cdc00a27b1921225bfcb589651725d50026884")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f02e6f64a737e6f25d975975793b1962cd66f72e")]
 [assembly: System.Reflection.AssemblyProductAttribute("Cyaim.WebSocketServer.Example.Wpf")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Cyaim.WebSocketServer.Example.Wpf")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

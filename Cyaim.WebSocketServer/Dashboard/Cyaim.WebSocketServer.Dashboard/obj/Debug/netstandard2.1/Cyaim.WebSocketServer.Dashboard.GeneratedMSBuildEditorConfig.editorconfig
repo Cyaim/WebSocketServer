@@ -1,8 +1,0 @@
-is_global = true
-build_property.RootNamespace = Cyaim.WebSocketServer.Dashboard
-build_property.ProjectDir = D:\WorkSpaces\WebSocketServer\Cyaim.WebSocketServer\Dashboard\Cyaim.WebSocketServer.Dashboard\
-build_property.EnableComHosting = 
-build_property.EnableGeneratedComInterfaceComImportInterop = 
-build_property.CsWinRTUseWindowsUIXamlProjections = false
-build_property.EffectiveAnalysisLevelStyle = 
-build_property.EnableCodeStyleSeverity = 
