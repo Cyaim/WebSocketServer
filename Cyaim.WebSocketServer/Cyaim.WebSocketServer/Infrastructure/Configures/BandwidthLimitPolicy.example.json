@@ -1,0 +1,30 @@
+{
+  "BandwidthLimitPolicy": {
+    "Enabled": true,
+    "GlobalChannelBandwidthLimit": {
+      "/ws": 10485760
+    },
+    "ChannelMinBandwidthGuarantee": {
+      "/ws": 1048576
+    },
+    "ChannelMaxBandwidthLimit": {
+      "/ws": 5242880
+    },
+    "ChannelEnableAverageBandwidth": {
+      "/ws": true
+    },
+    "ChannelConnectionMinBandwidthGuarantee": {
+      "/ws": 524288
+    },
+    "ChannelConnectionMaxBandwidthLimit": {
+      "/ws": 2097152
+    },
+    "EndPointMaxBandwidthLimit": {
+      "controller.action": 1048576
+    },
+    "EndPointMinBandwidthGuarantee": {
+      "controller.action": 262144
+    }
+  }
+}
+

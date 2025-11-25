@@ -104,6 +104,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// </summary>
         public ConcurrentDictionary<string, SemaphoreSlim> MaxEndPointParallelForwardLimit { get; set; }
 
+        /// <summary>
+        /// 接收请求体限速策略配置
+        /// </summary>
+        public BandwidthLimitPolicy BandwidthLimitPolicy { get; set; }
 
         #region Event
 

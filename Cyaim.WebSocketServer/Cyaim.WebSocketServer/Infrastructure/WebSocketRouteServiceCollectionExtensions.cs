@@ -1,8 +1,10 @@
 ﻿using Cyaim.WebSocketServer.Infrastructure.Attributes;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -24,6 +26,17 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// <param name="setupAction"></param>
         public static void ConfigureWebSocketRoute(this IServiceCollection services, Action<WebSocketRouteOption> setupAction)
         {
+            ConfigureWebSocketRoute(services, null, setupAction);
+        }
+
+        /// <summary>
+        /// Configure WebSocketRoute Middleware with IConfiguration
+        /// </summary>
+        /// <param name="services"></param>
+        /// <param name="configuration">Configuration object for loading BandwidthLimitPolicy. If provided, will automatically configure IOptions&lt;BandwidthLimitPolicy&gt;.</param>
+        /// <param name="setupAction"></param>
+        public static void ConfigureWebSocketRoute(this IServiceCollection services, IConfiguration configuration, Action<WebSocketRouteOption> setupAction)
+        {
             if (services == null)
             {
                 throw new ArgumentNullException(nameof(services));
@@ -33,6 +46,32 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 throw new ArgumentNullException(nameof(setupAction));
             }
             services.TryAddSingleton<IHostApplicationLifetime>();
+
+            // 如果提供了 IConfiguration，自动配置 IOptions<BandwidthLimitPolicy>
+            // 用户也可以手动调用 services.Configure<BandwidthLimitPolicy>(...) 来配置
+            if (configuration != null)
+            {
+                var policySection = configuration.GetSection("BandwidthLimitPolicy");
+                if (policySection.Exists())
+                {
+                    // 使用 Action<T> 重载，手动从配置加载，避免依赖 Microsoft.Extensions.Options.ConfigurationExtensions
+                    services.Configure<BandwidthLimitPolicy>(options =>
+                    {
+                        var policy = new BandwidthLimitPolicy();
+                        policy.LoadFromConfiguration(configuration, "BandwidthLimitPolicy");
+                        // 复制属性值到 options
+                        options.Enabled = policy.Enabled;
+                        options.GlobalChannelBandwidthLimit = policy.GlobalChannelBandwidthLimit;
+                        options.ChannelMinBandwidthGuarantee = policy.ChannelMinBandwidthGuarantee;
+                        options.ChannelMaxBandwidthLimit = policy.ChannelMaxBandwidthLimit;
+                        options.ChannelEnableAverageBandwidth = policy.ChannelEnableAverageBandwidth;
+                        options.ChannelConnectionMinBandwidthGuarantee = policy.ChannelConnectionMinBandwidthGuarantee;
+                        options.ChannelConnectionMaxBandwidthLimit = policy.ChannelConnectionMaxBandwidthLimit;
+                        options.EndPointMaxBandwidthLimit = policy.EndPointMaxBandwidthLimit;
+                        options.EndPointMinBandwidthGuarantee = policy.EndPointMinBandwidthGuarantee;
+                    });
+                }
+            }
 
             var wsrOptions = new WebSocketRouteOption();
             setupAction(wsrOptions);

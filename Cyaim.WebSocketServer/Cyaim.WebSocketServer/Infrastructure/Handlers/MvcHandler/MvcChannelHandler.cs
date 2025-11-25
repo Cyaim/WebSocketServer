@@ -31,6 +31,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
     {
         private ILogger<WebSocketRouteMiddleware> logger;
         private WebSocketRouteOption webSocketOption;
+        private BandwidthLimitManager bandwidthLimitManager;
 
         /// <summary>
         /// Get instance
@@ -123,6 +124,33 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             this.logger = logger;
             webSocketOption = webSocketOptions;
+
+            // 初始化带宽限速管理器
+            // 如果 BandwidthLimitPolicy 未设置，尝试从 IOptions 加载
+            var policy = webSocketOptions.BandwidthLimitPolicy;
+            if (policy == null && WebSocketRouteOption.ApplicationServices != null)
+            {
+                try
+                {
+                    var options = WebSocketRouteOption.ApplicationServices.GetService<Microsoft.Extensions.Options.IOptions<Infrastructure.Configures.BandwidthLimitPolicy>>();
+                    if (options != null && options.Value != null)
+                    {
+                        policy = options.Value;
+                    }
+                }
+                catch
+                {
+                    // 忽略错误，继续使用 null
+                }
+            }
+
+            if (policy != null)
+            {
+                var loggerFactory = WebSocketRouteOption.ApplicationServices?.GetService<ILoggerFactory>();
+                var bandwidthLogger = loggerFactory?.CreateLogger<BandwidthLimitManager>();
+                bandwidthLimitManager = new BandwidthLimitManager(bandwidthLogger, policy);
+            }
+
             // 配置并行转发上限
             if (ParallelForwardLimitSlim == null && webSocketOptions.MaxConnectionParallelForwardLimit != null)
             {
@@ -199,6 +227,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
             finally
             {
+                // 清理带宽限速跟踪器
+                if (bandwidthLimitManager != null)
+                {
+                    bandwidthLimitManager.RemoveConnection(context.Connection.Id);
+                }
+
                 await MvcChannel_OnDisconnected(context, webSocketCloseStatus, webSocketOptions, logger);
 
                 // 执行管道 Disconnected
@@ -265,6 +299,31 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                     goto CONTINUE_RECEIVE;
                                 }
 
+                                // 应用带宽限速策略
+                                if (bandwidthLimitManager != null && result.Count > 0)
+                                {
+                                    string endPoint = null;
+                                    // 尝试从已接收的数据中提取端点信息（如果数据足够）
+                                    if (wsReceiveReader.Length > 0)
+                                    {
+                                        try
+                                        {
+                                            endPoint = FindJsonPropertyValue(wsReceiveReader.GetBuffer());
+                                        }
+                                        catch
+                                        {
+                                            // 如果无法解析，忽略端点信息
+                                        }
+                                    }
+
+                                    await bandwidthLimitManager.WaitForBandwidthAsync(
+                                        context.Request.Path,
+                                        context.Connection.Id,
+                                        endPoint,
+                                        result.Count,
+                                        CancellationToken.None);
+                                }
+
                                 //await wsReceiveReader.WriteAsync(buffer, 0, result.Count);
                                 await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
 
@@ -313,10 +372,37 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             continue;
                         }
 
+                        // 在接收完数据后，应用端点级别的限速策略
+                        string endpoint = null;
+                        if (bandwidthLimitManager != null && wsReceiveReader.Length > 0)
+                        {
+                            try
+                            {
+                                endpoint = FindJsonPropertyValue(wsReceiveReader.GetBuffer());
+                                if (!string.IsNullOrEmpty(endpoint))
+                                {
+                                    // 对完整消息应用端点级别限速
+                                    await bandwidthLimitManager.WaitForBandwidthAsync(
+                                        context.Request.Path,
+                                        context.Connection.Id,
+                                        endpoint,
+                                        (int)wsReceiveReader.Length,
+                                        CancellationToken.None);
+                                }
+                            }
+                            catch
+                            {
+                                // 如果无法解析端点，忽略
+                            }
+                        }
+
                         // EndPoint level restrictions
                         if (webSocketOption.MaxEndPointParallelForwardLimit != null)
                         {
-                            string endpoint = FindJsonPropertyValue(wsReceiveReader.GetBuffer());
+                            if (string.IsNullOrEmpty(endpoint))
+                            {
+                                endpoint = FindJsonPropertyValue(wsReceiveReader.GetBuffer());
+                            }
                             if (webSocketOption.MaxEndPointParallelForwardLimit.TryGetValue(endpoint, out endPointSlim) && endPointSlim != null)
                             {
                                 await endPointSlim.WaitAsync().ConfigureAwait(false);
