@@ -7,39 +7,10 @@
 *.vs
 .vs
 
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer/bin
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer/obj
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer/Properties
+# 忽略所有项目中的 bin、obj、Properties 文件夹
+**/bin/
+**/obj/
+**/Properties/
 
-
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Client/bin
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Client/obj
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Client/Properties
-
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.RabbitMQ/bin
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.RabbitMQ/obj
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.RabbitMQ/Properties
-
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.StackExchangeRedis/bin
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.StackExchangeRedis/obj
-/Cyaim.WebSocketServer/Cyaim.WebSocketServer.Cluster.StackExchangeRedis/Properties
-
-
-/Cyaim.WebSocketServer/Dashboard/Cyaim.WebSocketServer.Dashboard/obj
-/Cyaim.WebSocketServer/Dashboard/Cyaim.WebSocketServer.Dashboard/bin
-/Cyaim.WebSocketServer/Dashboard/Cyaim.WebSocketServer.Dashboard/Properties
-/Cyaim.WebSocketServer/Dashboard/websocketserver-dashboard/node_modules
-
-/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Sample.Dashboard/obj
-/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Sample.Dashboard/bin
-/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Sample.Dashboard/Properties
-
-/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Example.Wpf/bin
-/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Example.Wpf/obj
-/Cyaim.WebSocketServer/Sample/Cyaim.WebSocketServer.Example.Wpf/Properties
-
-
-/Cyaim.WebSocketServer/TestAOT/bin
-/Cyaim.WebSocketServer/TestAOT/obj
-/Cyaim.WebSocketServer/TestAOT/Properties
-
+# 其他忽略项
+**/node_modules/
