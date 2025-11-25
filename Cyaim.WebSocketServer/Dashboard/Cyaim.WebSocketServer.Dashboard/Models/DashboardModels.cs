@@ -314,5 +314,129 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// </summary>
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     }
+
+    /// <summary>
+    /// Connection count information / 连接数信息
+    /// </summary>
+    public class ConnectionCountInfo
+    {
+        /// <summary>
+        /// Total connections / 总连接数
+        /// </summary>
+        public int Total { get; set; }
+
+        /// <summary>
+        /// Local connections / 本地连接数
+        /// </summary>
+        public int Local { get; set; }
+    }
+
+    /// <summary>
+    /// Broadcast message request / 广播消息请求
+    /// </summary>
+    public class BroadcastMessageRequest
+    {
+        /// <summary>
+        /// Message content / 消息内容
+        /// </summary>
+        public string Content { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Message type (Text/Binary) / 消息类型（文本/二进制）
+        /// </summary>
+        public string? MessageType { get; set; }
+    }
+
+    /// <summary>
+    /// Cluster health status / 集群健康状态
+    /// </summary>
+    public class ClusterHealthStatus
+    {
+        /// <summary>
+        /// Is healthy / 是否健康
+        /// </summary>
+        public bool IsHealthy { get; set; }
+
+        /// <summary>
+        /// Total nodes / 总节点数
+        /// </summary>
+        public int TotalNodes { get; set; }
+
+        /// <summary>
+        /// Healthy nodes / 健康节点数
+        /// </summary>
+        public int HealthyNodes { get; set; }
+
+        /// <summary>
+        /// Unhealthy nodes / 不健康节点数
+        /// </summary>
+        public int UnhealthyNodes { get; set; }
+
+        /// <summary>
+        /// Has leader / 是否有领导者
+        /// </summary>
+        public bool HasLeader { get; set; }
+
+        /// <summary>
+        /// Total connections / 总连接数
+        /// </summary>
+        public int TotalConnections { get; set; }
+
+        /// <summary>
+        /// Health check time / 健康检查时间
+        /// </summary>
+        public DateTime CheckTime { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Details / 详细信息
+        /// </summary>
+        public Dictionary<string, object> Details { get; set; } = new Dictionary<string, object>();
+    }
+
+    /// <summary>
+    /// Node health status / 节点健康状态
+    /// </summary>
+    public class NodeHealthStatus
+    {
+        /// <summary>
+        /// Node ID / 节点 ID
+        /// </summary>
+        public string NodeId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Is healthy / 是否健康
+        /// </summary>
+        public bool IsHealthy { get; set; }
+
+        /// <summary>
+        /// Is connected / 是否连接
+        /// </summary>
+        public bool IsConnected { get; set; }
+
+        /// <summary>
+        /// Connection count / 连接数
+        /// </summary>
+        public int ConnectionCount { get; set; }
+
+        /// <summary>
+        /// Is leader / 是否为领导者
+        /// </summary>
+        public bool IsLeader { get; set; }
+
+        /// <summary>
+        /// Response time in milliseconds / 响应时间（毫秒）
+        /// </summary>
+        public long ResponseTimeMs { get; set; }
+
+        /// <summary>
+        /// Health check time / 健康检查时间
+        /// </summary>
+        public DateTime CheckTime { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Error message / 错误信息
+        /// </summary>
+        public string? ErrorMessage { get; set; }
+    }
 }
 

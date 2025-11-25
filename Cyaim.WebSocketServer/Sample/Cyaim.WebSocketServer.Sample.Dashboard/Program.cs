@@ -14,6 +14,10 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container / 添加服务到容器
 builder.Services.AddControllers();
 
+// Add Swagger/OpenAPI services / 添加 Swagger/OpenAPI 服务
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
 // Add Dashboard services / 添加 Dashboard 服务
 builder.Services.AddWebSocketDashboard();
 
@@ -38,13 +42,13 @@ builder.Services.AddScoped<ClusterTestService>();
 builder.Services.ConfigureWebSocketRoute(x =>
 {
     var mvcHandler = new MvcChannelHandler();
-    
+
     // Define WebSocket channels / 定义 WebSocket 通道
     x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
     {
         { "/ws", mvcHandler.ConnectionEntry }
     };
-    
+
     x.ApplicationServiceCollection = builder.Services;
 });
 
@@ -54,6 +58,16 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
+
+    // Enable Swagger UI in development / 在开发环境中启用 Swagger UI
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "WebSocket Cluster Test API v1");
+        c.RoutePrefix = "swagger"; // Swagger UI 访问路径: /swagger
+        c.DocumentTitle = "WebSocket Cluster Test API";
+        c.DefaultModelsExpandDepth(-1); // 隐藏模型定义，使界面更简洁
+    });
 }
 
 app.UseRouting();

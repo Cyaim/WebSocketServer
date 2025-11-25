@@ -17,6 +17,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Middlewares
         public static IServiceCollection AddWebSocketDashboard(this IServiceCollection services)
         {
             services.AddSingleton<Services.DashboardStatisticsService>();
+            services.AddSingleton<Services.DashboardHelperService>();
             return services;
         }
 
