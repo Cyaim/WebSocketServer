@@ -73,18 +73,25 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
                     };
                 }
 
+                // Get Raft node info for current node / 获取当前节点的 Raft 信息
+                var raftNode = GetRaftNodeFromManager(clusterManager);
+                var currentTerm = raftNode?.CurrentTerm ?? 0;
+                var isLeader = clusterManager.IsLeader();
+                var leaderId = raftNode?.LeaderId;
+
                 // Get current node info / 获取当前节点信息
                 var currentNode = new NodeStatusInfo
                 {
                     NodeId = clusterContext.NodeId,
                     Address = clusterContext.NodeAddress,
                     Port = clusterContext.NodePort,
-                    State = "Unknown",
-                    IsLeader = clusterManager.IsLeader(),
+                    State = "Connected",
+                    IsLeader = isLeader,
                     IsConnected = true,
                     ConnectionCount = clusterManager.GetLocalConnectionCount(),
-                    CurrentTerm = 0,
-                    LogLength = 0
+                    CurrentTerm = currentTerm,
+                    LeaderId = leaderId,
+                    LogLength = raftNode?.Log?.Count ?? 0
                 };
 
                 nodes.Add(currentNode);
@@ -97,27 +104,78 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
                         if (string.IsNullOrEmpty(nodeConfig))
                             continue;
 
-                        // Parse node config / 解析节点配置
-                        var parts = nodeConfig.Split('@');
-                        if (parts.Length >= 2)
+                        try
                         {
-                            var nodeId = parts[0];
-                            var addressParts = parts[1].Split(':');
-                            var address = addressParts[0];
-                            var port = addressParts.Length > 1 && int.TryParse(addressParts[1], out var p) ? p : 0;
+                            string nodeId = null;
+                            string address = null;
+                            int port = 0;
+                            bool isConnected = false;
 
-                            if (nodeId != currentNode.NodeId)
+                            // Try to parse as URI first (format: ws://address:port/nodeId) / 首先尝试解析为 URI（格式：ws://address:port/nodeId）
+                            if (Uri.TryCreate(nodeConfig, UriKind.Absolute, out var uri))
                             {
+                                address = uri.Host;
+                                port = uri.Port > 0 ? uri.Port : (uri.Scheme == "ws" || uri.Scheme == "wss" ? 80 : 0);
+
+                                // Extract node ID from path / 从路径提取节点 ID
+                                var path = uri.PathAndQuery.TrimStart('/');
+                                nodeId = !string.IsNullOrEmpty(path) ? path : $"{uri.Host}:{uri.Port}";
+                            }
+                            else
+                            {
+                                // Try format: nodeId@address:port or nodeId@address / 尝试格式：nodeId@address:port 或 nodeId@address
+                                var parts = nodeConfig.Split('@');
+                                if (parts.Length == 2)
+                                {
+                                    nodeId = parts[0];
+                                    var addressParts = parts[1].Split(':');
+                                    address = addressParts[0];
+                                    port = addressParts.Length > 1 && int.TryParse(addressParts[1], out var p) ? p : 0;
+                                }
+                                else
+                                {
+                                    // Assume it's just a node ID / 假设它只是一个节点 ID
+                                    nodeId = nodeConfig;
+                                }
+                            }
+
+                            if (!string.IsNullOrEmpty(nodeId) && nodeId != currentNode.NodeId)
+                            {
+                                // Check if node is connected via cluster manager / 通过集群管理器检查节点是否已连接
+                                if (clusterManager != null)
+                                {
+                                    // Try to get connection status from transport / 尝试从传输层获取连接状态
+                                    var transport = GetTransportFromManager(clusterManager);
+                                    if (transport is Infrastructure.Cluster.Transports.WebSocketClusterTransport wsTransport)
+                                    {
+                                        isConnected = wsTransport.IsNodeConnected(nodeId);
+                                    }
+                                }
+
+                                // Get current Raft info to determine if this node is the leader / 获取当前 Raft 信息以确定此节点是否为领导者
+                                var currentRaftNode = GetRaftNodeFromManager(clusterManager);
+                                string currLeaderId = currentRaftNode?.LeaderId;
+                                bool isRemoteLeader = nodeId == currLeaderId;
+
                                 nodes.Add(new NodeStatusInfo
                                 {
                                     NodeId = nodeId,
-                                    Address = address,
+                                    Address = address ?? "unknown",
                                     Port = port,
-                                    State = "Unknown",
-                                    IsConnected = false,
-                                    ConnectionCount = 0
+                                    State = isConnected ? "Connected" : "Disconnected",
+                                    IsConnected = isConnected,
+                                    ConnectionCount = 0, // TODO: Get from cluster manager / 从集群管理器获取
+                                    CurrentTerm = currentRaftNode?.CurrentTerm ?? 0, // Use current node's term as reference / 使用当前节点的任期作为参考
+                                    IsLeader = isRemoteLeader,
+                                    LeaderId = currLeaderId,
+                                    LogLength = 0
                                 });
                             }
+                        }
+                        catch (Exception ex)
+                        {
+                            // Log and continue with next node / 记录错误并继续处理下一个节点
+                            System.Diagnostics.Debug.WriteLine($"Failed to parse node config '{nodeConfig}': {ex.Message}");
                         }
                     }
                 }
@@ -128,6 +186,34 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
             }
 
             return nodes;
+        }
+
+        /// <summary>
+        /// Get transport instance from cluster manager using reflection
+        /// 使用反射从集群管理器获取传输实例
+        /// </summary>
+        private static IClusterTransport GetTransportFromManager(ClusterManager manager)
+        {
+            if (manager == null)
+                return null;
+
+            var transportField = typeof(ClusterManager)
+                .GetField("_transport", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            return transportField?.GetValue(manager) as IClusterTransport;
+        }
+
+        /// <summary>
+        /// Get Raft node instance from cluster manager using reflection
+        /// 使用反射从集群管理器获取 Raft 节点实例
+        /// </summary>
+        private static RaftNode GetRaftNodeFromManager(ClusterManager manager)
+        {
+            if (manager == null)
+                return null;
+
+            var raftNodeField = typeof(ClusterManager)
+                .GetField("_raftNode", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            return raftNodeField?.GetValue(manager) as RaftNode;
         }
     }
 }

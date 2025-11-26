@@ -80,6 +80,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         private Timer _heartbeatTimer;
         private readonly object _stateLock = new object();
 
+        // Request-response correlation for vote requests / 投票请求的请求-响应关联
+        private readonly ConcurrentDictionary<string, TaskCompletionSource<ClusterMessage>> _pendingVoteRequests = new ConcurrentDictionary<string, TaskCompletionSource<ClusterMessage>>();
+
         /// <summary>
         /// Constructor / 构造函数
         /// </summary>
@@ -145,6 +148,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         {
             lock (_stateLock)
             {
+                var previousState = State;
+                var previousTerm = CurrentTerm;
+
                 if (term > CurrentTerm)
                 {
                     CurrentTerm = term;
@@ -154,7 +160,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 State = RaftNodeState.Follower;
                 LeaderId = null;
 
-                _logger.LogInformation($"Node {_nodeId} became Follower in term {CurrentTerm}");
+                // Only log if state actually changed / 只在状态真正改变时记录日志
+                if (previousState != RaftNodeState.Follower || previousTerm != CurrentTerm)
+                {
+                    _logger.LogInformation($"Node {_nodeId} became Follower in term {CurrentTerm}");
+                }
                 ResetElectionTimer();
             }
         }
@@ -209,7 +219,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// </summary>
         private async Task StartElectionAsync()
         {
-            _logger.LogInformation($"Node {_nodeId} starting election for term {CurrentTerm}");
+            var knownNodes = GetKnownNodeIds();
+            _logger.LogInformation($"Node {_nodeId} starting election for term {CurrentTerm}. Known nodes: {string.Join(", ", knownNodes)}");
+
+            if (knownNodes.Count == 0)
+            {
+                _logger.LogWarning($"No known nodes found, cannot start election. Node will remain as candidate.");
+                return;
+            }
 
             var requestVote = new RequestVoteMessage
             {
@@ -226,29 +243,51 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             };
 
             var votesReceived = 1; // Vote for self / 为自己投票
-            var votesNeeded = (GetKnownNodeIds().Count + 1) / 2 + 1;
+            var votesNeeded = (knownNodes.Count + 1) / 2 + 1;
+            _logger.LogInformation($"Election requires {votesNeeded} votes (including self). Total nodes: {knownNodes.Count + 1}");
 
-            var voteTasks = GetKnownNodeIds().Select(async nodeId =>
+            var voteTasks = knownNodes.Select(async nodeId =>
             {
                 try
                 {
+                    // Check if connection is established / 检查连接是否已建立
+                    if (_transport is Transports.WebSocketClusterTransport wsTransport)
+                    {
+                        var isConnected = wsTransport.IsNodeConnected(nodeId);
+                        if (!isConnected)
+                        {
+                            _logger.LogWarning($"Node {nodeId} is not connected, attempting to establish connection before requesting vote");
+                        }
+                    }
+
+                    _logger.LogDebug($"Requesting vote from node {nodeId}");
                     var responseMessage = await SendRequestVoteAsync(nodeId, message);
                     if (responseMessage != null)
                     {
                         var response = System.Text.Json.JsonSerializer.Deserialize<RequestVoteResponseMessage>(responseMessage.Payload);
                         if (response.VoteGranted && response.Term == CurrentTerm)
                         {
+                            _logger.LogInformation($"✓ Received GRANTED vote from node {nodeId}");
                             return 1;
                         }
                         else if (response.Term > CurrentTerm)
                         {
+                            _logger.LogInformation($"Node {nodeId} has higher term {response.Term}, becoming follower");
                             BecomeFollower(response.Term);
                         }
+                        else
+                        {
+                            _logger.LogDebug($"Node {nodeId} did not grant vote (term: {response.Term}, granted: {response.VoteGranted})");
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"No response received from node {nodeId} (connection may not be established or request timed out)");
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, $"Error requesting vote from node {nodeId}");
+                    _logger.LogWarning(ex, $"Error requesting vote from node {nodeId}: {ex.Message}");
                 }
                 return 0;
             });
@@ -256,9 +295,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             var results = await Task.WhenAll(voteTasks);
             votesReceived += results.Sum();
 
+            _logger.LogInformation($"Election result: {votesReceived}/{votesNeeded} votes received");
+
             if (votesReceived >= votesNeeded && State == RaftNodeState.Candidate)
             {
+                _logger.LogInformation($"Node {_nodeId} won election with {votesReceived} votes, becoming leader");
                 BecomeLeader();
+            }
+            else if (State == RaftNodeState.Candidate)
+            {
+                _logger.LogInformation($"Node {_nodeId} did not receive enough votes ({votesReceived}/{votesNeeded}), will retry");
             }
         }
 
@@ -272,17 +318,37 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         {
             try
             {
-                await _transport.SendAsync(nodeId, message);
-                // In a real implementation, we would wait for a response
-                // 在真实实现中，我们会等待响应
-                // For now, we'll use a timeout-based approach
-                // 目前，我们使用基于超时的方法
-                await Task.Delay(100);
-                return null; // Simplified - would need to implement request-response pattern / 简化版本 - 需要实现请求-响应模式
+                _logger.LogDebug($"Sending vote request to node {nodeId} for term {CurrentTerm}");
+
+                // Create a task completion source to wait for response / 创建任务完成源以等待响应
+                var tcs = new TaskCompletionSource<ClusterMessage>();
+                var requestKey = $"{nodeId}:{CurrentTerm}";
+                _pendingVoteRequests.TryAdd(requestKey, tcs);
+
+                try
+                {
+                    await _transport.SendAsync(nodeId, message);
+
+                    // Wait for response with timeout / 等待响应（带超时）
+                    using (var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1000)))
+                    {
+                        cts.Token.Register(() => tcs.TrySetCanceled());
+                        var response = await tcs.Task;
+                        _pendingVoteRequests.TryRemove(requestKey, out _);
+                        _logger.LogDebug($"Received vote response from node {nodeId}");
+                        return response;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    _pendingVoteRequests.TryRemove(requestKey, out _);
+                    _logger.LogWarning($"Vote request to node {nodeId} timed out");
+                    return null;
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to send vote request to {nodeId}");
+                _logger.LogWarning(ex, $"Failed to send vote request to {nodeId}: {ex.Message}");
                 return null;
             }
         }
@@ -336,7 +402,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             var timeout = new Random().Next(_electionTimeoutMin, _electionTimeoutMax);
             _electionTimer = new Timer(async _ =>
             {
-                if (State != RaftNodeState.Leader && 
+                if (State != RaftNodeState.Leader &&
                     (DateTime.UtcNow - _lastHeartbeatTime).TotalMilliseconds > timeout)
                 {
                     _logger.LogInformation($"Election timeout reached for node {_nodeId}");
@@ -360,7 +426,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     HandleRequestVote(e.Message);
                     break;
                 case ClusterMessageType.RequestVoteResponse:
-                    // Handled in election process / 在选举过程中处理
+                    HandleRequestVoteResponse(e.Message);
                     break;
                 case ClusterMessageType.AppendEntries:
                 case ClusterMessageType.Heartbeat:
@@ -381,7 +447,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             try
             {
                 var request = System.Text.Json.JsonSerializer.Deserialize<RequestVoteMessage>(message.Payload);
-                
+
                 bool voteGranted = false;
 
                 if (request.Term > CurrentTerm)
@@ -389,7 +455,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     BecomeFollower(request.Term);
                 }
 
-                if (request.Term == CurrentTerm && 
+                if (request.Term == CurrentTerm &&
                     (VotedFor == null || VotedFor == request.CandidateId) &&
                     IsLogUpToDate(request.LastLogIndex, request.LastLogTerm))
                 {
@@ -410,11 +476,46 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     Payload = System.Text.Json.JsonSerializer.Serialize(response)
                 };
 
-                _transport.SendAsync(message.FromNodeId, responseMessage);
+                _logger.LogInformation($"Sending vote response to node {message.FromNodeId}: {(voteGranted ? "GRANTED" : "DENIED")} for term {CurrentTerm}");
+                _ = _transport.SendAsync(message.FromNodeId, responseMessage).ContinueWith(t =>
+                {
+                    if (t.IsFaulted)
+                    {
+                        _logger.LogError(t.Exception, $"Failed to send vote response to node {message.FromNodeId}");
+                    }
+                });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error handling request vote");
+            }
+        }
+
+        /// <summary>
+        /// Handle request vote response / 处理请求投票响应
+        /// </summary>
+        /// <param name="message">Vote response message / 投票响应消息</param>
+        private void HandleRequestVoteResponse(ClusterMessage message)
+        {
+            try
+            {
+                var response = System.Text.Json.JsonSerializer.Deserialize<RequestVoteResponseMessage>(message.Payload);
+
+                // Find and complete the pending request / 查找并完成待处理的请求
+                var requestKey = $"{message.FromNodeId}:{response.Term}";
+                if (_pendingVoteRequests.TryRemove(requestKey, out var tcs))
+                {
+                    tcs.TrySetResult(message);
+                    _logger.LogDebug($"Completed vote request for node {message.FromNodeId}, term {response.Term}, granted: {response.VoteGranted}");
+                }
+                else
+                {
+                    _logger.LogDebug($"Received vote response from node {message.FromNodeId} but no pending request found (may have timed out)");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error handling request vote response");
             }
         }
 
@@ -439,8 +540,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
                 if (request.Term == CurrentTerm)
                 {
-                    if (request.PrevLogIndex == 0 || 
-                        (request.PrevLogIndex <= Log.Count && 
+                    if (request.PrevLogIndex == 0 ||
+                        (request.PrevLogIndex <= Log.Count &&
                          Log[(int)(request.PrevLogIndex - 1)].Term == request.PrevLogTerm))
                     {
                         success = true;
@@ -514,8 +615,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
                     // Update commit index if majority has replicated / 如果多数节点已复制，则更新提交索引
                     var majorityIndex = GetMajorityReplicatedIndex();
-                    if (majorityIndex > CommitIndex && 
-                        Log.Any() && 
+                    if (majorityIndex > CommitIndex &&
+                        Log.Any() &&
                         Log.Last(e => e.Index == majorityIndex).Term == CurrentTerm)
                     {
                         CommitIndex = majorityIndex;
@@ -545,7 +646,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         private bool IsLogUpToDate(long lastLogIndex, long lastLogTerm)
         {
             var ourLastTerm = Log.Count > 0 ? Log.Last().Term : 0;
-            return lastLogTerm > ourLastTerm || 
+            return lastLogTerm > ourLastTerm ||
                    (lastLogTerm == ourLastTerm && lastLogIndex >= (Log.Count > 0 ? Log.Last().Index : 0));
         }
 
@@ -569,7 +670,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             // Get known node IDs from transport / 从传输获取已知节点 ID
             // The transport should maintain a list of registered nodes / 传输应该维护已注册节点的列表
             var nodeIds = new List<string>();
-            
+
             if (_transport is Transports.WebSocketClusterTransport wsTransport)
             {
                 // For WebSocket transport, nodes are registered via RegisterNode
@@ -578,6 +679,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 var clusterOption = GlobalClusterCenter.ClusterContext;
                 if (clusterOption?.Nodes != null)
                 {
+                    _logger.LogDebug($"Parsing {clusterOption.Nodes.Length} node(s) from configuration for node {_nodeId}");
                     foreach (var nodeUrl in clusterOption.Nodes)
                     {
                         // Parse node URL to extract node ID / 解析节点 URL 以提取节点 ID
@@ -589,6 +691,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                             if (!string.IsNullOrEmpty(nodeId) && nodeId != _nodeId)
                             {
                                 nodeIds.Add(nodeId);
+                                _logger.LogDebug($"Parsed node ID '{nodeId}' from URL '{nodeUrl}'");
                             }
                             else
                             {
@@ -597,20 +700,27 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                                 if (fallbackId != _nodeId)
                                 {
                                     nodeIds.Add(fallbackId);
+                                    _logger.LogDebug($"Using fallback node ID '{fallbackId}' from URL '{nodeUrl}'");
                                 }
                             }
                         }
-                        catch
+                        catch (Exception ex)
                         {
                             // If URL parsing fails, try to extract node ID from the string
                             // 如果 URL 解析失败，尝试从字符串中提取节点 ID
+                            _logger.LogDebug(ex, $"Failed to parse URL '{nodeUrl}', trying alternative format");
                             var parts = nodeUrl.Split('@');
                             if (parts.Length > 1 && parts[0] != _nodeId)
                             {
                                 nodeIds.Add(parts[0]);
+                                _logger.LogDebug($"Parsed node ID '{parts[0]}' from alternative format '{nodeUrl}'");
                             }
                         }
                     }
+                }
+                else
+                {
+                    _logger.LogWarning($"Cluster context or nodes configuration is null for node {_nodeId}");
                 }
             }
             else
@@ -620,6 +730,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 // They should maintain their own node registry
                 // 它们应该维护自己的节点注册表
                 // For now, we'll rely on the cluster configuration
+                _logger.LogDebug($"Transport is not WebSocketClusterTransport, using cluster configuration");
                 // 目前，我们将依赖集群配置
                 var clusterOption = GlobalClusterCenter.ClusterContext;
                 if (clusterOption?.Nodes != null)
@@ -639,7 +750,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     }
                 }
             }
-            
+
+            _logger.LogDebug($"GetKnownNodeIds for node {_nodeId} returned {nodeIds.Count} node(s): {string.Join(", ", nodeIds)}");
             return nodeIds;
         }
 

@@ -14,7 +14,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
     /// 集群管理控制器
     /// </summary>
     [ApiController]
-    [Route("ws_server/api/dashboard/cluster")]
+    [Route("ws_server/api/cluster")]
     public class ClusterController : ControllerBase
     {
         private readonly ILogger<ClusterController> _logger;

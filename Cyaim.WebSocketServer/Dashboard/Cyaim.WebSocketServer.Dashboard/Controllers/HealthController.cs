@@ -13,7 +13,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
     /// 健康检查控制器
     /// </summary>
     [ApiController]
-    [Route("ws_server/api/dashboard/health")]
+    [Route("ws_server/api/health")]
     public class HealthController : ControllerBase
     {
         private readonly ILogger<HealthController> _logger;

@@ -14,7 +14,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
     /// 统计信息控制器
     /// </summary>
     [ApiController]
-    [Route("ws_server/api/dashboard/statistics")]
+    [Route("ws_server/api/statistics")]
     public class StatisticsController : ControllerBase
     {
         private readonly ILogger<StatisticsController> _logger;

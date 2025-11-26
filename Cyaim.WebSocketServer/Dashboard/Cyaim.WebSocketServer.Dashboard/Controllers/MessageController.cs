@@ -18,7 +18,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
     /// 消息发送控制器
     /// </summary>
     [ApiController]
-    [Route("ws_server/api/dashboard/messages")]
+    [Route("ws_server/api/messages")]
     public class MessageController : ControllerBase
     {
         private readonly ILogger<MessageController> _logger;

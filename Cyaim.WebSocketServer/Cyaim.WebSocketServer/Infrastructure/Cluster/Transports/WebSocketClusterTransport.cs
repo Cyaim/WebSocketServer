@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -62,8 +63,91 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
         public async Task StartAsync()
         {
             _logger.LogInformation($"Starting WebSocket cluster transport for node {_nodeId}");
-            // Connections will be established when SendAsync or BroadcastAsync is called
-            // 连接将在调用 SendAsync 或 BroadcastAsync 时建立
+            _logger.LogInformation($"Registered nodes count: {_nodes.Count}");
+            
+            // Try to establish connections to all registered nodes / 尝试建立到所有已注册节点的连接
+            if (_nodes.Count > 0)
+            {
+                _logger.LogInformation($"Attempting to connect to {_nodes.Count} cluster node(s): {string.Join(", ", _nodes.Values.Select(n => n.NodeId))}");
+                var connectionTasks = new List<Task>();
+                foreach (var node in _nodes.Values)
+                {
+                    if (node.NodeId != _nodeId)
+                    {
+                        var targetNodeId = node.NodeId; // Capture for closure
+                        var targetNode = node; // Capture for closure
+                        connectionTasks.Add(Task.Run(async () =>
+                        {
+                            try
+                            {
+                                // Wait a bit before connecting to allow other nodes to start / 等待一下再连接，让其他节点有时间启动
+                                // Use exponential backoff for retries / 使用指数退避进行重试
+                                for (int attempt = 0; attempt < 3; attempt++)
+                                {
+                                    if (attempt > 0)
+                                    {
+                                        var delay = (int)(1000 * Math.Pow(2, attempt - 1)); // 1s, 2s, 4s
+                                        _logger.LogInformation($"Retrying connection to node {targetNodeId} (attempt {attempt + 1}/3) after {delay}ms");
+                                        await Task.Delay(delay, _cancellationTokenSource.Token);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogInformation($"Waiting 2 seconds before initial connection attempt to node {targetNodeId}");
+                                        await Task.Delay(2000, _cancellationTokenSource.Token); // Initial delay
+                                    }
+                                    
+                                    try
+                                    {
+                                        _logger.LogInformation($"Connection attempt {attempt + 1} to node {targetNodeId} at ws://{targetNode.Address}:{targetNode.Port}{targetNode.TransportConfig ?? "/cluster"}");
+                                        await GetOrCreateConnection(targetNodeId, targetNode);
+                                        _logger.LogInformation($"✓ Successfully connected to node {targetNodeId}");
+                                        return; // Success, exit retry loop
+                                    }
+                                    catch (Exception connectEx) when (attempt < 2) // Retry on failure except last attempt
+                                    {
+                                        _logger.LogWarning(connectEx, $"Connection attempt {attempt + 1} to node {targetNodeId} failed, will retry. Error: {connectEx.Message}");
+                                        // Continue to next attempt
+                                    }
+                                }
+                                _logger.LogError($"Failed to connect to node {targetNodeId} after 3 attempts");
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                _logger.LogInformation($"Connection to node {targetNodeId} was cancelled");
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, $"Failed to establish initial connection to node {targetNodeId} after retries, will retry on first message");
+                            }
+                        }));
+                    }
+                }
+                
+                // Wait a reasonable time for connections to establish / 等待合理时间让连接建立
+                _logger.LogInformation("Waiting for cluster connections to establish...");
+                try
+                {
+                    await Task.WhenAny(Task.WhenAll(connectionTasks), Task.Delay(10000)); // Wait up to 10 seconds
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error waiting for connections");
+                }
+                
+                var connectedCount = _connections.Count;
+                var expectedCount = _nodes.Count - 1; // Exclude self
+                _logger.LogInformation($"Cluster transport initialization: {connectedCount}/{expectedCount} node(s) connected");
+                
+                if (connectedCount < expectedCount)
+                {
+                    _logger.LogWarning($"Only {connectedCount} out of {expectedCount} connections established. Some nodes may not be reachable.");
+                }
+            }
+            else
+            {
+                _logger.LogInformation("No cluster nodes registered, running in standalone mode");
+            }
+            
             await Task.CompletedTask;
         }
 
@@ -120,7 +204,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
                 var client = new ClientWebSocket();
                 var uri = new Uri($"ws://{node.Address}:{node.Port}{node.TransportConfig ?? "/cluster"}");
                 
+                _logger.LogInformation($"Attempting to connect to node {nodeId} at {uri}");
                 await client.ConnectAsync(uri, _cancellationTokenSource.Token);
+                _logger.LogInformation($"WebSocket connection to {uri} established successfully");
                 
                 if (_connections.TryAdd(nodeId, client))
                 {
@@ -133,10 +219,25 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
                     
                     return client;
                 }
+                else
+                {
+                    // Connection was added by another thread / 连接已被另一个线程添加
+                    client.Dispose();
+                    if (_connections.TryGetValue(nodeId, out var existing))
+                    {
+                        return existing;
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogDebug($"Connection to node {nodeId} was cancelled");
+                throw;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to connect to node {nodeId}");
+                _logger.LogError(ex, $"Failed to connect to node {nodeId} at ws://{node.Address}:{node.Port}{node.TransportConfig ?? "/cluster"}. Error: {ex.GetType().Name}: {ex.Message}");
+                // Don't throw, allow retry on next SendAsync call / 不抛出异常，允许在下次 SendAsync 调用时重试
                 throw;
             }
 
@@ -214,16 +315,29 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
 
             if (!_nodes.TryGetValue(nodeId, out var node))
             {
-                _logger.LogWarning($"Node {nodeId} not found, cannot send message");
+                _logger.LogWarning($"Node {nodeId} not found in registered nodes. Available nodes: {string.Join(", ", _nodes.Keys)}");
                 return;
             }
 
-            var connection = await GetOrCreateConnection(nodeId, node);
-            if (connection == null || connection.State != WebSocketState.Open)
+            ClientWebSocket connection = null;
+            try
             {
-                _logger.LogWarning($"Cannot send message to node {nodeId}, connection not available");
+                _logger.LogDebug($"Getting connection to node {nodeId} for message type {message.Type}");
+                connection = await GetOrCreateConnection(nodeId, node);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Failed to get or create connection to node {nodeId}, message will be dropped. Error: {ex.Message}");
                 return;
             }
+            
+            if (connection == null || connection.State != WebSocketState.Open)
+            {
+                _logger.LogWarning($"Cannot send message to node {nodeId}, connection not available (state: {connection?.State}). Active connections: {_connections.Count}");
+                return;
+            }
+            
+            _logger.LogDebug($"Sending {message.Type} message to node {nodeId}");
 
             message.FromNodeId = _nodeId;
             message.ToNodeId = nodeId;

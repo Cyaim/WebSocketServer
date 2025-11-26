@@ -13,7 +13,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
     /// 连接路由控制器
     /// </summary>
     [ApiController]
-    [Route("ws_server/api/dashboard/routes")]
+    [Route("ws_server/api/routes")]
     public class RouteController : ControllerBase
     {
         private readonly ILogger<RouteController> _logger;
