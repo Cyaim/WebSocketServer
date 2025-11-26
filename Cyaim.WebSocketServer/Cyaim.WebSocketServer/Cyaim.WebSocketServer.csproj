@@ -1,76 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<TargetFrameworks>netstandard2.1;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
-	</PropertyGroup>
-	<PropertyGroup>
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-		<PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
-		<Authors>Psyche</Authors>
-		<Company>Cyaim Studio</Company>
-		<PackageProjectUrl>https://github.com/Cyaim/WebSocketServer</PackageProjectUrl>
-		<PackageLicenseFile>LICENSE</PackageLicenseFile>
-		<RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
-		<Copyright>Copyright © Cyaim Studio</Copyright>
-		<Version>1.7.8</Version>
-		<PackageReleaseNotes>
-			fix: When fixing a Task type with no return value as the target endpoint, an exception will be thrown.
-			perf: Exception information will be displayed internally.
-		</PackageReleaseNotes>
-		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
-		<Description>
-			WebSocketServer is lightweight and high performance WebSocket server library.Support route, full duplex communication, multiplexing, pipeline, encryption.
-			WebSocketServer 是一个轻量级、高性能WebSocket服务端库。支持 WebApi 路由、全双工通信、多路复用、管道、加密等。
-		</Description>
-		<PackageReadmeFile>README.md</PackageReadmeFile>
-	</PropertyGroup>
-
-	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0'">
-		<FrameworkReference Include="Microsoft.AspNetCore.App" />
-	</ItemGroup>
-
-	<!-- 对于 .NET Standard 2.1 版本 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
-		<!--<PackageReference Include="System.Text.Encodings.Web" Version="8.0.0" />-->
-		<PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.1.1" />
-		<PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.1" />
-		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
-		<PackageReference Include="Microsoft.AspNetCore.Hosting.Server.Abstractions" Version="2.1.1" />
-		<PackageReference Include="System.Text.Json" Version="8.0.6" />
-		<PackageReference Include="System.Threading.Channels" Version="8.0.0" />
-	</ItemGroup>
-	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
-		<!--<PackageReference Include="System.Text.Encodings.Web" Version="8.0.0" />-->
-		<PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.3.0" />
-		<PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.10" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.10" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.10" />
-		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.10" />
-		<PackageReference Include="Microsoft.AspNetCore.Hosting.Server.Abstractions" Version="2.3.0" />
-		<PackageReference Include="System.Text.Json" Version="9.0.10" />
-		<PackageReference Include="System.Threading.Channels" Version="9.0.10" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<None Include="..\..\LICENSE">
-			<Pack>True</Pack>
-			<PackagePath></PackagePath>
-		</None>
-		<None Include="..\..\README.md">
-			<Pack>True</Pack>
-			<PackagePath>\</PackagePath>
-		</None>
-		<None Include="WebSocketRepository_Logo.png">
-			<Pack>True</Pack>
-			<PackagePath></PackagePath>
-		</None>
-	</ItemGroup>
-
-	<ItemGroup>
-	  <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
-	</ItemGroup>
-
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.1;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+    </PropertyGroup>
+    <PropertyGroup>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+        <Authors>Psyche</Authors>
+        <Company>Cyaim Studio</Company>
+        <PackageProjectUrl>https://github.com/Cyaim/WebSocketServer</PackageProjectUrl>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
+        <Copyright>Copyright © Cyaim Studio</Copyright>
+        <Version>1.7.8</Version>
+        <PackageReleaseNotes>            
+            fix: When fixing a Task type with no return value as the target endpoint, an exception will be thrown.
+            perf: Exception information will be displayed internally.
+        </PackageReleaseNotes>
+        <PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
+        <Description>            
+            WebSocketServer is lightweight and high performance WebSocket server library.Support route, full duplex communication, multiplexing, pipeline, encryption.
+            WebSocketServer 是一个轻量级、高性能WebSocket服务端库。支�?WebApi 路由、全双工通信、多路复用、管道、加密等。\\r
+        </Description>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0'">
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    </ItemGroup>
+    <!-- 对于 .NET Standard 2.1 版本 -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+        <!-- <PackageReference Include="System.Text.Encodings.Web" Version="8.0.0" /> -->
+        <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions"
+                          Version="2.1.1" />
+        <PackageReference Include="Microsoft.CSharp"
+                          Version="4.7.0" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"
+                          Version="8.0.1" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection"
+                          Version="8.0.0" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"
+                          Version="8.0.1" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions"
+                          Version="8.0.0" />
+        <PackageReference Include="Microsoft.AspNetCore.Hosting.Server.Abstractions"
+                          Version="2.1.1" />
+        <PackageReference Include="System.Text.Json"
+                          Version="8.0.6" />
+        <PackageReference Include="System.Threading.Channels"
+                          Version="8.0.0" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+        <!-- <PackageReference Include="System.Text.Encodings.Web" Version="8.0.0" /> -->
+        <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions"
+                          Version="2.3.0" />
+        <PackageReference Include="Microsoft.CSharp"
+                          Version="4.7.0" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"
+                          Version="9.0.10" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection"
+                          Version="9.0.10" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"
+                          Version="9.0.10" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions"
+                          Version="9.0.10" />
+        <PackageReference Include="Microsoft.AspNetCore.Hosting.Server.Abstractions"
+                          Version="2.3.0" />
+        <PackageReference Include="System.Text.Json"
+                          Version="9.0.10" />
+        <PackageReference Include="System.Threading.Channels"
+                          Version="9.0.10" />
+    </ItemGroup>
+    <ItemGroup>
+        <None Include="..\..\LICENSE">
+            <Pack>True</Pack>
+            <PackagePath />
+        </None>
+        <None Include="..\..\README.md">
+            <Pack>True</Pack>
+            <PackagePath>\</PackagePath>
+        </None>
+        <None Include="WebSocketRepository_Logo.png">
+            <Pack>True</Pack>
+            <PackagePath />
+        </None>
+    </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder"
+                          Version="10.0.0" />
+    </ItemGroup>
+    <!-- OpenTelemetry Metrics for OTLP export -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0'">
+        <PackageReference Include="OpenTelemetry"
+                          Version="1.9.0" />
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting"
+                          Version="1.9.0" />
+        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol"
+                          Version="1.9.0" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+        <PackageReference Include="OpenTelemetry"
+                          Version="1.9.0" />
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting"
+                          Version="1.9.0" />
+        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol"
+                          Version="1.9.0" />
+    </ItemGroup>
 </Project>

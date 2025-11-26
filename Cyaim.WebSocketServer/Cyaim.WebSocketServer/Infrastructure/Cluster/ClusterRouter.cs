@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Cyaim.WebSocketServer.Infrastructure.Metrics;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 {
@@ -21,6 +22,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         private readonly RaftNode _raftNode;
         private readonly string _nodeId;
         private IWebSocketConnectionProvider _connectionProvider;
+        private WebSocketMetricsCollector _metricsCollector;
 
         // Connection routing: connectionId -> nodeId / 连接路由：连接ID -> 节点ID
         /// <summary>
@@ -77,6 +79,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         }
 
         /// <summary>
+        /// Set metrics collector
+        /// 设置指标收集器
+        /// </summary>
+        /// <param name="metricsCollector">Metrics collector / 指标收集器</param>
+        public void SetMetricsCollector(WebSocketMetricsCollector metricsCollector)
+        {
+            _metricsCollector = metricsCollector;
+        }
+
+        /// <summary>
         /// Register a WebSocket connection to this node
         /// 将 WebSocket 连接注册到此节点
         /// </summary>
@@ -87,6 +99,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             _connectionRoutes.AddOrUpdate(connectionId, _nodeId, (key, oldValue) => _nodeId);
 
             _nodeConnectionCounts.AddOrUpdate(_nodeId, 1, (key, value) => value + 1);
+
+            // 更新集群连接数指标
+            _metricsCollector?.UpdateClusterConnectionCount(1, _nodeId);
 
             // Broadcast connection registration to cluster
             if (_raftNode.IsLeader())
@@ -121,6 +136,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             if (_connectionRoutes.TryRemove(connectionId, out var nodeId))
             {
                 _nodeConnectionCounts.AddOrUpdate(nodeId, 0, (key, value) => Math.Max(0, value - 1));
+
+                // 更新集群连接数指标
+                _metricsCollector?.UpdateClusterConnectionCount(-1, nodeId);
 
                 if (_raftNode.IsLeader())
                 {
@@ -241,12 +259,17 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 };
 
                 await _transport.SendAsync(targetNodeId, message);
+                
+                // 记录集群消息转发指标
+                _metricsCollector?.RecordClusterMessageForwarded(_nodeId, targetNodeId);
+                
                 _logger.LogDebug($"Forwarded message for connection {connectionId} to node {targetNodeId}");
                 return true;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Failed to forward message for connection {connectionId} to node {targetNodeId}");
+                _metricsCollector?.RecordError("cluster_forward_failed", _nodeId);
                 return false;
             }
         }
@@ -347,6 +370,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 // 如果这是目标节点，查找本地 WebSocket 并发送
                 if (forward.TargetNodeId == _nodeId)
                 {
+                    // 记录集群消息接收指标
+                    _metricsCollector?.RecordClusterMessageReceived(forward.TargetNodeId);
+                    
                     _logger.LogDebug($"Received forward message for local connection {forward.ConnectionId}");
 
                     if (_connectionProvider != null)

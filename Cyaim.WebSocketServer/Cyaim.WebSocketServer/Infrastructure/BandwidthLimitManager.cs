@@ -234,15 +234,14 @@ namespace Cyaim.WebSocketServer.Infrastructure
     }
 
     /// <summary>
-    /// 通道带宽跟踪器
+    /// 通道带宽跟踪器（无锁实现）
     /// </summary>
     internal class ChannelBandwidthTracker : IDisposable
     {
-        private readonly object _lock = new object();
         private readonly BandwidthLimitPolicy _policy;
         private long _totalBytes;
-        private DateTime _windowStart;
-        private readonly TimeSpan _windowSize = TimeSpan.FromSeconds(1);
+        private long _windowStartTicks; // 使用 Ticks 存储时间，支持原子操作
+        private readonly long _windowSizeTicks = TimeSpan.FromSeconds(1).Ticks;
 
         public string Channel { get; }
 
@@ -250,49 +249,99 @@ namespace Cyaim.WebSocketServer.Infrastructure
         {
             Channel = channel;
             _policy = policy;
-            _windowStart = DateTime.UtcNow;
+            _windowStartTicks = DateTime.UtcNow.Ticks;
         }
 
         public void RecordData(int bytes)
         {
-            lock (_lock)
+            var nowTicks = DateTime.UtcNow.Ticks;
+            long currentWindowStart;
+            long currentTotalBytes;
+            long newWindowStart;
+            long newTotalBytes;
+
+            // 无锁循环，直到成功更新
+            do
             {
-                var now = DateTime.UtcNow;
-                if (now - _windowStart >= _windowSize)
+                currentWindowStart = Interlocked.Read(ref _windowStartTicks);
+                currentTotalBytes = Interlocked.Read(ref _totalBytes);
+
+                // 检查是否需要重置窗口
+                if (nowTicks - currentWindowStart >= _windowSizeTicks)
                 {
-                    _totalBytes = 0;
-                    _windowStart = now;
+                    newWindowStart = nowTicks;
+                    newTotalBytes = bytes;
                 }
-                _totalBytes += bytes;
-            }
+                else
+                {
+                    newWindowStart = currentWindowStart;
+                    newTotalBytes = currentTotalBytes + bytes;
+                }
+
+                // 尝试原子更新窗口开始时间
+                var originalWindowStart = Interlocked.CompareExchange(ref _windowStartTicks, newWindowStart, currentWindowStart);
+                if (originalWindowStart == currentWindowStart)
+                {
+                    // 窗口时间更新成功，更新总字节数
+                    if (newWindowStart != currentWindowStart)
+                    {
+                        // 窗口已重置，直接设置新值
+                        Interlocked.Exchange(ref _totalBytes, newTotalBytes);
+                    }
+                    else
+                    {
+                        // 窗口未重置，累加字节数
+                        Interlocked.Add(ref _totalBytes, bytes);
+                    }
+                    break;
+                }
+                // 如果窗口时间被其他线程修改，重试
+            } while (true);
         }
 
         public TimeSpan CalculateWaitTime(int dataSize, long limitBytesPerSecond)
         {
-            lock (_lock)
+            var nowTicks = DateTime.UtcNow.Ticks;
+            long currentWindowStart;
+            long currentTotalBytes;
+
+            // 无锁读取，可能需要重置窗口
+            do
             {
-                var now = DateTime.UtcNow;
-                var elapsed = now - _windowStart;
-                if (elapsed >= _windowSize)
+                currentWindowStart = Interlocked.Read(ref _windowStartTicks);
+                currentTotalBytes = Interlocked.Read(ref _totalBytes);
+
+                var elapsedTicks = nowTicks - currentWindowStart;
+                if (elapsedTicks >= _windowSizeTicks)
                 {
-                    _totalBytes = 0;
-                    _windowStart = now;
-                    return TimeSpan.Zero;
+                    // 需要重置窗口
+                    var newWindowStart = nowTicks;
+                    var originalWindowStart = Interlocked.CompareExchange(ref _windowStartTicks, newWindowStart, currentWindowStart);
+                    if (originalWindowStart == currentWindowStart)
+                    {
+                        // 成功重置窗口
+                        Interlocked.Exchange(ref _totalBytes, 0);
+                        return TimeSpan.Zero;
+                    }
+                    // 窗口被其他线程重置，重试
+                    continue;
                 }
 
-                var currentRate = _totalBytes / Math.Max(elapsed.TotalSeconds, 0.001);
+                // 窗口未过期，计算等待时间
+                var elapsed = TimeSpan.FromTicks(elapsedTicks).TotalSeconds;
+                var currentRate = currentTotalBytes / Math.Max(elapsed, 0.001);
                 var targetRate = limitBytesPerSecond;
 
-                if (currentRate + dataSize / _windowSize.TotalSeconds <= targetRate)
+                if (currentRate + dataSize / TimeSpan.FromTicks(_windowSizeTicks).TotalSeconds <= targetRate)
                 {
                     return TimeSpan.Zero;
                 }
 
                 // 计算需要等待的时间
-                var excessBytes = _totalBytes + dataSize - (targetRate * elapsed.TotalSeconds);
+                var excessBytes = currentTotalBytes + dataSize - (targetRate * elapsed);
                 var waitSeconds = excessBytes / targetRate;
                 return TimeSpan.FromSeconds(Math.Max(0, waitSeconds));
-            }
+            } while (true);
         }
 
         public void Dispose()
@@ -302,15 +351,14 @@ namespace Cyaim.WebSocketServer.Infrastructure
     }
 
     /// <summary>
-    /// 连接带宽跟踪器
+    /// 连接带宽跟踪器（无锁实现）
     /// </summary>
     internal class ConnectionBandwidthTracker : IDisposable
     {
-        private readonly object _lock = new object();
         private readonly BandwidthLimitPolicy _policy;
         private long _totalBytes;
-        private DateTime _windowStart;
-        private readonly TimeSpan _windowSize = TimeSpan.FromSeconds(1);
+        private long _windowStartTicks; // 使用 Ticks 存储时间，支持原子操作
+        private readonly long _windowSizeTicks = TimeSpan.FromSeconds(1).Ticks;
 
         public string ConnectionId { get; }
         public string Channel { get; }
@@ -320,74 +368,142 @@ namespace Cyaim.WebSocketServer.Infrastructure
             ConnectionId = connectionId;
             Channel = channel;
             _policy = policy;
-            _windowStart = DateTime.UtcNow;
+            _windowStartTicks = DateTime.UtcNow.Ticks;
         }
 
         public void RecordData(int bytes)
         {
-            lock (_lock)
+            var nowTicks = DateTime.UtcNow.Ticks;
+            long currentWindowStart;
+            long currentTotalBytes;
+            long newWindowStart;
+            long newTotalBytes;
+
+            // 无锁循环，直到成功更新
+            do
             {
-                var now = DateTime.UtcNow;
-                if (now - _windowStart >= _windowSize)
+                currentWindowStart = Interlocked.Read(ref _windowStartTicks);
+                currentTotalBytes = Interlocked.Read(ref _totalBytes);
+
+                // 检查是否需要重置窗口
+                if (nowTicks - currentWindowStart >= _windowSizeTicks)
                 {
-                    _totalBytes = 0;
-                    _windowStart = now;
+                    newWindowStart = nowTicks;
+                    newTotalBytes = bytes;
                 }
-                _totalBytes += bytes;
-            }
+                else
+                {
+                    newWindowStart = currentWindowStart;
+                    newTotalBytes = currentTotalBytes + bytes;
+                }
+
+                // 尝试原子更新窗口开始时间
+                var originalWindowStart = Interlocked.CompareExchange(ref _windowStartTicks, newWindowStart, currentWindowStart);
+                if (originalWindowStart == currentWindowStart)
+                {
+                    // 窗口时间更新成功，更新总字节数
+                    if (newWindowStart != currentWindowStart)
+                    {
+                        // 窗口已重置，直接设置新值
+                        Interlocked.Exchange(ref _totalBytes, newTotalBytes);
+                    }
+                    else
+                    {
+                        // 窗口未重置，累加字节数
+                        Interlocked.Add(ref _totalBytes, bytes);
+                    }
+                    break;
+                }
+                // 如果窗口时间被其他线程修改，重试
+            } while (true);
         }
 
         public TimeSpan CalculateWaitTime(int dataSize, long limitBytesPerSecond)
         {
-            lock (_lock)
+            var nowTicks = DateTime.UtcNow.Ticks;
+            long currentWindowStart;
+            long currentTotalBytes;
+
+            // 无锁读取，可能需要重置窗口
+            do
             {
-                var now = DateTime.UtcNow;
-                var elapsed = now - _windowStart;
-                if (elapsed >= _windowSize)
+                currentWindowStart = Interlocked.Read(ref _windowStartTicks);
+                currentTotalBytes = Interlocked.Read(ref _totalBytes);
+
+                var elapsedTicks = nowTicks - currentWindowStart;
+                if (elapsedTicks >= _windowSizeTicks)
                 {
-                    _totalBytes = 0;
-                    _windowStart = now;
-                    return TimeSpan.Zero;
+                    // 需要重置窗口
+                    var newWindowStart = nowTicks;
+                    var originalWindowStart = Interlocked.CompareExchange(ref _windowStartTicks, newWindowStart, currentWindowStart);
+                    if (originalWindowStart == currentWindowStart)
+                    {
+                        // 成功重置窗口
+                        Interlocked.Exchange(ref _totalBytes, 0);
+                        return TimeSpan.Zero;
+                    }
+                    // 窗口被其他线程重置，重试
+                    continue;
                 }
 
-                var currentRate = _totalBytes / Math.Max(elapsed.TotalSeconds, 0.001);
+                // 窗口未过期，计算等待时间
+                var elapsed = TimeSpan.FromTicks(elapsedTicks).TotalSeconds;
+                var currentRate = currentTotalBytes / Math.Max(elapsed, 0.001);
                 var targetRate = limitBytesPerSecond;
 
-                if (currentRate + dataSize / _windowSize.TotalSeconds <= targetRate)
+                if (currentRate + dataSize / TimeSpan.FromTicks(_windowSizeTicks).TotalSeconds <= targetRate)
                 {
                     return TimeSpan.Zero;
                 }
 
-                var excessBytes = _totalBytes + dataSize - (targetRate * elapsed.TotalSeconds);
+                // 计算需要等待的时间
+                var excessBytes = currentTotalBytes + dataSize - (targetRate * elapsed);
                 var waitSeconds = excessBytes / targetRate;
                 return TimeSpan.FromSeconds(Math.Max(0, waitSeconds));
-            }
+            } while (true);
         }
 
         public TimeSpan CalculateWaitTimeForGuarantee(int dataSize, long guaranteeBytesPerSecond)
         {
             // 最低带宽保障：确保每个连接都能获得最低带宽
-            // 这里实现一个简单的保障机制
-            lock (_lock)
+            var nowTicks = DateTime.UtcNow.Ticks;
+            long currentWindowStart;
+            long currentTotalBytes;
+
+            // 无锁读取，可能需要重置窗口
+            do
             {
-                var now = DateTime.UtcNow;
-                var elapsed = now - _windowStart;
-                if (elapsed >= _windowSize)
+                currentWindowStart = Interlocked.Read(ref _windowStartTicks);
+                currentTotalBytes = Interlocked.Read(ref _totalBytes);
+
+                var elapsedTicks = nowTicks - currentWindowStart;
+                if (elapsedTicks >= _windowSizeTicks)
                 {
-                    _totalBytes = 0;
-                    _windowStart = now;
-                    return TimeSpan.Zero;
+                    // 需要重置窗口
+                    var newWindowStart = nowTicks;
+                    var originalWindowStart = Interlocked.CompareExchange(ref _windowStartTicks, newWindowStart, currentWindowStart);
+                    if (originalWindowStart == currentWindowStart)
+                    {
+                        // 成功重置窗口
+                        Interlocked.Exchange(ref _totalBytes, 0);
+                        return TimeSpan.Zero;
+                    }
+                    // 窗口被其他线程重置，重试
+                    continue;
                 }
 
+                // 窗口未过期，计算保障等待时间
+                var elapsed = TimeSpan.FromTicks(elapsedTicks).TotalSeconds;
+                
                 // 如果当前速率低于保障速率，不需要等待
-                var currentRate = _totalBytes / Math.Max(elapsed.TotalSeconds, 0.001);
+                var currentRate = currentTotalBytes / Math.Max(elapsed, 0.001);
                 if (currentRate < guaranteeBytesPerSecond)
                 {
                     return TimeSpan.Zero;
                 }
 
                 // 如果超过保障速率，需要等待
-                var excessBytes = _totalBytes - (guaranteeBytesPerSecond * elapsed.TotalSeconds);
+                var excessBytes = currentTotalBytes - (guaranteeBytesPerSecond * elapsed);
                 if (excessBytes > 0)
                 {
                     var waitSeconds = excessBytes / guaranteeBytesPerSecond;
@@ -395,7 +511,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 }
 
                 return TimeSpan.Zero;
-            }
+            } while (true);
         }
 
         public void Dispose()
@@ -405,15 +521,14 @@ namespace Cyaim.WebSocketServer.Infrastructure
     }
 
     /// <summary>
-    /// 端点带宽跟踪器
+    /// 端点带宽跟踪器（无锁实现）
     /// </summary>
     internal class EndPointBandwidthTracker : IDisposable
     {
-        private readonly object _lock = new object();
         private readonly BandwidthLimitPolicy _policy;
         private long _totalBytes;
-        private DateTime _windowStart;
-        private readonly TimeSpan _windowSize = TimeSpan.FromSeconds(1);
+        private long _windowStartTicks; // 使用 Ticks 存储时间，支持原子操作
+        private readonly long _windowSizeTicks = TimeSpan.FromSeconds(1).Ticks;
 
         public string EndPoint { get; }
 
@@ -421,70 +536,141 @@ namespace Cyaim.WebSocketServer.Infrastructure
         {
             EndPoint = endPoint;
             _policy = policy;
-            _windowStart = DateTime.UtcNow;
+            _windowStartTicks = DateTime.UtcNow.Ticks;
         }
 
         public void RecordData(int bytes)
         {
-            lock (_lock)
+            var nowTicks = DateTime.UtcNow.Ticks;
+            long currentWindowStart;
+            long currentTotalBytes;
+            long newWindowStart;
+            long newTotalBytes;
+
+            // 无锁循环，直到成功更新
+            do
             {
-                var now = DateTime.UtcNow;
-                if (now - _windowStart >= _windowSize)
+                currentWindowStart = Interlocked.Read(ref _windowStartTicks);
+                currentTotalBytes = Interlocked.Read(ref _totalBytes);
+
+                // 检查是否需要重置窗口
+                if (nowTicks - currentWindowStart >= _windowSizeTicks)
                 {
-                    _totalBytes = 0;
-                    _windowStart = now;
+                    newWindowStart = nowTicks;
+                    newTotalBytes = bytes;
                 }
-                _totalBytes += bytes;
-            }
+                else
+                {
+                    newWindowStart = currentWindowStart;
+                    newTotalBytes = currentTotalBytes + bytes;
+                }
+
+                // 尝试原子更新窗口开始时间
+                var originalWindowStart = Interlocked.CompareExchange(ref _windowStartTicks, newWindowStart, currentWindowStart);
+                if (originalWindowStart == currentWindowStart)
+                {
+                    // 窗口时间更新成功，更新总字节数
+                    if (newWindowStart != currentWindowStart)
+                    {
+                        // 窗口已重置，直接设置新值
+                        Interlocked.Exchange(ref _totalBytes, newTotalBytes);
+                    }
+                    else
+                    {
+                        // 窗口未重置，累加字节数
+                        Interlocked.Add(ref _totalBytes, bytes);
+                    }
+                    break;
+                }
+                // 如果窗口时间被其他线程修改，重试
+            } while (true);
         }
 
         public TimeSpan CalculateWaitTime(int dataSize, long limitBytesPerSecond)
         {
-            lock (_lock)
+            var nowTicks = DateTime.UtcNow.Ticks;
+            long currentWindowStart;
+            long currentTotalBytes;
+
+            // 无锁读取，可能需要重置窗口
+            do
             {
-                var now = DateTime.UtcNow;
-                var elapsed = now - _windowStart;
-                if (elapsed >= _windowSize)
+                currentWindowStart = Interlocked.Read(ref _windowStartTicks);
+                currentTotalBytes = Interlocked.Read(ref _totalBytes);
+
+                var elapsedTicks = nowTicks - currentWindowStart;
+                if (elapsedTicks >= _windowSizeTicks)
                 {
-                    _totalBytes = 0;
-                    _windowStart = now;
-                    return TimeSpan.Zero;
+                    // 需要重置窗口
+                    var newWindowStart = nowTicks;
+                    var originalWindowStart = Interlocked.CompareExchange(ref _windowStartTicks, newWindowStart, currentWindowStart);
+                    if (originalWindowStart == currentWindowStart)
+                    {
+                        // 成功重置窗口
+                        Interlocked.Exchange(ref _totalBytes, 0);
+                        return TimeSpan.Zero;
+                    }
+                    // 窗口被其他线程重置，重试
+                    continue;
                 }
 
-                var currentRate = _totalBytes / Math.Max(elapsed.TotalSeconds, 0.001);
+                // 窗口未过期，计算等待时间
+                var elapsed = TimeSpan.FromTicks(elapsedTicks).TotalSeconds;
+                var currentRate = currentTotalBytes / Math.Max(elapsed, 0.001);
                 var targetRate = limitBytesPerSecond;
 
-                if (currentRate + dataSize / _windowSize.TotalSeconds <= targetRate)
+                if (currentRate + dataSize / TimeSpan.FromTicks(_windowSizeTicks).TotalSeconds <= targetRate)
                 {
                     return TimeSpan.Zero;
                 }
 
-                var excessBytes = _totalBytes + dataSize - (targetRate * elapsed.TotalSeconds);
+                // 计算需要等待的时间
+                var excessBytes = currentTotalBytes + dataSize - (targetRate * elapsed);
                 var waitSeconds = excessBytes / targetRate;
                 return TimeSpan.FromSeconds(Math.Max(0, waitSeconds));
-            }
+            } while (true);
         }
 
         public TimeSpan CalculateWaitTimeForGuarantee(int dataSize, long guaranteeBytesPerSecond)
         {
-            lock (_lock)
+            var nowTicks = DateTime.UtcNow.Ticks;
+            long currentWindowStart;
+            long currentTotalBytes;
+
+            // 无锁读取，可能需要重置窗口
+            do
             {
-                var now = DateTime.UtcNow;
-                var elapsed = now - _windowStart;
-                if (elapsed >= _windowSize)
+                currentWindowStart = Interlocked.Read(ref _windowStartTicks);
+                currentTotalBytes = Interlocked.Read(ref _totalBytes);
+
+                var elapsedTicks = nowTicks - currentWindowStart;
+                if (elapsedTicks >= _windowSizeTicks)
                 {
-                    _totalBytes = 0;
-                    _windowStart = now;
-                    return TimeSpan.Zero;
+                    // 需要重置窗口
+                    var newWindowStart = nowTicks;
+                    var originalWindowStart = Interlocked.CompareExchange(ref _windowStartTicks, newWindowStart, currentWindowStart);
+                    if (originalWindowStart == currentWindowStart)
+                    {
+                        // 成功重置窗口
+                        Interlocked.Exchange(ref _totalBytes, 0);
+                        return TimeSpan.Zero;
+                    }
+                    // 窗口被其他线程重置，重试
+                    continue;
                 }
 
-                var currentRate = _totalBytes / Math.Max(elapsed.TotalSeconds, 0.001);
+                // 窗口未过期，计算保障等待时间
+                var elapsed = TimeSpan.FromTicks(elapsedTicks).TotalSeconds;
+                
+                // 如果当前速率低于保障速率，不需要等待
+                var currentRate = currentTotalBytes / Math.Max(elapsed, 0.001);
                 if (currentRate < guaranteeBytesPerSecond)
                 {
                     return TimeSpan.Zero;
                 }
 
-                var excessBytes = _totalBytes - (guaranteeBytesPerSecond * elapsed.TotalSeconds);
+                // 如果超过保障速率，需要等待
+                var excessBytes = currentTotalBytes - (guaranteeBytesPerSecond * elapsed);
                 if (excessBytes > 0)
                 {
                     var waitSeconds = excessBytes / guaranteeBytesPerSecond;
@@ -492,7 +678,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 }
 
                 return TimeSpan.Zero;
-            }
+            } while (true);
         }
 
         public void Dispose()

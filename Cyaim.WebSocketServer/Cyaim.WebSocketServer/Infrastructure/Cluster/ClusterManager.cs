@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Cyaim.WebSocketServer.Infrastructure.Metrics;
 using Microsoft.Extensions.Logging;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Cluster
@@ -60,6 +61,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         public void SetConnectionProvider(IWebSocketConnectionProvider provider)
         {
             _connectionProvider = provider;
+        }
+
+        /// <summary>
+        /// Set metrics collector
+        /// 设置指标收集器
+        /// </summary>
+        /// <param name="metricsCollector">Metrics collector / 指标收集器</param>
+        public void SetMetricsCollector(WebSocketMetricsCollector metricsCollector)
+        {
+            _router.SetMetricsCollector(metricsCollector);
         }
 
         /// <summary>

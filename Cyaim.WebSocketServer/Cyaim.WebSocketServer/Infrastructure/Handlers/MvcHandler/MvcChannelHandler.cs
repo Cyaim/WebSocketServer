@@ -1,4 +1,5 @@
 ﻿using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Cyaim.WebSocketServer.Infrastructure.Metrics;
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
 using Microsoft.CSharp.RuntimeBinder;
@@ -32,6 +33,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         private ILogger<WebSocketRouteMiddleware> logger;
         private WebSocketRouteOption webSocketOption;
         private BandwidthLimitManager bandwidthLimitManager;
+        private WebSocketMetricsCollector _metricsCollector;
 
         /// <summary>
         /// Get instance
@@ -125,6 +127,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             this.logger = logger;
             webSocketOption = webSocketOptions;
 
+            // 获取指标收集器
+            if (WebSocketRouteOption.ApplicationServices != null)
+            {
+                _metricsCollector = WebSocketRouteOption.ApplicationServices.GetService<WebSocketMetricsCollector>();
+            }
+
             // 初始化带宽限速管理器
             // 如果 BandwidthLimitPolicy 未设置，尝试从 IOptions 加载
             var policy = webSocketOptions.BandwidthLimitPolicy;
@@ -194,6 +202,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             return;
                         }
 
+                        // 记录连接建立指标
+                        var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
+                        _metricsCollector?.RecordConnectionEstablished(currentNodeId, context.Request.Path);
+
                         // 执行BeforeReceivingData管道
                         _ = await InvokePipeline(RequestPipelineStage.Connected, context, webSocket, null, null);
 
@@ -232,6 +244,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     bandwidthLimitManager.RemoveConnection(context.Connection.Id);
                 }
+
+                // 记录连接关闭指标
+                var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
+                var closeStatusStr = webSocketCloseStatus?.ToString();
+                _metricsCollector?.RecordConnectionClosed(currentNodeId, context.Request.Path, closeStatusStr);
 
                 await MvcChannel_OnDisconnected(context, webSocketCloseStatus, webSocketOptions, logger);
 
@@ -326,6 +343,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                                 //await wsReceiveReader.WriteAsync(buffer, 0, result.Count);
                                 await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
+
+                                // 记录消息接收指标
+                                var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
+                                _metricsCollector?.RecordMessageReceived(result.Count, currentNodeId, context.Request.Path);
 
                                 // 执行ReceivingData管道
                                 _ = await InvokePipeline(RequestPipelineStage.ReceivingData, context, webSocket, result, buffer);
@@ -515,7 +536,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 //string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
                 //await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
 
+                // 序列化响应以获取大小
+                string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
+                var responseBytes = Encoding.UTF8.GetBytes(serialJson);
+                
                 await invokeResult.SendAsync(webSocketOption.DefaultResponseJsonSerializerOptions, result.MessageType, timeout: ResponseSendTimeout, encoding: Encoding.UTF8, sendBufferSize: SendTextBufferSize, socket: webSocket).ConfigureAwait(false);
+
+                // 记录消息发送指标
+                var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
+                _metricsCollector?.RecordMessageSent(responseBytes.Length, currentNodeId, context.Request.Path);
             }
             catch (JsonException ex)
             {
