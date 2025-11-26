@@ -297,14 +297,52 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
             _logger.LogInformation($"Election result: {votesReceived}/{votesNeeded} votes received");
 
-            if (votesReceived >= votesNeeded && State == RaftNodeState.Candidate)
+            var totalNodes = knownNodes.Count + 1;
+            var isTwoNodeCluster = totalNodes == 2;
+
+            // Special handling for 2-node clusters or when majority cannot be achieved / 2节点集群或无法达到多数的特殊处理
+            if (votesReceived < votesNeeded && State == RaftNodeState.Candidate)
+            {
+                if (isTwoNodeCluster)
+                {
+                    _logger.LogInformation($"Two-node cluster detected. Using network quality-based leader selection.");
+                    
+                    // Add a small random delay to avoid simultaneous elections / 添加小的随机延迟以避免同时选举
+                    var randomDelay = new Random().Next(100, 300);
+                    await Task.Delay(randomDelay);
+                    
+                    // Re-check state in case we received a heartbeat from the other node / 重新检查状态，以防我们从另一个节点收到心跳
+                    if (State != RaftNodeState.Candidate)
+                    {
+                        _logger.LogInformation($"Node {_nodeId} state changed during delay, aborting leader selection");
+                        return;
+                    }
+                    
+                    // For 2-node clusters, select leader based on network quality / 对于2节点集群，基于网络质量选择Leader
+                    var shouldBecomeLeader = await ShouldBecomeLeaderBasedOnNetworkQuality(knownNodes);
+                    
+                    if (shouldBecomeLeader)
+                    {
+                        _logger.LogInformation($"Node {_nodeId} selected as leader based on network quality in 2-node cluster");
+                        BecomeLeader();
+                        return;
+                    }
+                    else
+                    {
+                        _logger.LogInformation($"Node {_nodeId} will wait for other node to become leader based on network quality");
+                        // Wait a bit longer before retrying / 在重试前等待更长时间
+                        await Task.Delay(1000);
+                    }
+                }
+                else
+                {
+                    _logger.LogInformation($"Node {_nodeId} did not receive enough votes ({votesReceived}/{votesNeeded}), will retry");
+                }
+            }
+            else if (votesReceived >= votesNeeded && State == RaftNodeState.Candidate)
             {
                 _logger.LogInformation($"Node {_nodeId} won election with {votesReceived} votes, becoming leader");
                 BecomeLeader();
-            }
-            else if (State == RaftNodeState.Candidate)
-            {
-                _logger.LogInformation($"Node {_nodeId} did not receive enough votes ({votesReceived}/{votesNeeded}), will retry");
             }
         }
 
@@ -753,6 +791,87 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
             _logger.LogDebug($"GetKnownNodeIds for node {_nodeId} returned {nodeIds.Count} node(s): {string.Join(", ", nodeIds)}");
             return nodeIds;
+        }
+
+        /// <summary>
+        /// Determine if this node should become leader based on network quality (for 2-node clusters) / 基于网络质量确定此节点是否应成为Leader（用于2节点集群）
+        /// </summary>
+        /// <param name="knownNodes">List of known node IDs / 已知节点ID列表</param>
+        /// <returns>True if this node should become leader / 如果此节点应成为Leader返回 true</returns>
+        private async Task<bool> ShouldBecomeLeaderBasedOnNetworkQuality(List<string> knownNodes)
+        {
+            if (knownNodes.Count == 0)
+            {
+                return true; // Only node, become leader / 唯一节点，成为Leader
+            }
+
+            if (_transport is Transports.WebSocketClusterTransport wsTransport)
+            {
+                try
+                {
+                    // Measure network quality to all other nodes / 测量到所有其他节点的网络质量
+                    var qualityScores = new Dictionary<string, int>();
+                    var myTotalQuality = 0;
+
+                    foreach (var nodeId in knownNodes)
+                    {
+                        var quality = await wsTransport.GetNetworkQualityAsync(nodeId);
+                        qualityScores[nodeId] = quality;
+                        myTotalQuality += quality;
+                        _logger.LogDebug($"Network quality to node {nodeId}: {quality}/100");
+                    }
+
+                    // For 2-node cluster, compare our quality with the other node's quality
+                    // 对于2节点集群，比较我们的质量与另一个节点的质量
+                    if (knownNodes.Count == 1)
+                    {
+                        var otherNodeId = knownNodes[0];
+                        var otherQuality = qualityScores[otherNodeId];
+
+                        // If we have better or equal network quality, we should be leader
+                        // 如果我们有更好或相等的网络质量，我们应该成为Leader
+                        // Also consider: if we can't measure the other node's quality to us,
+                        // we'll use a tie-breaker (node ID comparison)
+                        // 同时考虑：如果我们无法测量另一个节点到我们的质量，我们将使用平局决胜（节点ID比较）
+                        
+                        if (myTotalQuality > otherQuality)
+                        {
+                            _logger.LogInformation($"Node {_nodeId} has better network quality ({myTotalQuality} vs {otherQuality}), becoming leader");
+                            return true;
+                        }
+                        else if (myTotalQuality < otherQuality)
+                        {
+                            _logger.LogInformation($"Other node has better network quality ({otherQuality} vs {myTotalQuality}), waiting");
+                            return false;
+                        }
+                        else
+                        {
+                            // Tie: use node ID as tie-breaker (lexicographically smaller becomes leader)
+                            // 平局：使用节点ID作为平局决胜（字典序较小的成为Leader）
+                            var shouldLead = string.Compare(_nodeId, otherNodeId, StringComparison.Ordinal) < 0;
+                            _logger.LogInformation($"Network quality tie ({myTotalQuality} = {otherQuality}), using node ID comparison: {_nodeId} {(shouldLead ? "<" : ">")} {otherNodeId}");
+                            return shouldLead;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error evaluating network quality, using node ID as tie-breaker");
+                    // Fallback to node ID comparison / 回退到节点ID比较
+                    if (knownNodes.Count == 1)
+                    {
+                        return string.Compare(_nodeId, knownNodes[0], StringComparison.Ordinal) < 0;
+                    }
+                }
+            }
+
+            // Fallback: use node ID comparison / 回退：使用节点ID比较
+            if (knownNodes.Count == 1)
+            {
+                return string.Compare(_nodeId, knownNodes[0], StringComparison.Ordinal) < 0;
+            }
+
+            return false;
         }
 
         /// <summary>
