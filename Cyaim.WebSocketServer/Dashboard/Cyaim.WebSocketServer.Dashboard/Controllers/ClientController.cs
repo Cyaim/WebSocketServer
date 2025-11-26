@@ -15,7 +15,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
     /// 客户端连接管理控制器
     /// </summary>
     [ApiController]
-    [Route("ws_server/api/dashboard/clients")]
+    [Route("ws_server/api/dashboard/client")]
     public class ClientController : ControllerBase
     {
         private readonly ILogger<ClientController> _logger;
