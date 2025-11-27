@@ -66,6 +66,15 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                     // Get connection info / 获取连接信息
                     ClientConnectionInfo clientInfo = null;
 
+                    // Get connection metadata from cluster manager / 从集群管理器获取连接元数据
+                    ConnectionMetadata metadata = null;
+                    string endpoint = null;
+                    if (clusterManager != null)
+                    {
+                        metadata = clusterManager.GetConnectionMetadata(connectionId);
+                        endpoint = clusterManager.GetConnectionEndpoint(connectionId);
+                    }
+
                     // If connection is on current node, get detailed info / 如果连接在当前节点，获取详细信息
                     if (targetNodeId == currentNodeId && MvcChannelHandler.Clients != null)
                     {
@@ -76,7 +85,11 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                             {
                                 ConnectionId = connectionId,
                                 NodeId = targetNodeId,
+                                RemoteIpAddress = metadata?.RemoteIpAddress,
+                                RemotePort = metadata?.RemotePort ?? 0,
                                 State = webSocket.State.ToString(),
+                                ConnectedAt = metadata?.ConnectedAt,
+                                Endpoint = endpoint,
                                 BytesSent = stats?.BytesSent ?? 0,
                                 BytesReceived = stats?.BytesReceived ?? 0,
                                 MessagesSent = stats?.MessagesSent ?? 0,
@@ -96,7 +109,11 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                         {
                             ConnectionId = connectionId,
                             NodeId = targetNodeId,
+                            RemoteIpAddress = metadata?.RemoteIpAddress,
+                            RemotePort = metadata?.RemotePort ?? 0,
                             State = state,
+                            ConnectedAt = metadata?.ConnectedAt,
+                            Endpoint = endpoint,
                             BytesSent = 0,
                             BytesReceived = 0,
                             MessagesSent = 0,

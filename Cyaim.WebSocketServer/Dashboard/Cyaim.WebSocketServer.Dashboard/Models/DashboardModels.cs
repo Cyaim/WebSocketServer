@@ -112,22 +112,22 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Bytes sent / 发送的字节数
         /// </summary>
-        public long BytesSent { get; set; }
+        public ulong BytesSent { get; set; }
 
         /// <summary>
         /// Bytes received / 接收的字节数
         /// </summary>
-        public long BytesReceived { get; set; }
+        public ulong BytesReceived { get; set; }
 
         /// <summary>
         /// Messages sent / 发送的消息数
         /// </summary>
-        public long MessagesSent { get; set; }
+        public ulong MessagesSent { get; set; }
 
         /// <summary>
         /// Messages received / 接收的消息数
         /// </summary>
-        public long MessagesReceived { get; set; }
+        public ulong MessagesReceived { get; set; }
     }
 
     /// <summary>
@@ -138,12 +138,12 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Total bytes sent / 总发送字节数
         /// </summary>
-        public long TotalBytesSent { get; set; }
+        public ulong TotalBytesSent { get; set; }
 
         /// <summary>
         /// Total bytes received / 总接收字节数
         /// </summary>
-        public long TotalBytesReceived { get; set; }
+        public ulong TotalBytesReceived { get; set; }
 
         /// <summary>
         /// Bytes sent per second / 每秒发送字节数
@@ -158,12 +158,12 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Total messages sent / 总发送消息数
         /// </summary>
-        public long TotalMessagesSent { get; set; }
+        public ulong TotalMessagesSent { get; set; }
 
         /// <summary>
         /// Total messages received / 总接收消息数
         /// </summary>
-        public long TotalMessagesReceived { get; set; }
+        public ulong TotalMessagesReceived { get; set; }
 
         /// <summary>
         /// Messages sent per second / 每秒发送消息数

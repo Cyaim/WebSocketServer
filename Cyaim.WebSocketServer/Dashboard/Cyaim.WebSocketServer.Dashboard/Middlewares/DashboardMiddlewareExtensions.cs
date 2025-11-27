@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
 
 namespace Cyaim.WebSocketServer.Dashboard.Middlewares
 {
@@ -31,6 +32,13 @@ namespace Cyaim.WebSocketServer.Dashboard.Middlewares
             this IApplicationBuilder app,
             string dashboardPath = "/dashboard")
         {
+            // Register statistics recorder to GlobalClusterCenter / 将统计记录器注册到 GlobalClusterCenter
+            var statisticsService = app.ApplicationServices.GetService<Services.DashboardStatisticsService>();
+            if (statisticsService != null)
+            {
+                GlobalClusterCenter.StatisticsRecorder = statisticsService;
+            }
+
             app.UseMiddleware<DashboardMiddleware>(dashboardPath);
             return app;
         }

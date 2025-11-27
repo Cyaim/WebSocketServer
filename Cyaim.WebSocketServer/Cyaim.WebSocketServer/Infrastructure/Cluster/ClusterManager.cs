@@ -155,9 +155,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// </summary>
         /// <param name="connectionId">Connection ID / 连接 ID</param>
         /// <param name="endpoint">Endpoint path / 端点路径</param>
-        public async Task RegisterConnectionAsync(string connectionId, string endpoint = null)
+        /// <param name="remoteIpAddress">Remote IP address / 远程 IP 地址</param>
+        /// <param name="remotePort">Remote port / 远程端口</param>
+        public async Task RegisterConnectionAsync(string connectionId, string endpoint = null, string remoteIpAddress = null, int remotePort = 0)
         {
-            await _router.RegisterConnectionAsync(connectionId, endpoint);
+            await _router.RegisterConnectionAsync(connectionId, endpoint, remoteIpAddress, remotePort);
         }
 
         /// <summary>
@@ -239,6 +241,26 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         public string GetOptimalNode()
         {
             return _router.GetOptimalNode();
+        }
+
+        /// <summary>
+        /// Get connection metadata / 获取连接元数据
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接ID</param>
+        /// <returns>Connection metadata or null / 连接元数据或null</returns>
+        public ConnectionMetadata GetConnectionMetadata(string connectionId)
+        {
+            return _router.GetConnectionMetadata(connectionId);
+        }
+
+        /// <summary>
+        /// Get connection endpoint / 获取连接端点
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接ID</param>
+        /// <returns>Endpoint path or null / 端点路径或null</returns>
+        public string GetConnectionEndpoint(string connectionId)
+        {
+            return _router.GetConnectionEndpoint(connectionId);
         }
 
         /// <summary>

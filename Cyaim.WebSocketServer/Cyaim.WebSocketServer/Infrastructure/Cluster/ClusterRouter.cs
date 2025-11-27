@@ -40,6 +40,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// </summary>
         private readonly ConcurrentDictionary<string, string> _connectionEndpoints;
 
+        // Connection metadata: connectionId -> connection info / 连接元数据：连接ID -> 连接信息
+        /// <summary>
+        /// Connection metadata mapping / 连接元数据映射
+        /// </summary>
+        private readonly ConcurrentDictionary<string, ConnectionMetadata> _connectionMetadata;
+
         /// <summary>
         /// Get connection routing table (read-only) / 获取连接路由表（只读）
         /// </summary>
@@ -74,6 +80,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
             _connectionRoutes = new ConcurrentDictionary<string, string>();
             _connectionEndpoints = new ConcurrentDictionary<string, string>();
+            _connectionMetadata = new ConcurrentDictionary<string, ConnectionMetadata>();
             _nodeConnectionCounts = new ConcurrentDictionary<string, int>();
             _pendingForwards = new ConcurrentDictionary<string, TaskCompletionSource<byte[]>>();
 
@@ -110,7 +117,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// </summary>
         /// <param name="connectionId">Connection ID / 连接 ID</param>
         /// <param name="endpoint">Endpoint path / 端点路径</param>
-        public async Task RegisterConnectionAsync(string connectionId, string endpoint = null)
+        /// <param name="remoteIpAddress">Remote IP address / 远程 IP 地址</param>
+        /// <param name="remotePort">Remote port / 远程端口</param>
+        public async Task RegisterConnectionAsync(string connectionId, string endpoint = null, string remoteIpAddress = null, int remotePort = 0)
         {
             _connectionRoutes.AddOrUpdate(connectionId, _nodeId, (key, oldValue) => _nodeId);
             
@@ -119,6 +128,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             {
                 _connectionEndpoints.AddOrUpdate(connectionId, endpoint, (key, oldValue) => endpoint);
             }
+
+            // Store connection metadata / 存储连接元数据
+            var metadata = new ConnectionMetadata
+            {
+                RemoteIpAddress = remoteIpAddress,
+                RemotePort = remotePort,
+                ConnectedAt = DateTime.UtcNow
+            };
+            _connectionMetadata.AddOrUpdate(connectionId, metadata, (key, oldValue) => metadata);
 
             _nodeConnectionCounts.AddOrUpdate(_nodeId, 1, (key, value) => value + 1);
 
@@ -129,21 +147,23 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             // 始终向集群广播连接注册（不仅仅是领导者时）
             // This ensures all nodes know about all connections
             // 这确保所有节点都知道所有连接
-                var registration = new WebSocketConnectionRegistration
-                {
-                    ConnectionId = connectionId,
-                    NodeId = _nodeId,
-                    Endpoint = endpoint,
-                    RegisteredAt = DateTime.UtcNow
-                };
+            var registration = new WebSocketConnectionRegistration
+            {
+                ConnectionId = connectionId,
+                NodeId = _nodeId,
+                Endpoint = endpoint,
+                RemoteIpAddress = remoteIpAddress,
+                RemotePort = remotePort,
+                RegisteredAt = DateTime.UtcNow
+            };
 
-                var message = new ClusterMessage
-                {
-                    Type = ClusterMessageType.RegisterWebSocketConnection,
-                    Payload = JsonSerializer.Serialize(registration)
-                };
+            var message = new ClusterMessage
+            {
+                Type = ClusterMessageType.RegisterWebSocketConnection,
+                Payload = JsonSerializer.Serialize(registration)
+            };
 
-                await _transport.BroadcastAsync(message);
+            await _transport.BroadcastAsync(message);
 
             _logger.LogDebug($"Registered connection {connectionId} to node {_nodeId} and broadcast to cluster");
         }
@@ -159,6 +179,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             {
                 // Remove endpoint information / 移除端点信息
                 _connectionEndpoints.TryRemove(connectionId, out _);
+                
+                // Remove connection metadata / 移除连接元数据
+                _connectionMetadata.TryRemove(connectionId, out _);
                 
                 _nodeConnectionCounts.AddOrUpdate(nodeId, 0, (key, value) => Math.Max(0, value - 1));
 
@@ -494,6 +517,36 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     {
                         _connectionEndpoints.AddOrUpdate(registration.ConnectionId, registration.Endpoint, (key, oldValue) => registration.Endpoint);
                     }
+                    else
+                    {
+                        // If endpoint is not provided but we have it stored, keep the existing one / 如果未提供端点但我们已存储，保留现有的
+                        // This ensures endpoint is preserved during transfers / 这确保在转移期间保留端点
+                    }
+                    
+                    // Store connection metadata / 存储连接元数据
+                    var metadata = new ConnectionMetadata
+                    {
+                        RemoteIpAddress = registration.RemoteIpAddress,
+                        RemotePort = registration.RemotePort,
+                        ConnectedAt = registration.RegisteredAt
+                    };
+                    _connectionMetadata.AddOrUpdate(registration.ConnectionId, metadata, (key, oldValue) => 
+                    {
+                        // Preserve existing metadata if new one is missing fields / 如果新元数据缺少字段，保留现有元数据
+                        if (string.IsNullOrEmpty(metadata.RemoteIpAddress) && !string.IsNullOrEmpty(oldValue.RemoteIpAddress))
+                        {
+                            metadata.RemoteIpAddress = oldValue.RemoteIpAddress;
+                        }
+                        if (metadata.RemotePort == 0 && oldValue.RemotePort != 0)
+                        {
+                            metadata.RemotePort = oldValue.RemotePort;
+                        }
+                        if (metadata.ConnectedAt == default && oldValue.ConnectedAt != default)
+                        {
+                            metadata.ConnectedAt = oldValue.ConnectedAt;
+                        }
+                        return metadata;
+                    });
                     
                     // Increment count for new node / 增加新节点的计数
                     _nodeConnectionCounts.AddOrUpdate(registration.NodeId, 1, (key, value) => value + 1);
@@ -634,9 +687,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         }
 
         /// <summary>
-        /// Transfer connections from disconnected node to optimal node / 将连接从断开节点转移到最优节点
+        /// Handle connections from disconnected node / 处理断开节点上的连接
+        /// Note: WebSocket connections cannot be truly "transferred" as they are TCP connections.
+        /// We only remove them from routing table and wait for clients to reconnect.
+        /// 注意：WebSocket 连接无法真正"转移"，因为它们是 TCP 连接。
+        /// 我们只从路由表中移除它们，等待客户端重新连接。
         /// </summary>
-        /// <param name="connectionIds">Connection IDs to transfer / 要转移的连接 ID</param>
+        /// <param name="connectionIds">Connection IDs from disconnected node / 断开节点上的连接 ID</param>
         /// <param name="disconnectedNodeId">Disconnected node ID / 断开连接的节点 ID</param>
         private async Task TransferConnectionsAsync(List<string> connectionIds, string disconnectedNodeId)
         {
@@ -647,80 +704,40 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
             try
             {
-                // Get optimal node for load balancing / 获取用于负载均衡的最优节点
-                // Exclude disconnected node from consideration / 从考虑中排除断开节点
-                var availableNodes = _connectionRoutes.Values
-                    .Distinct()
-                    .Where(n => n != disconnectedNodeId && _transport.IsNodeConnected(n))
-                    .ToList();
-                
-                // Also include current node if it's connected / 如果当前节点已连接，也包含它
-                if (!availableNodes.Contains(_nodeId))
-                {
-                    availableNodes.Add(_nodeId);
-                }
-
-                string optimalNodeId;
-                if (availableNodes.Count > 0)
-                {
-                    // Select node with least connections (load balancing) / 选择连接数最少的节点（负载均衡）
-                    optimalNodeId = availableNodes
-                        .Select(n => new { NodeId = n, Count = _nodeConnectionCounts.GetValueOrDefault(n, 0) })
-                        .OrderBy(x => x.Count)
-                        .First().NodeId;
-                }
-                else
-                {
-                    // No other nodes available, use current node / 没有其他可用节点，使用当前节点
-                    optimalNodeId = _nodeId;
-                }
-
-                _logger.LogInformation($"Transferring {connectionIds.Count} connection(s) from node {disconnectedNodeId} to node {optimalNodeId}");
+                _logger.LogInformation($"Node {disconnectedNodeId} disconnected. Removed {connectionIds.Count} connection(s) from routing table. Clients will need to reconnect.");
 
                 // Note: WebSocket connections cannot be truly "transferred" as they are TCP connections
-                // We can only notify clients to reconnect, or wait for them to reconnect naturally
+                // We can only remove them from the routing table and wait for clients to reconnect
+                // When clients reconnect, they will be registered to an available node via RegisterConnectionAsync
                 // 注意：WebSocket 连接无法真正"转移"，因为它们是 TCP 连接
-                // 我们只能通知客户端重新连接，或等待它们自然重新连接
+                // 我们只能从路由表中移除它们，等待客户端重新连接
+                // 当客户端重新连接时，它们将通过 RegisterConnectionAsync 注册到可用节点
 
-                // For now, we'll just update the routing table to point to the optimal node
-                // This allows the system to handle reconnections gracefully
-                // 目前，我们只是更新路由表指向最优节点
-                // 这允许系统优雅地处理重新连接
-
+                // Remove endpoint information for disconnected connections / 移除断开连接的端点信息
                 foreach (var connectionId in connectionIds)
                 {
-                    // Update routing table to point to optimal node / 更新路由表指向最优节点
-                    _connectionRoutes.TryAdd(connectionId, optimalNodeId);
-                    _nodeConnectionCounts.AddOrUpdate(optimalNodeId, 1, (key, value) => value + 1);
+                    _connectionEndpoints.TryRemove(connectionId, out _);
                 }
 
-                // Broadcast connection transfers to cluster / 向集群广播连接转移
-                // Send individual registration messages for each connection / 为每个连接发送单独的注册消息
-                // This ensures all nodes know about the transfer / 这确保所有节点都知道转移
+                // Broadcast connection unregistration to cluster / 向集群广播连接注销
+                // This ensures all nodes know these connections are no longer valid
+                // 这确保所有节点都知道这些连接不再有效
                 foreach (var connectionId in connectionIds)
                 {
-                    var registration = new WebSocketConnectionRegistration
-                    {
-                        ConnectionId = connectionId,
-                        NodeId = optimalNodeId,
-                        Endpoint = null, // Endpoint unknown after transfer / 转移后端点未知
-                        RegisteredAt = DateTime.UtcNow
-                    };
-
                     var message = new ClusterMessage
                     {
-                        Type = ClusterMessageType.RegisterWebSocketConnection,
-                        Payload = System.Text.Json.JsonSerializer.Serialize(registration)
+                        Type = ClusterMessageType.UnregisterWebSocketConnection,
+                        Payload = System.Text.Json.JsonSerializer.Serialize(new { ConnectionId = connectionId, NodeId = disconnectedNodeId })
                     };
 
                     await _transport.BroadcastAsync(message);
                 }
 
-                _logger.LogInformation($"Successfully transferred {connectionIds.Count} connection(s) from node {disconnectedNodeId} to node {optimalNodeId}");
+                _logger.LogInformation($"Successfully removed {connectionIds.Count} connection(s) from node {disconnectedNodeId}. Waiting for clients to reconnect.");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error transferring connections from node {disconnectedNodeId}");
+                _logger.LogError(ex, $"Error handling disconnected connections from node {disconnectedNodeId}");
             }
         }
 
@@ -1172,6 +1189,26 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         }
 
         /// <summary>
+        /// Get connection metadata / 获取连接元数据
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接ID</param>
+        /// <returns>Connection metadata or null / 连接元数据或null</returns>
+        public ConnectionMetadata GetConnectionMetadata(string connectionId)
+        {
+            return _connectionMetadata.TryGetValue(connectionId, out var metadata) ? metadata : null;
+        }
+
+        /// <summary>
+        /// Get connection endpoint / 获取连接端点
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接ID</param>
+        /// <returns>Endpoint path or null / 端点路径或null</returns>
+        public string GetConnectionEndpoint(string connectionId)
+        {
+            return _connectionEndpoints.TryGetValue(connectionId, out var endpoint) ? endpoint : null;
+        }
+
+        /// <summary>
         /// Dispose resources / 释放资源
         /// </summary>
         public void Dispose()
@@ -1179,6 +1216,27 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             _cancellationTokenSource?.Cancel();
             _nodeHealthCheckTimer?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Connection metadata / 连接元数据
+    /// </summary>
+    public class ConnectionMetadata
+    {
+        /// <summary>
+        /// Remote IP address / 远程 IP 地址
+        /// </summary>
+        public string RemoteIpAddress { get; set; }
+
+        /// <summary>
+        /// Remote port / 远程端口
+        /// </summary>
+        public int RemotePort { get; set; }
+
+        /// <summary>
+        /// Connection time / 连接时间
+        /// </summary>
+        public DateTime ConnectedAt { get; set; }
     }
 }
 

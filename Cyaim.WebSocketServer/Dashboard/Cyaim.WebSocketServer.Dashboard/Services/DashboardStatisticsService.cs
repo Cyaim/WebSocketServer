@@ -7,6 +7,7 @@ using System.Threading;
 using Cyaim.WebSocketServer.Dashboard.Models;
 using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+using Cyaim.WebSocketServer.Infrastructure.Metrics;
 using Microsoft.Extensions.Logging;
 
 namespace Cyaim.WebSocketServer.Dashboard.Services
@@ -15,17 +16,17 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
     /// Service for collecting dashboard statistics
     /// 用于收集仪表板统计信息的服务
     /// </summary>
-    public class DashboardStatisticsService
+    public class DashboardStatisticsService : IWebSocketStatisticsRecorder
     {
         private readonly ILogger<DashboardStatisticsService> _logger;
         private readonly ConcurrentDictionary<string, ClientConnectionStats> _connectionStats;
         private readonly Timer _bandwidthTimer;
         private BandwidthStatistics _lastBandwidthStats;
         private DateTime _lastBandwidthUpdate;
-        private long _lastTotalBytesSent;
-        private long _lastTotalBytesReceived;
-        private long _lastTotalMessagesSent;
-        private long _lastTotalMessagesReceived;
+        private ulong _lastTotalBytesSent;
+        private ulong _lastTotalBytesReceived;
+        private ulong _lastTotalMessagesSent;
+        private ulong _lastTotalMessagesReceived;
 
         /// <summary>
         /// Constructor / 构造函数
@@ -49,15 +50,15 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
         /// <param name="bytes">Bytes sent / 发送的字节数</param>
         public void RecordBytesSent(string connectionId, int bytes)
         {
-            if (string.IsNullOrEmpty(connectionId))
+            if (string.IsNullOrEmpty(connectionId) || bytes <= 0)
                 return;
 
             var stats = _connectionStats.GetOrAdd(connectionId, _ => new ClientConnectionStats { ConnectionId = connectionId });
-            lock (stats)
-            {
-                stats.BytesSent += bytes;
-                stats.MessagesSent++;
-            }
+            
+            // Use lock-free operations with Interlocked for better performance / 使用无锁的 Interlocked 操作以获得更好的性能
+            // Interlocked.Add supports long, so we use long internally and convert to ulong when reading / Interlocked.Add 支持 long，所以内部使用 long，读取时转换为 ulong
+            Interlocked.Add(ref stats._bytesSentLong, bytes);
+            Interlocked.Increment(ref stats._messagesSentLong);
         }
 
         /// <summary>
@@ -67,15 +68,15 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
         /// <param name="bytes">Bytes received / 接收的字节数</param>
         public void RecordBytesReceived(string connectionId, int bytes)
         {
-            if (string.IsNullOrEmpty(connectionId))
+            if (string.IsNullOrEmpty(connectionId) || bytes <= 0)
                 return;
 
             var stats = _connectionStats.GetOrAdd(connectionId, _ => new ClientConnectionStats { ConnectionId = connectionId });
-            lock (stats)
-            {
-                stats.BytesReceived += bytes;
-                stats.MessagesReceived++;
-            }
+            
+            // Use lock-free operations with Interlocked for better performance / 使用无锁的 Interlocked 操作以获得更好的性能
+            // Interlocked.Add supports long, so we use long internally and convert to ulong when reading / Interlocked.Add 支持 long，所以内部使用 long，读取时转换为 ulong
+            Interlocked.Add(ref stats._bytesReceivedLong, bytes);
+            Interlocked.Increment(ref stats._messagesReceivedLong);
         }
 
         /// <summary>
@@ -128,15 +129,26 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
                 if (elapsed <= 0)
                     return;
 
-                var totalBytesSent = _connectionStats.Values.Sum(s => s.BytesSent);
-                var totalBytesReceived = _connectionStats.Values.Sum(s => s.BytesReceived);
-                var totalMessagesSent = _connectionStats.Values.Sum(s => s.MessagesSent);
-                var totalMessagesReceived = _connectionStats.Values.Sum(s => s.MessagesReceived);
+                // Use Aggregate for ulong sum (LINQ Sum doesn't support ulong directly) / 使用 Aggregate 进行 ulong 求和（LINQ Sum 不直接支持 ulong）
+                var totalBytesSent = _connectionStats.Values.Aggregate(0UL, (sum, s) => sum + s.BytesSent);
+                var totalBytesReceived = _connectionStats.Values.Aggregate(0UL, (sum, s) => sum + s.BytesReceived);
+                var totalMessagesSent = _connectionStats.Values.Aggregate(0UL, (sum, s) => sum + s.MessagesSent);
+                var totalMessagesReceived = _connectionStats.Values.Aggregate(0UL, (sum, s) => sum + s.MessagesReceived);
 
-                var bytesSentPerSecond = (totalBytesSent - _lastTotalBytesSent) / elapsed;
-                var bytesReceivedPerSecond = (totalBytesReceived - _lastTotalBytesReceived) / elapsed;
-                var messagesSentPerSecond = (totalMessagesSent - _lastTotalMessagesSent) / elapsed;
-                var messagesReceivedPerSecond = (totalMessagesReceived - _lastTotalMessagesReceived) / elapsed;
+                // Calculate per-second rates (handle potential overflow by checking if current > last)
+                // 计算每秒速率（通过检查当前值是否大于上次值来处理潜在的溢出）
+                var bytesSentPerSecond = totalBytesSent > _lastTotalBytesSent 
+                    ? (totalBytesSent - _lastTotalBytesSent) / elapsed 
+                    : 0.0;
+                var bytesReceivedPerSecond = totalBytesReceived > _lastTotalBytesReceived 
+                    ? (totalBytesReceived - _lastTotalBytesReceived) / elapsed 
+                    : 0.0;
+                var messagesSentPerSecond = totalMessagesSent > _lastTotalMessagesSent 
+                    ? (totalMessagesSent - _lastTotalMessagesSent) / elapsed 
+                    : 0.0;
+                var messagesReceivedPerSecond = totalMessagesReceived > _lastTotalMessagesReceived 
+                    ? (totalMessagesReceived - _lastTotalMessagesReceived) / elapsed 
+                    : 0.0;
 
                 _lastBandwidthStats = new BandwidthStatistics
                 {
@@ -182,25 +194,49 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
         /// </summary>
         public string ConnectionId { get; set; }
 
+        // Internal fields for lock-free operations using long (Interlocked supports long) / 用于无锁操作的内部字段，使用 long（Interlocked 支持 long）
+        // We use long internally and convert to ulong when reading / 内部使用 long，读取时转换为 ulong
+        // This allows us to use Interlocked.Add which is much faster than lock / 这允许我们使用 Interlocked.Add，比 lock 快得多
+        internal long _bytesSentLong;
+        internal long _bytesReceivedLong;
+        internal long _messagesSentLong;
+        internal long _messagesReceivedLong;
+
         /// <summary>
         /// Bytes sent / 发送的字节数
         /// </summary>
-        public long BytesSent { get; set; }
+        public ulong BytesSent 
+        { 
+            get => unchecked((ulong)Interlocked.Read(ref _bytesSentLong)); 
+            set => Interlocked.Exchange(ref _bytesSentLong, unchecked((long)value)); 
+        }
 
         /// <summary>
         /// Bytes received / 接收的字节数
         /// </summary>
-        public long BytesReceived { get; set; }
+        public ulong BytesReceived 
+        { 
+            get => unchecked((ulong)Interlocked.Read(ref _bytesReceivedLong)); 
+            set => Interlocked.Exchange(ref _bytesReceivedLong, unchecked((long)value)); 
+        }
 
         /// <summary>
         /// Messages sent / 发送的消息数
         /// </summary>
-        public long MessagesSent { get; set; }
+        public ulong MessagesSent 
+        { 
+            get => unchecked((ulong)Interlocked.Read(ref _messagesSentLong)); 
+            set => Interlocked.Exchange(ref _messagesSentLong, unchecked((long)value)); 
+        }
 
         /// <summary>
         /// Messages received / 接收的消息数
         /// </summary>
-        public long MessagesReceived { get; set; }
+        public ulong MessagesReceived 
+        { 
+            get => unchecked((ulong)Interlocked.Read(ref _messagesReceivedLong)); 
+            set => Interlocked.Exchange(ref _messagesReceivedLong, unchecked((long)value)); 
+        }
     }
 }
 

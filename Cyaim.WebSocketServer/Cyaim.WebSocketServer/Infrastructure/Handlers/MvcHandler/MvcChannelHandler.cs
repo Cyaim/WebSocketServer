@@ -213,7 +213,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         {
                             try
                             {
-                                await clusterManager.RegisterConnectionAsync(context.Connection.Id, context.Request.Path);
+                                var remoteIpAddress = context.Connection.RemoteIpAddress?.ToString();
+                                var remotePort = context.Connection.RemotePort;
+                                await clusterManager.RegisterConnectionAsync(
+                                    context.Connection.Id, 
+                                    context.Request.Path,
+                                    remoteIpAddress,
+                                    remotePort);
                                 logger.LogDebug($"Registered connection {context.Connection.Id} with cluster manager");
                             }
                             catch (Exception ex)
@@ -363,6 +369,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 // 记录消息接收指标
                                 var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
                                 _metricsCollector?.RecordMessageReceived(result.Count, currentNodeId, context.Request.Path);
+                                
+                                // 记录统计信息（如果统计记录器可用）
+                                Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesReceived(context.Connection.Id, result.Count);
 
                                 // 执行ReceivingData管道
                                 _ = await InvokePipeline(RequestPipelineStage.ReceivingData, context, webSocket, result, buffer);
@@ -561,6 +570,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 // 记录消息发送指标
                 var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
                 _metricsCollector?.RecordMessageSent(responseBytes.Length, currentNodeId, context.Request.Path);
+                
+                // 记录统计信息（如果统计记录器可用）
+                Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesSent(context.Connection.Id, responseBytes.Length);
             }
             catch (JsonException ex)
             {

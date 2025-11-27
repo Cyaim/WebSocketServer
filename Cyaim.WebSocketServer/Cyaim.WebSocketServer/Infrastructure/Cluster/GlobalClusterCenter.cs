@@ -24,5 +24,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// WebSocket connection provider instance / WebSocket 连接提供者实例
         /// </summary>
         public static IWebSocketConnectionProvider ConnectionProvider { get; set; }
+
+        /// <summary>
+        /// WebSocket statistics recorder instance / WebSocket 统计记录器实例
+        /// </summary>
+        public static Infrastructure.Metrics.IWebSocketStatisticsRecorder StatisticsRecorder { get; set; }
     }
 }

@@ -308,6 +308,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         public string Endpoint { get; set; }
 
         /// <summary>
+        /// Remote IP address / 远程 IP 地址
+        /// </summary>
+        public string RemoteIpAddress { get; set; }
+
+        /// <summary>
+        /// Remote port / 远程端口
+        /// </summary>
+        public int RemotePort { get; set; }
+
+        /// <summary>
         /// Registration time / 注册时间
         /// </summary>
         public DateTime RegisteredAt { get; set; }
