@@ -1,4 +1,5 @@
-﻿using Cyaim.WebSocketServer.Infrastructure.Configures;
+﻿using Cyaim.WebSocketServer.Infrastructure.AccessControl;
+using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Infrastructure.Metrics;
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
@@ -1098,6 +1099,56 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <returns></returns>
         public virtual async Task<bool> MvcChannel_OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
+            // Check access control / 检查访问控制
+            if (WebSocketRouteOption.ApplicationServices != null)
+            {
+                try
+                {
+                    var accessControlService = WebSocketRouteOption.ApplicationServices.GetService<AccessControlService>();
+                    if (accessControlService != null)
+                    {
+                        var ipAddress = context.Connection.RemoteIpAddress?.ToString();
+                        var isAllowed = await accessControlService.IsAllowedAsync(ipAddress);
+                        
+                        if (!isAllowed)
+                        {
+                            var policy = WebSocketRouteOption.ApplicationServices.GetService<AccessControlPolicy>();
+                            if (policy != null)
+                            {
+                                switch (policy.DeniedAction)
+                                {
+                                    case AccessDeniedAction.ReturnForbidden:
+                                        context.Response.StatusCode = 403;
+                                        await context.Response.WriteAsync(policy.DenialMessage ?? "Access denied");
+                                        logger.LogWarning($"Access denied for IP {ipAddress} from {context.Request.Path}: {policy.DenialMessage}");
+                                        break;
+                                    case AccessDeniedAction.ReturnUnauthorized:
+                                        context.Response.StatusCode = 401;
+                                        await context.Response.WriteAsync(policy.DenialMessage ?? "Unauthorized");
+                                        logger.LogWarning($"Access denied for IP {ipAddress} from {context.Request.Path}: {policy.DenialMessage}");
+                                        break;
+                                    case AccessDeniedAction.CloseConnection:
+                                    default:
+                                        logger.LogWarning($"Access denied for IP {ipAddress} from {context.Request.Path}: {policy.DenialMessage}");
+                                        break;
+                                }
+                            }
+                            else
+                            {
+                                logger.LogWarning($"Access denied for IP {ipAddress} from {context.Request.Path}");
+                            }
+                            
+                            return false;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error checking access control");
+                    // Allow connection on error to avoid blocking legitimate users / 出错时允许连接，避免阻止合法用户
+                }
+            }
+
             return await Task.FromResult(true);
         }
 

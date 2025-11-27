@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.0.11217.181 d18.0
+VisualStudioVersion = 18.0.11217.181
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Cyaim.WebSocketServer", "Cyaim.WebSocketServer\Cyaim.WebSocketServer.csproj", "{F1683A2D-FA48-4F06-B99D-AD9548EF060D}"
 EndProject
@@ -22,6 +22,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cyaim.WebSocketServer.Example.Wpf", "Sample\Cyaim.WebSocketServer.Example.Wpf\Cyaim.WebSocketServer.Example.Wpf.csproj", "{1E66F9B8-2F53-49AC-FDE8-159A5AF78846}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cyaim.WebSocketServer.Sample.Dashboard", "Sample\Cyaim.WebSocketServer.Sample.Dashboard\Cyaim.WebSocketServer.Sample.Dashboard.csproj", "{EA37AAED-D05E-A539-F096-B6520032CFD7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cyaim.WebSocketServer.Sample.AccessControl", "Sample\Cyaim.WebSocketServer.Sample.AccessControl\Cyaim.WebSocketServer.Sample.AccessControl.csproj", "{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -129,6 +131,18 @@ Global
 		{EA37AAED-D05E-A539-F096-B6520032CFD7}.Release|x64.Build.0 = Release|Any CPU
 		{EA37AAED-D05E-A539-F096-B6520032CFD7}.Release|x86.ActiveCfg = Release|Any CPU
 		{EA37AAED-D05E-A539-F096-B6520032CFD7}.Release|x86.Build.0 = Release|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Debug|x64.Build.0 = Debug|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Debug|x86.Build.0 = Debug|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Release|x64.ActiveCfg = Release|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Release|x64.Build.0 = Release|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Release|x86.ActiveCfg = Release|Any CPU
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -137,6 +151,7 @@ Global
 		{26B4308D-3AC5-DB9D-4FCC-08761FD9E25D} = {8AB54424-C8DA-4B64-B84C-8E696D7939C7}
 		{1E66F9B8-2F53-49AC-FDE8-159A5AF78846} = {B0CA25E1-04AB-4C66-93B8-21DDF6CC996F}
 		{EA37AAED-D05E-A539-F096-B6520032CFD7} = {B0CA25E1-04AB-4C66-93B8-21DDF6CC996F}
+		{F9C82F6A-8725-6A10-C3AF-73406DCD1A61} = {B0CA25E1-04AB-4C66-93B8-21DDF6CC996F}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {5078C553-A1C2-42BD-9F21-BCDE0A70B225}
