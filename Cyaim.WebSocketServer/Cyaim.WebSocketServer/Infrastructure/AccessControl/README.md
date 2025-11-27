@@ -66,7 +66,32 @@ builder.Services.AddAccessControl(policy =>
 });
 
 // Register geographic location provider (optional) / 注册地理位置提供者（可选）
-builder.Services.AddGeoLocationProvider<DefaultGeoLocationProvider>();
+// Choose one of the following providers / 选择以下提供者之一
+
+// Online providers / 在线提供者
+builder.Services.AddGeoLocationProvider<IpApiComGeoLocationProvider>();      // ip-api.com (45 req/min)
+// builder.Services.AddGeoLocationProvider<IpApiCoGeoLocationProvider>();   // ipapi.co (1,000 req/day)
+// builder.Services.AddGeoLocationProvider<IpWhoisAppGeoLocationProvider>(); // ipwhois.app (10,000 req/month)
+// builder.Services.AddGeoLocationProvider<IpApiIoGeoLocationProvider>();     // ip-api.io (45 req/min)
+// builder.Services.AddGeoLocationProvider<IpIpNetGeoLocationProvider>();     // ipip.net (varies)
+// builder.Services.AddSingleton<IGeoLocationProvider>(provider =>          // ipinfo.io (50,000 req/month, requires API key)
+//     new IpInfoIoGeoLocationProvider(
+//         provider.GetRequiredService<ILogger<IpInfoIoGeoLocationProvider>>(),
+//         apiKey: "your-api-key"));
+
+// Offline database providers / 离线数据库提供者
+// builder.Services.AddSingleton<IGeoLocationProvider>(provider =>          // ChunZhen offline (qqwry.dat)
+//     new ChunZhenOfflineGeoLocationProvider(
+//         provider.GetRequiredService<ILogger<ChunZhenOfflineGeoLocationProvider>>(),
+//         databasePath: "path/to/qqwry.dat"));
+// builder.Services.AddSingleton<IGeoLocationProvider>(provider =>          // ipip.net offline
+//     new IpIpNetOfflineGeoLocationProvider(
+//         provider.GetRequiredService<ILogger<IpIpNetOfflineGeoLocationProvider>>(),
+//         databasePath: "path/to/ipipnet-database"));
+// builder.Services.AddSingleton<IGeoLocationProvider>(provider =>          // MaxMind offline (.mmdb)
+//     new MaxMindOfflineGeoLocationProvider(
+//         provider.GetRequiredService<ILogger<MaxMindOfflineGeoLocationProvider>>(),
+//         databasePath: "path/to/GeoLite2-City.mmdb"));
 ```
 
 ### 2. Configuration from appsettings.json / 从 appsettings.json 配置
@@ -123,15 +148,149 @@ builder.Services.AddAccessControl(builder.Configuration);
 
 ## Geographic Location Providers / 地理位置提供者
 
-### DefaultGeoLocationProvider
+The library provides multiple free IP geolocation providers. Choose the one that best fits your needs:
 
-Uses ip-api.com (free tier) for IP geolocation.
+库提供了多个免费的 IP 地理位置提供者。选择最适合您需求的：
 
-使用 ip-api.com（免费版）进行 IP 地理位置查询。
+### IpApiComGeoLocationProvider (ip-api.com)
 
-**Note**: The free tier has rate limits. For production use, consider using a commercial service or MaxMind GeoIP2.
+- **Rate Limit**: 45 requests/minute / 每分钟 45 次请求
+- **API Key**: Not required / 不需要 API 密钥
+- **URL**: http://ip-api.com/json/{ip}
 
-**注意**：免费版有速率限制。生产环境请考虑使用商业服务或 MaxMind GeoIP2。
+```csharp
+builder.Services.AddGeoLocationProvider<IpApiComGeoLocationProvider>();
+```
+
+### IpApiCoGeoLocationProvider (ipapi.co)
+
+- **Rate Limit**: 1,000 requests/day / 每天 1,000 次请求
+- **API Key**: Optional / 可选
+- **URL**: https://ipapi.co/{ip}/json/
+
+```csharp
+builder.Services.AddGeoLocationProvider<IpApiCoGeoLocationProvider>();
+// With API key / 使用 API 密钥
+builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<IpApiCoGeoLocationProvider>>();
+    return new IpApiCoGeoLocationProvider(logger, apiKey: "your-api-key");
+});
+```
+
+### IpWhoisAppGeoLocationProvider (ipwhois.app)
+
+- **Rate Limit**: 10,000 requests/month / 每月 10,000 次请求
+- **API Key**: Not required / 不需要 API 密钥
+- **URL**: http://ipwhois.app/json/{ip}
+
+```csharp
+builder.Services.AddGeoLocationProvider<IpWhoisAppGeoLocationProvider>();
+```
+
+### IpApiIoGeoLocationProvider (ip-api.io)
+
+- **Rate Limit**: 45 requests/minute / 每分钟 45 次请求
+- **API Key**: Not required / 不需要 API 密钥
+- **URL**: https://ip-api.io/json/{ip}
+
+```csharp
+builder.Services.AddGeoLocationProvider<IpApiIoGeoLocationProvider>();
+```
+
+### IpInfoIoGeoLocationProvider (ipinfo.io)
+
+- **Rate Limit**: 50,000 requests/month / 每月 50,000 次请求
+- **API Key**: Required (free tier) / 必需（免费版）
+- **URL**: https://ipinfo.io/{ip}/json?token={key}
+
+```csharp
+// Requires API key / 需要 API 密钥
+builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<IpInfoIoGeoLocationProvider>>();
+    return new IpInfoIoGeoLocationProvider(logger, apiKey: "your-api-key");
+});
+```
+
+### IpIpNetGeoLocationProvider (ipip.net)
+
+- **Rate Limit**: Varies by plan / 根据套餐不同
+- **API Key**: Optional / 可选
+- **URL**: https://freeapi.ipip.net/{ip}
+
+```csharp
+builder.Services.AddGeoLocationProvider<IpIpNetGeoLocationProvider>();
+// With API key / 使用 API 密钥
+builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<IpIpNetGeoLocationProvider>>();
+    return new IpIpNetGeoLocationProvider(logger, apiKey: "your-api-key");
+});
+```
+
+### ChunZhenGeoLocationProvider (纯真在线)
+
+- **Note**: ChunZhen typically uses offline database. Online API may not be available.
+- **注意**：纯真通常使用离线数据库。在线 API 可能不可用。
+
+```csharp
+// Note: This is a placeholder. Use ChunZhenOfflineGeoLocationProvider instead.
+// 注意：这是占位符。请使用 ChunZhenOfflineGeoLocationProvider。
+builder.Services.AddGeoLocationProvider<ChunZhenGeoLocationProvider>();
+```
+
+## Offline Database Providers / 离线数据库提供者
+
+### ChunZhenOfflineGeoLocationProvider (纯真离线数据库)
+
+- **Database Format**: qqwry.dat / 数据库格式：qqwry.dat
+- **Download**: Search for "纯真IP数据库" or "qqwry.dat" / 搜索"纯真IP数据库"或"qqwry.dat"
+- **Encoding**: GB2312 / 编码：GB2312
+
+```csharp
+builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<ChunZhenOfflineGeoLocationProvider>>();
+    return new ChunZhenOfflineGeoLocationProvider(logger, databasePath: "path/to/qqwry.dat");
+});
+```
+
+### IpIpNetOfflineGeoLocationProvider (ipip.net 离线数据库)
+
+- **Database Format**: ipip.net database file / 数据库格式：ipip.net 数据库文件
+- **Download**: From ipip.net official website / 从 ipip.net 官网下载
+- **Note**: Database format may vary. Implementation may need adjustment based on actual format.
+- **注意**：数据库格式可能不同。实现可能需要根据实际格式进行调整。
+
+```csharp
+builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<IpIpNetOfflineGeoLocationProvider>>();
+    return new IpIpNetOfflineGeoLocationProvider(logger, databasePath: "path/to/ipipnet-database");
+});
+```
+
+### MaxMindOfflineGeoLocationProvider (MaxMind GeoIP2/GeoLite2)
+
+- **Database Format**: .mmdb (MaxMind Binary Database) / 数据库格式：.mmdb (MaxMind 二进制数据库)
+- **Download**: https://dev.maxmind.com/geoip/geoip2/geolite2/ / 下载：https://dev.maxmind.com/geoip/geoip2/geolite2/
+- **NuGet Package**: MaxMind.GeoIP2 (optional, uses reflection if not installed) / MaxMind.GeoIP2（可选，如果未安装则使用反射）
+
+```csharp
+// Install MaxMind.GeoIP2 NuGet package first / 首先安装 MaxMind.GeoIP2 NuGet 包
+// dotnet add package MaxMind.GeoIP2
+
+builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<MaxMindOfflineGeoLocationProvider>>();
+    return new MaxMindOfflineGeoLocationProvider(logger, databasePath: "path/to/GeoLite2-City.mmdb");
+});
+```
+
+**Note**: All free tiers have rate limits. For production use, consider using a commercial service or MaxMind GeoIP2.
+
+**注意**：所有免费版都有速率限制。生产环境请考虑使用商业服务或 MaxMind GeoIP2。
 
 ### Custom Provider
 
@@ -255,7 +414,7 @@ builder.Services.AddAccessControl(policy =>
 });
 
 // Register geographic location provider / 注册地理位置提供者
-builder.Services.AddGeoLocationProvider<DefaultGeoLocationProvider>();
+builder.Services.AddGeoLocationProvider<IpApiComGeoLocationProvider>();
 
 // Configure WebSocket / 配置 WebSocket
 builder.Services.ConfigureWebSocketRoute(x =>
@@ -331,7 +490,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddAccessControl(builder.Configuration, "AccessControlPolicy");
 
 // Register geographic location provider / 注册地理位置提供者
-builder.Services.AddGeoLocationProvider<DefaultGeoLocationProvider>();
+builder.Services.AddGeoLocationProvider<IpApiComGeoLocationProvider>();
 
 // Configure WebSocket / 配置 WebSocket
 builder.Services.ConfigureWebSocketRoute(x =>
@@ -356,7 +515,105 @@ app.UseWebSocketServer();
 app.Run();
 ```
 
-### Example 4: Custom Geographic Location Provider / 自定义地理位置提供者
+### Example 4: Using Offline Database (ChunZhen) / 使用离线数据库（纯真）
+
+```csharp
+using Cyaim.WebSocketServer.Infrastructure.AccessControl;
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Cyaim.WebSocketServer.Middlewares;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Configure access control / 配置访问控制
+builder.Services.AddAccessControl(policy =>
+{
+    policy.Enabled = true;
+    policy.CountryWhitelist = new List<string> { "CN" };
+    policy.EnableGeoLocationLookup = true;
+});
+
+// Register ChunZhen offline database provider / 注册纯真离线数据库提供者
+builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<ChunZhenOfflineGeoLocationProvider>>();
+    return new ChunZhenOfflineGeoLocationProvider(logger, databasePath: "path/to/qqwry.dat");
+});
+
+// Configure WebSocket / 配置 WebSocket
+builder.Services.ConfigureWebSocketRoute(x =>
+{
+    x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
+    {
+        { "/ws", new MvcChannelHandler(4 * 1024).ConnectionEntry }
+    };
+    x.ApplicationServiceCollection = builder.Services;
+});
+
+var app = builder.Build();
+
+var webSocketOptions = new Microsoft.AspNetCore.Builder.WebSocketOptions()
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(120)
+};
+
+app.UseWebSockets(webSocketOptions);
+app.UseWebSocketServer();
+
+app.Run();
+```
+
+### Example 5: Using MaxMind Offline Database / 使用 MaxMind 离线数据库
+
+```csharp
+using Cyaim.WebSocketServer.Infrastructure.AccessControl;
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Cyaim.WebSocketServer.Middlewares;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Configure access control / 配置访问控制
+builder.Services.AddAccessControl(policy =>
+{
+    policy.Enabled = true;
+    policy.CountryWhitelist = new List<string> { "CN", "US" };
+    policy.EnableGeoLocationLookup = true;
+});
+
+// Register MaxMind offline database provider / 注册 MaxMind 离线数据库提供者
+// First install MaxMind.GeoIP2 NuGet package: dotnet add package MaxMind.GeoIP2
+// 首先安装 MaxMind.GeoIP2 NuGet 包：dotnet add package MaxMind.GeoIP2
+builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<MaxMindOfflineGeoLocationProvider>>();
+    return new MaxMindOfflineGeoLocationProvider(logger, databasePath: "path/to/GeoLite2-City.mmdb");
+});
+
+// Configure WebSocket / 配置 WebSocket
+builder.Services.ConfigureWebSocketRoute(x =>
+{
+    x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
+    {
+        { "/ws", new MvcChannelHandler(4 * 1024).ConnectionEntry }
+    };
+    x.ApplicationServiceCollection = builder.Services;
+});
+
+var app = builder.Build();
+
+var webSocketOptions = new Microsoft.AspNetCore.Builder.WebSocketOptions()
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(120)
+};
+
+app.UseWebSockets(webSocketOptions);
+app.UseWebSocketServer();
+
+app.Run();
+```
+
+### Example 6: Custom Geographic Location Provider / 自定义地理位置提供者
 
 ```csharp
 using Cyaim.WebSocketServer.Infrastructure.AccessControl;

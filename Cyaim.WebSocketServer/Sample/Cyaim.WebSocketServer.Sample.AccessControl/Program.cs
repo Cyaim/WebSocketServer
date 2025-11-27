@@ -60,7 +60,31 @@ builder.Services.AddAccessControl(policy =>
 
 // Register geographic location provider (optional, only needed if EnableGeoLocationLookup is true)
 // 注册地理位置提供者（可选，仅在 EnableGeoLocationLookup 为 true 时需要）
-// builder.Services.AddGeoLocationProvider<DefaultGeoLocationProvider>();
+
+// Online providers / 在线提供者
+// builder.Services.AddGeoLocationProvider<IpApiComGeoLocationProvider>();      // ip-api.com
+// builder.Services.AddGeoLocationProvider<IpApiCoGeoLocationProvider>();       // ipapi.co
+// builder.Services.AddGeoLocationProvider<IpWhoisAppGeoLocationProvider>();    // ipwhois.app
+// builder.Services.AddGeoLocationProvider<IpApiIoGeoLocationProvider>();       // ip-api.io
+// builder.Services.AddGeoLocationProvider<IpIpNetGeoLocationProvider>();       // ipip.net
+// builder.Services.AddSingleton<IGeoLocationProvider>(provider =>              // ipinfo.io (requires API key)
+//     new IpInfoIoGeoLocationProvider(
+//         provider.GetRequiredService<ILogger<IpInfoIoGeoLocationProvider>>(),
+//         apiKey: "your-api-key"));
+
+// Offline database providers / 离线数据库提供者
+// builder.Services.AddSingleton<IGeoLocationProvider>(provider =>              // ChunZhen offline (qqwry.dat)
+//     new ChunZhenOfflineGeoLocationProvider(
+//         provider.GetRequiredService<ILogger<ChunZhenOfflineGeoLocationProvider>>(),
+//         databasePath: "path/to/qqwry.dat"));
+// builder.Services.AddSingleton<IGeoLocationProvider>(provider =>              // ipip.net offline
+//     new IpIpNetOfflineGeoLocationProvider(
+//         provider.GetRequiredService<ILogger<IpIpNetOfflineGeoLocationProvider>>(),
+//         databasePath: "path/to/ipipnet-database"));
+// builder.Services.AddSingleton<IGeoLocationProvider>(provider =>              // MaxMind offline (.mmdb)
+//     new MaxMindOfflineGeoLocationProvider(
+//         provider.GetRequiredService<ILogger<MaxMindOfflineGeoLocationProvider>>(),
+//         databasePath: "path/to/GeoLite2-City.mmdb"));
 
 // Add controllers / 添加控制器
 builder.Services.AddControllers();

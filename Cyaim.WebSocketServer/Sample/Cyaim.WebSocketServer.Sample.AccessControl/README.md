@@ -70,7 +70,14 @@ builder.Services.AddAccessControl(policy =>
     policy.EnableGeoLocationLookup = true;
 });
 
-builder.Services.AddGeoLocationProvider<DefaultGeoLocationProvider>();
+// Online provider / 在线提供者
+builder.Services.AddGeoLocationProvider<IpApiComGeoLocationProvider>();
+
+// Or use offline database / 或使用离线数据库
+// builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
+//     new ChunZhenOfflineGeoLocationProvider(
+//         provider.GetRequiredService<ILogger<ChunZhenOfflineGeoLocationProvider>>(),
+//         databasePath: "path/to/qqwry.dat"));
 ```
 
 ### Example 3: Configuration from appsettings.json / 从 appsettings.json 配置

@@ -7,29 +7,35 @@ using Microsoft.Extensions.Logging;
 namespace Cyaim.WebSocketServer.Infrastructure.AccessControl
 {
     /// <summary>
-    /// Default geographic location provider using ip-api.com (free tier)
-    /// 使用 ip-api.com（免费版）的默认地理位置提供者
+    /// Geographic location provider using ipinfo.io (free tier)
+    /// 使用 ipinfo.io（免费版）的地理位置提供者
+    /// Rate limit: 50,000 requests/month for free tier / 免费版限制：每月 50,000 次请求
+    /// Note: Requires API key for free tier / 注意：免费版需要 API 密钥
     /// </summary>
-    public class DefaultGeoLocationProvider : IGeoLocationProvider
+    public class IpInfoIoGeoLocationProvider : IGeoLocationProvider
     {
-        private readonly ILogger<DefaultGeoLocationProvider> _logger;
+        private readonly ILogger<IpInfoIoGeoLocationProvider> _logger;
         private readonly HttpClient _httpClient;
+        private readonly string _apiKey;
         private readonly string _apiUrl;
 
         /// <summary>
         /// Constructor / 构造函数
         /// </summary>
         /// <param name="logger">Logger instance / 日志实例</param>
+        /// <param name="apiKey">API key (required for free tier) / API 密钥（免费版必需）</param>
         /// <param name="httpClient">HTTP client (optional, will create if null) / HTTP 客户端（可选，如果为 null 则创建）</param>
-        /// <param name="apiUrl">API URL (default: http://ip-api.com/json/{ip}) / API URL（默认：http://ip-api.com/json/{ip}）</param>
-        public DefaultGeoLocationProvider(
-            ILogger<DefaultGeoLocationProvider> logger,
+        /// <param name="apiUrl">API URL (default: https://ipinfo.io/{ip}/json?token={key}) / API URL（默认：https://ipinfo.io/{ip}/json?token={key}）</param>
+        public IpInfoIoGeoLocationProvider(
+            ILogger<IpInfoIoGeoLocationProvider> logger,
+            string apiKey,
             HttpClient httpClient = null,
             string apiUrl = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _apiKey = apiKey ?? throw new ArgumentNullException(nameof(apiKey), "API key is required for ipinfo.io");
             _httpClient = httpClient ?? new HttpClient();
-            _apiUrl = apiUrl ?? "http://ip-api.com/json/{ip}";
+            _apiUrl = apiUrl ?? "https://ipinfo.io/{ip}/json?token={key}";
         }
 
         /// <summary>
@@ -53,7 +59,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.AccessControl
                     return null;
                 }
 
-                var url = _apiUrl.Replace("{ip}", ipAddress);
+                var url = _apiUrl.Replace("{ip}", ipAddress).Replace("{key}", _apiKey);
                 var response = await _httpClient.GetStringAsync(url);
 
                 if (string.IsNullOrEmpty(response))
@@ -64,34 +70,48 @@ namespace Cyaim.WebSocketServer.Infrastructure.AccessControl
                 var jsonDoc = JsonDocument.Parse(response);
                 var root = jsonDoc.RootElement;
 
-                // Check if query was successful / 检查查询是否成功
-                if (root.TryGetProperty("status", out var statusElement) &&
-                    statusElement.GetString() != "success")
+                // Check for error / 检查错误
+                if (root.TryGetProperty("error", out var errorElement))
                 {
-                    _logger.LogWarning($"Geo lookup failed for IP {ipAddress}: {response}");
+                    _logger.LogWarning($"Geo lookup failed for IP {ipAddress}: {errorElement.GetRawText()}");
                     return null;
+                }
+
+                // Parse location from "loc" field (format: "lat,lon") / 从 "loc" 字段解析位置（格式："lat,lon"）
+                double? latitude = null;
+                double? longitude = null;
+                if (root.TryGetProperty("loc", out var locElement))
+                {
+                    var loc = locElement.GetString();
+                    if (!string.IsNullOrEmpty(loc))
+                    {
+                        var parts = loc.Split(',');
+                        if (parts.Length == 2)
+                        {
+                            if (double.TryParse(parts[0], out var lat))
+                                latitude = lat;
+                            if (double.TryParse(parts[1], out var lon))
+                                longitude = lon;
+                        }
+                    }
                 }
 
                 var geoInfo = new GeoLocationInfo
                 {
-                    CountryCode = root.TryGetProperty("countryCode", out var countryCode)
+                    CountryCode = root.TryGetProperty("country", out var countryCode)
                         ? countryCode.GetString()
                         : null,
                     CountryName = root.TryGetProperty("country", out var country)
                         ? country.GetString()
                         : null,
-                    RegionName = root.TryGetProperty("regionName", out var region)
+                    RegionName = root.TryGetProperty("region", out var region)
                         ? region.GetString()
                         : null,
                     CityName = root.TryGetProperty("city", out var city)
                         ? city.GetString()
                         : null,
-                    Latitude = root.TryGetProperty("lat", out var lat) && lat.ValueKind == JsonValueKind.Number
-                        ? lat.GetDouble()
-                        : (double?)null,
-                    Longitude = root.TryGetProperty("lon", out var lon) && lon.ValueKind == JsonValueKind.Number
-                        ? lon.GetDouble()
-                        : (double?)null
+                    Latitude = latitude,
+                    Longitude = longitude
                 };
 
                 _logger.LogDebug($"Geo lookup for IP {ipAddress}: {geoInfo.CountryCode}/{geoInfo.CityName}");
