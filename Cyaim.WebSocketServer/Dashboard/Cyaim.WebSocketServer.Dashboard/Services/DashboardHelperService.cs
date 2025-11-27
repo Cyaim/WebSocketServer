@@ -23,22 +23,27 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
             var clusterManager = GlobalClusterCenter.ClusterManager;
             var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "unknown";
 
-            // Get local connections / 获取本地连接
-            if (MvcChannelHandler.Clients != null)
-            {
-                foreach (var kvp in MvcChannelHandler.Clients)
-                {
-                    connections[kvp.Key] = currentNodeId;
-                }
-            }
-
-            // Get connections from cluster routing table / 从集群路由表获取连接
+            // Priority 1: Get connections from cluster routing table (most authoritative) / 优先级1：从集群路由表获取连接（最权威）
+            // This includes all connections from all nodes in the cluster / 这包括集群中所有节点的所有连接
             if (clusterManager != null && clusterManager.ConnectionRoutes != null)
             {
                 foreach (var kvp in clusterManager.ConnectionRoutes)
                 {
-                    // Merge with local connections, cluster routes take precedence / 与本地连接合并，集群路由优先
                     connections[kvp.Key] = kvp.Value;
+                }
+            }
+
+            // Priority 2: Add local connections that might not be in routing table yet / 优先级2：添加可能尚未在路由表中的本地连接
+            // This ensures we don't miss any local connections that haven't been registered yet / 这确保我们不会遗漏任何尚未注册的本地连接
+            if (MvcChannelHandler.Clients != null)
+            {
+                foreach (var kvp in MvcChannelHandler.Clients)
+                {
+                    // Only add if not already in connections (cluster routes take precedence) / 仅在尚未在连接中时添加（集群路由优先）
+                    if (!connections.ContainsKey(kvp.Key))
+                    {
+                        connections[kvp.Key] = currentNodeId;
+                    }
                 }
             }
 

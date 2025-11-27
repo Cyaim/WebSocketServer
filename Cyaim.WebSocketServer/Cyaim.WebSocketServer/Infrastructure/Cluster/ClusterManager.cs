@@ -102,6 +102,32 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         }
 
         /// <summary>
+        /// Gracefully shutdown the cluster with connection transfer / 优雅关闭集群并转移连接
+        /// </summary>
+        /// <param name="force">Force shutdown without transfer / 强制关闭不转移连接</param>
+        /// <returns>Task / 任务</returns>
+        public async Task ShutdownAsync(bool force = false)
+        {
+            _logger.LogInformation($"Shutting down cluster manager for node {_nodeId} (force: {force})");
+
+            try
+            {
+                if (!force)
+                {
+                    // Graceful shutdown: transfer connections before stopping / 优雅关闭：在停止前转移连接
+                    await _router.GracefulShutdownAsync(_clusterOption);
+                }
+
+                await StopAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error during cluster shutdown for node {_nodeId}");
+                throw;
+            }
+        }
+
+        /// <summary>
         /// Stop the cluster
         /// 停止集群
         /// </summary>

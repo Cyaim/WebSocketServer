@@ -229,21 +229,31 @@ if (clusterConfig.Exists() && !string.IsNullOrEmpty(clusterConfig["NodeId"]))
             });
         });
 
-        // 在应用关闭时停止集群
+        // 在应用关闭时停止集群（优雅关闭）
         lifetime.ApplicationStopping.Register(() =>
         {
             Task.Run(async () =>
             {
                 try
                 {
-                    await clusterManager.StopAsync();
-                    logger.LogInformation($"集群节点 {nodeId} 已停止");
+                    // Graceful shutdown: transfer connections before stopping / 优雅关闭：在停止前转移连接
+                    await clusterManager.ShutdownAsync(force: false);
+                    logger.LogInformation($"集群节点 {nodeId} 已优雅关闭");
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "停止集群时发生错误");
+                    logger.LogError(ex, "优雅关闭集群时发生错误，尝试强制关闭");
+                    try
+                    {
+                        // Force shutdown if graceful shutdown fails / 如果优雅关闭失败，强制关闭
+                        await clusterManager.ShutdownAsync(force: true);
+                    }
+                    catch (Exception forceEx)
+                    {
+                        logger.LogError(forceEx, "强制关闭集群时发生错误");
+                    }
                 }
-            }).Wait(TimeSpan.FromSeconds(5)); // 等待最多5秒
+            }).Wait(TimeSpan.FromSeconds(30)); // 等待最多30秒（优雅关闭需要更多时间）
         });
     }
     catch (Exception ex)

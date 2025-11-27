@@ -206,6 +206,22 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
                         _metricsCollector?.RecordConnectionEstablished(currentNodeId, context.Request.Path);
 
+                        // Register connection with cluster manager if cluster is enabled
+                        // 如果启用了集群，向集群管理器注册连接
+                        var clusterManager = Infrastructure.Cluster.GlobalClusterCenter.ClusterManager;
+                        if (clusterManager != null)
+                        {
+                            try
+                            {
+                                await clusterManager.RegisterConnectionAsync(context.Connection.Id, context.Request.Path);
+                                logger.LogDebug($"Registered connection {context.Connection.Id} with cluster manager");
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.LogWarning(ex, $"Failed to register connection {context.Connection.Id} with cluster manager");
+                            }
+                        }
+
                         // 执行BeforeReceivingData管道
                         _ = await InvokePipeline(RequestPipelineStage.Connected, context, webSocket, null, null);
 
@@ -1039,6 +1055,22 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 if (wsExists)
                 {
                     Clients.TryRemove(context.Connection.Id, out var _);
+                    
+                    // Unregister connection from cluster manager if cluster is enabled
+                    // 如果启用了集群，从集群管理器注销连接
+                    var clusterManager = Infrastructure.Cluster.GlobalClusterCenter.ClusterManager;
+                    if (clusterManager != null)
+                    {
+                        try
+                        {
+                            await clusterManager.UnregisterConnectionAsync(context.Connection.Id);
+                            logger.LogDebug($"Unregistered connection {context.Connection.Id} from cluster manager");
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, $"Failed to unregister connection {context.Connection.Id} from cluster manager");
+                        }
+                    }
                 }
 
                 ParallelForwardLimitSlim?.Dispose();

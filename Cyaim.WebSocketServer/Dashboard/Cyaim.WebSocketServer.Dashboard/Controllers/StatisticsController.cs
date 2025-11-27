@@ -108,11 +108,15 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                     // If not found locally or on remote node, create basic info / 如果未在本地找到或在远程节点，创建基本信息
                     if (clientInfo == null)
                     {
+                        // If connection is in routing table, assume it's Open (disconnected connections are unregistered)
+                        // 如果连接在路由表中，假设它是 Open 状态（断开的连接会被注销）
+                        var state = "Open"; // Assume open if in routing table / 如果在路由表中，假设为 Open
+                        
                         clientInfo = new ClientConnectionInfo
                         {
                             ConnectionId = connectionId,
                             NodeId = targetNodeId,
-                            State = "Unknown",
+                            State = state,
                             BytesSent = 0,
                             BytesReceived = 0,
                             MessagesSent = 0,
