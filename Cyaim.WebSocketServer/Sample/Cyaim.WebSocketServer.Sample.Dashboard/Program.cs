@@ -75,6 +75,17 @@ builder.Services.AddWebSocketDashboard();
 // Add HTTP client for test API / 为测试 API 添加 HTTP 客户端
 builder.Services.AddHttpClient();
 
+// Add CORS support for testing / 添加 CORS 支持用于测试
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
 // Register WebSocket Cluster Test API / 注册 WebSocket 集群测试 API
 builder.Services.AddSingleton<IWebSocketClusterTestApi>(provider =>
 {
@@ -133,6 +144,9 @@ if (app.Environment.IsDevelopment())
         c.DefaultModelsExpandDepth(-1); // 隐藏模型定义，使界面更简洁
     });
 }
+
+// Enable CORS / 启用 CORS
+app.UseCors("AllowAll");
 
 app.UseRouting();
 

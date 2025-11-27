@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket 客户端消息测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        h1,
+        h2 {
+            color: #333;
+        }
+
+        .client-section {
+            border: 2px solid #e0e0e0;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+
+        .client-section.active {
+            border-color: #4CAF50;
+            background-color: #f1f8f4;
+        }
+
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        button.disconnect {
+            background-color: #f44336;
+        }
+
+        button.disconnect:hover {
+            background-color: #da190b;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .messages {
+            max-height: 200px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+
+        .message {
+            padding: 5px;
+            margin: 5px 0;
+            border-left: 3px solid #4CAF50;
+            background-color: white;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .status.connected {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .status.disconnected {
+            background-color: #f44336;
+            color: white;
+        }
+
+        .connection-info {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .send-section {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>WebSocket 客户端消息测试工具</h1>
+
+    <div class="container">
+        <h2>Client1 (连接到 node1:5001)</h2>
+        <div class="client-section" id="client1-section">
+            <div>
+                <span class="status disconnected" id="client1-status">未连接</span>
+                <span class="connection-info" id="client1-info"></span>
+            </div>
+            <button onclick="connectClient1()">连接 Client1</button>
+            <button class="disconnect" onclick="disconnectClient1()">断开 Client1</button>
+            <div class="messages" id="client1-messages"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Client2 (连接到 node2:5002)</h2>
+        <div class="client-section" id="client2-section">
+            <div>
+                <span class="status disconnected" id="client2-status">未连接</span>
+                <span class="connection-info" id="client2-info"></span>
+            </div>
+            <button onclick="connectClient2()">连接 Client2</button>
+            <button class="disconnect" onclick="disconnectClient2()">断开 Client2</button>
+            <div class="messages" id="client2-messages"></div>
+        </div>
+    </div>
+
+    <div class="container send-section">
+        <h2>发送消息</h2>
+        <div>
+            <label>目标连接ID (Client2):</label>
+            <input type="text" id="target-connection-id" placeholder="自动获取或手动输入">
+            <button onclick="refreshConnectionIds()">刷新连接列表</button>
+        </div>
+        <div>
+            <label>消息内容:</label>
+            <textarea id="message-content" rows="3" placeholder="输入要发送的消息">Hello from Client1!</textarea>
+        </div>
+        <div>
+            <label>消息类型:</label>
+            <select id="message-type">
+                <option value="Text">文本 (Text)</option>
+                <option value="Binary">二进制 (Binary)</option>
+            </select>
+        </div>
+        <button onclick="sendMessage()" style="background-color: #2196F3;">发送消息</button>
+        <div id="send-result" style="margin-top: 10px;"></div>
+    </div>
+
+    <div class="container">
+        <h2>连接列表</h2>
+        <button onclick="refreshConnectionIds()">刷新</button>
+        <div id="connection-list"></div>
+    </div>
+
+    <script>
+        let ws1 = null;
+        let ws2 = null;
+        let client1Id = null;
+        let client2Id = null;
+        // 如果是从 file:// 打开，使用默认的 localhost:5001，否则使用当前 origin
+        const baseUrl = window.location.protocol === 'file:'
+            ? 'http://localhost:5001'
+            : (window.location.origin.replace(/:\d+$/, '') || 'http://localhost:5001') + ':5001';
+
+        function updateStatus (clientNum, connected, connectionId = null) {
+            const statusEl = document.getElementById(`client${clientNum}-status`);
+            const infoEl = document.getElementById(`client${clientNum}-info`);
+            const sectionEl = document.getElementById(`client${clientNum}-section`);
+
+            if (connected) {
+                statusEl.textContent = '已连接';
+                statusEl.className = 'status connected';
+                if (connectionId) {
+                    infoEl.textContent = `ConnectionId: ${connectionId}`;
+                    if (clientNum === 1) client1Id = connectionId;
+                    if (clientNum === 2) client2Id = connectionId;
+                }
+                sectionEl.classList.add('active');
+            } else {
+                statusEl.textContent = '未连接';
+                statusEl.className = 'status disconnected';
+                infoEl.textContent = '';
+                sectionEl.classList.remove('active');
+            }
+        }
+
+        function addMessage (clientNum, message, isReceived = false) {
+            const messagesEl = document.getElementById(`client${clientNum}-messages`);
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+            messageDiv.textContent = `${isReceived ? '收到' : '发送'}: ${message}`;
+            messagesEl.appendChild(messageDiv);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function connectClient1 () {
+            ws1 = new WebSocket('ws://localhost:5001/ws');
+            ws1.onopen = () => {
+                updateStatus(1, true);
+                addMessage(1, '连接已建立', true);
+                refreshConnectionIds();
+            };
+            ws1.onmessage = (event) => {
+                addMessage(1, event.data, true);
+            };
+            ws1.onerror = (error) => {
+                console.error('Client1 error:', error);
+                addMessage(1, '连接错误', true);
+            };
+            ws1.onclose = () => {
+                updateStatus(1, false);
+                addMessage(1, '连接已关闭', true);
+            };
+        }
+
+        function connectClient2 () {
+            ws2 = new WebSocket('ws://localhost:5002/ws');
+            ws2.onopen = () => {
+                updateStatus(2, true);
+                addMessage(2, '连接已建立', true);
+                refreshConnectionIds();
+            };
+            ws2.onmessage = (event) => {
+                addMessage(2, event.data, true);
+            };
+            ws2.onerror = (error) => {
+                console.error('Client2 error:', error);
+                addMessage(2, '连接错误', true);
+            };
+            ws2.onclose = () => {
+                updateStatus(2, false);
+                addMessage(2, '连接已关闭', true);
+            };
+        }
+
+        function disconnectClient1 () {
+            if (ws1) {
+                ws1.close();
+                ws1 = null;
+                updateStatus(1, false);
+            }
+        }
+
+        function disconnectClient2 () {
+            if (ws2) {
+                ws2.close();
+                ws2 = null;
+                updateStatus(2, false);
+            }
+        }
+
+        async function refreshConnectionIds () {
+            try {
+                const response = await fetch(`${baseUrl}/ws_server/api/client`);
+                const data = await response.json();
+
+                if (data.success && data.data) {
+                    const listEl = document.getElementById('connection-list');
+                    listEl.innerHTML = '<table style="width:100%; border-collapse: collapse;"><tr><th>ConnectionId</th><th>NodeId</th><th>State</th><th>操作</th></tr>';
+
+                    data.data.forEach(client => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td><code>${client.connectionId}</code></td>
+                            <td>${client.nodeId}</td>
+                            <td><span class="status ${client.state === 'Open' ? 'connected' : 'disconnected'}">${client.state}</span></td>
+                            <td><button onclick="selectConnection('${client.connectionId}')" style="padding: 5px 10px; font-size: 12px;">选择</button></td>
+                        `;
+                        listEl.querySelector('table').appendChild(row);
+
+                        // 自动填充 Client2 的连接ID
+                        if (client.nodeId === 'node2' && !document.getElementById('target-connection-id').value) {
+                            document.getElementById('target-connection-id').value = client.connectionId;
+                        }
+                    });
+
+                    listEl.innerHTML += '</table>';
+                }
+            } catch (error) {
+                console.error('Failed to fetch connection IDs:', error);
+            }
+        }
+
+        function selectConnection (connectionId) {
+            document.getElementById('target-connection-id').value = connectionId;
+        }
+
+        async function sendMessage () {
+            const connectionId = document.getElementById('target-connection-id').value || client2Id;
+            const content = document.getElementById('message-content').value;
+            const messageType = document.getElementById('message-type').value;
+            const resultEl = document.getElementById('send-result');
+
+            if (!connectionId) {
+                resultEl.innerHTML = '<div style="color: red;">错误: 请选择或输入目标连接ID</div>';
+                return;
+            }
+
+            if (!content) {
+                resultEl.innerHTML = '<div style="color: red;">错误: 请输入消息内容</div>';
+                return;
+            }
+
+            try {
+                resultEl.innerHTML = '<div style="color: blue;">发送中...</div>';
+
+                const response = await fetch(`${baseUrl}/ws_server/api/messages/send`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        connectionId: connectionId,
+                        content: content,
+                        messageType: messageType
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    resultEl.innerHTML = '<div style="color: green;">✓ 消息发送成功！</div>';
+                    addMessage(1, `发送给 ${connectionId}: ${content}`);
+                } else {
+                    resultEl.innerHTML = `<div style="color: red;">✗ 消息发送失败: ${result.error || '未知错误'}</div>`;
+                }
+            } catch (error) {
+                resultEl.innerHTML = `<div style="color: red;">✗ 发送消息时出错: ${error.message}</div>`;
+                console.error('Error sending message:', error);
+            }
+        }
+
+        // 页面加载时自动刷新连接列表
+        window.onload = () => {
+            refreshConnectionIds();
+            setInterval(refreshConnectionIds, 5000); // 每5秒刷新一次
+        };
+    </script>
+</body>
+
+</html>

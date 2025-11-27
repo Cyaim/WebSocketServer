@@ -319,8 +319,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                         }
 
-                        // Feature 要做流量控制 🔨🔨🔨
-
                         // 执行BeforeReceivingData管道
                         _ = await InvokePipeline(RequestPipelineStage.BeforeReceivingData, context, webSocket, null, null);
 
