@@ -292,28 +292,451 @@ builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
 
 **注意**：所有免费版都有速率限制。生产环境请考虑使用商业服务或 MaxMind GeoIP2。
 
-### Custom Provider
+## Creating Custom GeoLocation Providers / 创建自定义地理位置提供者
 
-Implement `IGeoLocationProvider` interface:
+If you need to integrate with a custom IP geolocation service or offline database, you can create your own provider by implementing the `IGeoLocationProvider` interface.
+
+如果您需要集成自定义的 IP 地理位置服务或离线数据库，可以通过实现 `IGeoLocationProvider` 接口来创建自己的提供者。
+
+### Interface Definition / 接口定义
 
 ```csharp
-public class CustomGeoLocationProvider : IGeoLocationProvider
+public interface IGeoLocationProvider
 {
-    public async Task<GeoLocationInfo> GetLocationAsync(string ipAddress)
-    {
-        // Your implementation / 您的实现
-        return new GeoLocationInfo
-        {
-            CountryCode = "CN",
-            CountryName = "China",
-            CityName = "Beijing",
-            RegionName = "Beijing"
-        };
-    }
+    Task<GeoLocationInfo> GetLocationAsync(string ipAddress);
 }
 
-// Register / 注册
-builder.Services.AddGeoLocationProvider<CustomGeoLocationProvider>();
+public class GeoLocationInfo
+{
+    public string CountryCode { get; set; }      // ISO 3166-1 alpha-2 (e.g., "CN", "US")
+    public string CountryName { get; set; }      // Country name / 国家名称
+    public string RegionName { get; set; }       // Region/State name / 地区/州名称
+    public string CityName { get; set; }         // City name / 城市名称
+    public double? Latitude { get; set; }        // Latitude / 纬度
+    public double? Longitude { get; set; }       // Longitude / 经度
+}
+```
+
+### Example 1: Online API Provider / 示例 1：在线 API 提供者
+
+This example shows how to create a provider for a custom online API service.
+
+此示例展示如何为自定义在线 API 服务创建提供者。
+
+```csharp
+using System;
+using System.Net.Http;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+
+namespace YourNamespace
+{
+    /// <summary>
+    /// Custom online API provider example / 自定义在线 API 提供者示例
+    /// </summary>
+    public class CustomApiGeoLocationProvider : IGeoLocationProvider
+    {
+        private readonly ILogger<CustomApiGeoLocationProvider> _logger;
+        private readonly HttpClient _httpClient;
+        private readonly string _apiUrl;
+        private readonly string _apiKey;
+
+        public CustomApiGeoLocationProvider(
+            ILogger<CustomApiGeoLocationProvider> logger,
+            HttpClient httpClient = null,
+            string apiUrl = "https://api.example.com/geo/{ip}",
+            string apiKey = null)
+        {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _httpClient = httpClient ?? new HttpClient();
+            _apiUrl = apiUrl;
+            _apiKey = apiKey;
+        }
+
+        public async Task<GeoLocationInfo> GetLocationAsync(string ipAddress)
+        {
+            // 1. Validate input / 验证输入
+            if (string.IsNullOrEmpty(ipAddress))
+            {
+                return null;
+            }
+
+            try
+            {
+                // 2. Skip local/private IPs (optional but recommended) / 跳过本地/私有 IP（可选但推荐）
+                if (IsLocalOrPrivateIp(ipAddress))
+                {
+                    _logger.LogDebug($"IP {ipAddress} is local/private, skipping geo lookup");
+                    return null;
+                }
+
+                // 3. Build API URL / 构建 API URL
+                var url = _apiUrl.Replace("{ip}", ipAddress);
+                if (!string.IsNullOrEmpty(_apiKey))
+                {
+                    url += $"?key={_apiKey}";
+                }
+
+                // 4. Make HTTP request / 发起 HTTP 请求
+                var response = await _httpClient.GetStringAsync(url);
+
+                if (string.IsNullOrEmpty(response))
+                {
+                    return null;
+                }
+
+                // 5. Parse JSON response / 解析 JSON 响应
+                var jsonDoc = JsonDocument.Parse(response);
+                var root = jsonDoc.RootElement;
+
+                // 6. Check for errors / 检查错误
+                if (root.TryGetProperty("error", out var errorElement))
+                {
+                    _logger.LogWarning($"Geo lookup failed for IP {ipAddress}: {errorElement.GetRawText()}");
+                    return null;
+                }
+
+                // 7. Extract location information / 提取位置信息
+                var geoInfo = new GeoLocationInfo
+                {
+                    // Map API response fields to GeoLocationInfo / 将 API 响应字段映射到 GeoLocationInfo
+                    CountryCode = root.TryGetProperty("country_code", out var countryCode)
+                        ? countryCode.GetString()
+                        : null,
+                    CountryName = root.TryGetProperty("country", out var country)
+                        ? country.GetString()
+                        : null,
+                    RegionName = root.TryGetProperty("region", out var region)
+                        ? region.GetString()
+                        : null,
+                    CityName = root.TryGetProperty("city", out var city)
+                        ? city.GetString()
+                        : null,
+                    // Handle numeric fields with null check / 处理数值字段并检查 null
+                    Latitude = root.TryGetProperty("latitude", out var lat) && lat.ValueKind == JsonValueKind.Number
+                        ? (double?)lat.GetDouble()
+                        : (double?)null,
+                    Longitude = root.TryGetProperty("longitude", out var lon) && lon.ValueKind == JsonValueKind.Number
+                        ? (double?)lon.GetDouble()
+                        : (double?)null
+                };
+
+                _logger.LogDebug($"Geo lookup for IP {ipAddress}: {geoInfo.CountryCode}/{geoInfo.CityName}");
+                return geoInfo;
+            }
+            catch (Exception ex)
+            {
+                // 8. Handle errors gracefully / 优雅地处理错误
+                _logger.LogWarning(ex, $"Error getting geographic location for IP {ipAddress}");
+                return null; // Return null on error, don't throw / 出错时返回 null，不要抛出异常
+            }
+        }
+
+        /// <summary>
+        /// Check if IP is local or private / 检查 IP 是否为本地或私有
+        /// </summary>
+        private bool IsLocalOrPrivateIp(string ipAddress)
+        {
+            if (string.IsNullOrEmpty(ipAddress))
+                return true;
+
+            if (ipAddress == "::1" || ipAddress == "127.0.0.1" || ipAddress == "localhost")
+                return true;
+
+            if (System.Net.IPAddress.TryParse(ipAddress, out var ip))
+            {
+                if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    var bytes = ip.GetAddressBytes();
+                    // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+                    if (bytes[0] == 10 ||
+                        (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
+                        (bytes[0] == 192 && bytes[1] == 168))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+    }
+}
+```
+
+### Example 2: Offline Database Provider / 示例 2：离线数据库提供者
+
+This example shows how to create a provider for a custom offline database.
+
+此示例展示如何为自定义离线数据库创建提供者。
+
+```csharp
+using System;
+using System.IO;
+using System.Net;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+
+namespace YourNamespace
+{
+    /// <summary>
+    /// Custom offline database provider example / 自定义离线数据库提供者示例
+    /// </summary>
+    public class CustomOfflineGeoLocationProvider : IGeoLocationProvider
+    {
+        private readonly ILogger<CustomOfflineGeoLocationProvider> _logger;
+        private readonly string _databasePath;
+        private readonly object _lockObject = new object();
+        private byte[] _databaseData;
+        private bool _databaseLoaded;
+
+        public CustomOfflineGeoLocationProvider(
+            ILogger<CustomOfflineGeoLocationProvider> logger,
+            string databasePath)
+        {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _databasePath = databasePath ?? throw new ArgumentNullException(nameof(databasePath));
+
+            if (!File.Exists(_databasePath))
+            {
+                throw new FileNotFoundException($"Database file not found: {_databasePath}");
+            }
+        }
+
+        public async Task<GeoLocationInfo> GetLocationAsync(string ipAddress)
+        {
+            if (string.IsNullOrEmpty(ipAddress))
+            {
+                return null;
+            }
+
+            try
+            {
+                // Skip local/private IPs / 跳过本地/私有 IP
+                if (IsLocalOrPrivateIp(ipAddress))
+                {
+                    _logger.LogDebug($"IP {ipAddress} is local/private, skipping geo lookup");
+                    return null;
+                }
+
+                // Load database if not loaded / 如果未加载则加载数据库
+                await EnsureDatabaseLoadedAsync();
+
+                // Parse IP address / 解析 IP 地址
+                if (!IPAddress.TryParse(ipAddress, out var ip) || 
+                    ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    _logger.LogWarning($"Invalid IPv4 address: {ipAddress}");
+                    return null;
+                }
+
+                // Convert IP to numeric value / 将 IP 转换为数值
+                var ipBytes = ip.GetAddressBytes();
+                var ipValue = (uint)(ipBytes[0] << 24) | 
+                             (uint)(ipBytes[1] << 16) | 
+                             (uint)(ipBytes[2] << 8) | 
+                             ipBytes[3];
+
+                // Search in database (implement your search algorithm) / 在数据库中搜索（实现您的搜索算法）
+                var location = SearchLocation(ipValue);
+                if (location == null)
+                {
+                    return null;
+                }
+
+                // Parse location string / 解析位置字符串
+                var geoInfo = ParseLocationString(location);
+
+                _logger.LogDebug($"Geo lookup for IP {ipAddress}: {geoInfo.CountryName}/{geoInfo.CityName}");
+                return geoInfo;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"Error getting geographic location for IP {ipAddress}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Ensure database is loaded / 确保数据库已加载
+        /// </summary>
+        private Task EnsureDatabaseLoadedAsync()
+        {
+            if (_databaseLoaded)
+            {
+                return Task.CompletedTask;
+            }
+
+            lock (_lockObject)
+            {
+                if (_databaseLoaded)
+                {
+                    return Task.CompletedTask;
+                }
+
+                _databaseData = File.ReadAllBytes(_databasePath);
+                _databaseLoaded = true;
+                _logger.LogInformation($"Loaded database from {_databasePath}, size: {_databaseData.Length} bytes");
+            }
+
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Search location in database / 在数据库中搜索位置
+        /// Implement your database-specific search algorithm here / 在此处实现特定于数据库的搜索算法
+        /// </summary>
+        private string SearchLocation(uint ipValue)
+        {
+            // TODO: Implement your database search logic / 实现您的数据库搜索逻辑
+            // Example: Binary search, B-tree lookup, etc. / 示例：二分搜索、B 树查找等
+            return null;
+        }
+
+        /// <summary>
+        /// Parse location string to GeoLocationInfo / 将位置字符串解析为 GeoLocationInfo
+        /// </summary>
+        private GeoLocationInfo ParseLocationString(string location)
+        {
+            // TODO: Parse your database format / 解析您的数据库格式
+            // Example: "Country Region City" or JSON string / 示例："国家 地区 城市" 或 JSON 字符串
+            return new GeoLocationInfo
+            {
+                CountryName = "Unknown",
+                CityName = location
+            };
+        }
+
+        private bool IsLocalOrPrivateIp(string ipAddress)
+        {
+            // Same as Example 1 / 与示例 1 相同
+            // ... (implementation omitted for brevity) / ...（为简洁起见省略实现）
+            return false;
+        }
+    }
+}
+```
+
+### Example 3: Simple Static Provider / 示例 3：简单静态提供者
+
+For testing or simple use cases, you can create a provider that returns static data.
+
+对于测试或简单用例，您可以创建一个返回静态数据的提供者。
+
+```csharp
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+
+namespace YourNamespace
+{
+    /// <summary>
+    /// Simple static provider for testing / 用于测试的简单静态提供者
+    /// </summary>
+    public class StaticGeoLocationProvider : IGeoLocationProvider
+    {
+        private readonly ILogger<StaticGeoLocationProvider> _logger;
+
+        public StaticGeoLocationProvider(ILogger<StaticGeoLocationProvider> logger)
+        {
+            _logger = logger;
+        }
+
+        public Task<GeoLocationInfo> GetLocationAsync(string ipAddress)
+        {
+            // Return static data for testing / 返回静态数据用于测试
+            return Task.FromResult<GeoLocationInfo>(new GeoLocationInfo
+            {
+                CountryCode = "CN",
+                CountryName = "China",
+                RegionName = "Beijing",
+                CityName = "Beijing",
+                Latitude = 39.9042,
+                Longitude = 116.4074
+            });
+        }
+    }
+}
+```
+
+### Registering Custom Providers / 注册自定义提供者
+
+After creating your custom provider, register it in your `Program.cs`:
+
+创建自定义提供者后，在 `Program.cs` 中注册它：
+
+```csharp
+using Cyaim.WebSocketServer.Infrastructure.AccessControl;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Method 1: Using extension method (if provider has parameterless constructor) / 方法 1：使用扩展方法（如果提供者有无参构造函数）
+builder.Services.AddGeoLocationProvider<CustomApiGeoLocationProvider>();
+
+// Method 2: Manual registration with parameters / 方法 2：使用参数手动注册
+builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<CustomApiGeoLocationProvider>>();
+    var httpClient = provider.GetService<HttpClient>() ?? new HttpClient();
+    return new CustomApiGeoLocationProvider(
+        logger,
+        httpClient,
+        apiUrl: "https://api.example.com/geo/{ip}",
+        apiKey: "your-api-key"
+    );
+});
+
+// Method 3: For offline database / 方法 3：离线数据库
+builder.Services.AddSingleton<IGeoLocationProvider>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<CustomOfflineGeoLocationProvider>>();
+    return new CustomOfflineGeoLocationProvider(
+        logger,
+        databasePath: "path/to/your/database.dat"
+    );
+});
+
+// Configure access control / 配置访问控制
+builder.Services.AddAccessControl(policy =>
+{
+    policy.Enabled = true;
+    policy.EnableGeoLocationLookup = true;
+    // ... other settings / 其他设置
+});
+```
+
+### Best Practices for Custom Providers / 自定义提供者最佳实践
+
+1. **Error Handling / 错误处理**
+   - Always return `null` on error, don't throw exceptions / 出错时始终返回 `null`，不要抛出异常
+   - Log errors for debugging / 记录错误以便调试
+
+2. **Performance / 性能**
+   - Cache database data in memory for offline providers / 为离线提供者缓存数据库数据
+   - Use `HttpClient` efficiently (consider reusing instances) / 高效使用 `HttpClient`（考虑重用实例）
+   - Skip local/private IPs to avoid unnecessary lookups / 跳过本地/私有 IP 以避免不必要的查询
+
+3. **Null Safety / 空值安全**
+   - Always check for null values when parsing JSON / 解析 JSON 时始终检查空值
+   - Use `TryGetProperty` for optional fields / 对可选字段使用 `TryGetProperty`
+   - Handle missing fields gracefully / 优雅地处理缺失字段
+
+4. **Type Safety / 类型安全**
+   - Use explicit type casting for nullable types in C# 8.0 / 在 C# 8.0 中为可空类型使用显式类型转换
+   - Example: `? (double?)lat.GetDouble() : (double?)null` / 示例：`? (double?)lat.GetDouble() : (double?)null`
+
+5. **Logging / 日志记录**
+   - Log successful lookups at Debug level / 在 Debug 级别记录成功查询
+   - Log errors at Warning level / 在 Warning 级别记录错误
+   - Include IP address in log messages / 在日志消息中包含 IP 地址
+
+### Testing Your Provider / 测试您的提供者
+
+```csharp
+// Simple test / 简单测试
+var provider = new CustomApiGeoLocationProvider(logger, httpClient);
+var result = await provider.GetLocationAsync("8.8.8.8");
+Console.WriteLine($"Country: {result?.CountryName}, City: {result?.CityName}");
 ```
 
 ## Access Denied Actions / 拒绝访问操作
