@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFrameworks>netstandard2.1;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+		<Authors>Psyche</Authors>
+		<Company>Cyaim Studio</Company>
+		<PackageProjectUrl>https://github.com/Cyaim/WebSocketServer</PackageProjectUrl>
+		<PackageLicenseFile>LICENSE</PackageLicenseFile>
+		<RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
+		<Copyright>Copyright © Cyaim Studio</Copyright>
+		<Version>1.7.8</Version>
+		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
+		<Description>
+			WebSocketServer Hybrid cluster transport extension (Redis for service discovery, RabbitMQ for message routing)
+			WebSocketServer 混合集群传输扩展（Redis 用于服务发现，RabbitMQ 用于消息路由）
+			Supports different Redis and RabbitMQ libraries through abstraction layer
+			通过抽象层支持不同的 Redis 和 RabbitMQ 库
+		</Description>
+	</PropertyGroup>
+
+	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0'">
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.10" />
+		<PackageReference Include="System.Text.Json" Version="9.0.10" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0'">
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
+		<PackageReference Include="System.Text.Json" Version="8.0.6" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Cyaim.WebSocketServer\Cyaim.WebSocketServer.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="..\..\LICENSE">
+		  <Pack>True</Pack>
+		  <PackagePath>\</PackagePath>
+		</None>
+		<None Include="..\Cyaim.WebSocketServer\WebSocketRepository_Logo.png">
+			<Pack>True</Pack>
+			<PackagePath></PackagePath>
+		</None>
+	</ItemGroup>
+
+</Project>
