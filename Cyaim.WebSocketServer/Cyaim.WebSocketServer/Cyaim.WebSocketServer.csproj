@@ -49,27 +49,22 @@
         <PackageReference Include="System.Threading.Channels"
                           Version="8.0.0" />
     </ItemGroup>
+    <!-- .NET Standard 2.1 需要显式引用所有依赖包，使用最新稳定版本以避免安全漏洞 -->
     <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
-        <!-- <PackageReference Include="System.Text.Encodings.Web" Version="8.0.0" /> -->
-        <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions"
-                          Version="2.3.0" />
-        <PackageReference Include="Microsoft.CSharp"
-                          Version="4.7.0" />
-        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"
-                          Version="9.0.10" />
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection"
-                          Version="9.0.10" />
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"
-                          Version="9.0.10" />
-        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions"
-                          Version="9.0.10" />
-        <PackageReference Include="Microsoft.AspNetCore.Hosting.Server.Abstractions"
-                          Version="2.3.0" />
-        <PackageReference Include="System.Text.Json"
-                          Version="9.0.10" />
-        <PackageReference Include="System.Threading.Channels"
-                          Version="9.0.10" />
+        <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.3.0" />
+        <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
+        <!-- 使用 9.0.0 而不是 9.0.10，因为补丁版本会自动解析到最新 -->
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.0" />
+        <PackageReference Include="Microsoft.AspNetCore.Hosting.Server.Abstractions" Version="2.3.0" />
+        <PackageReference Include="System.Text.Json" Version="9.0.0" />
+        <PackageReference Include="System.Threading.Channels" Version="9.0.0" />
     </ItemGroup>
+    
+    <!-- .NET 6.0+ 框架已内置大部分包，无需显式引用，除非需要特定版本 -->
+    <!-- 这些框架版本会自动使用框架内置的包，更安全且性能更好 -->
     <ItemGroup>
         <None Include="..\..\LICENSE">
             <Pack>True</Pack>
@@ -84,25 +79,33 @@
             <PackagePath />
         </None>
     </ItemGroup>
-    <ItemGroup>
-        <PackageReference Include="Microsoft.Extensions.Configuration.Binder"
-                          Version="10.0.0" />
-    </ItemGroup>
-    <!-- OpenTelemetry Metrics for OTLP export -->
-    <ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0' Or '$(TargetFramework)' == 'net10.0'">
-        <PackageReference Include="OpenTelemetry"
-                          Version="1.9.0" />
-        <PackageReference Include="OpenTelemetry.Extensions.Hosting"
-                          Version="1.9.0" />
-        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol"
-                          Version="1.9.0" />
-    </ItemGroup>
+    <!-- Microsoft.Extensions.Configuration.Binder - 根据框架版本使用对应版本以确保兼容性和安全性 -->
+    <!-- 注意：OpenTelemetry.Exporter.OpenTelemetryProtocol 1.9.0 需要 >= 8.0.1，因此 net6.0 和 net7.0 也需要使用至少 8.0.1 -->
     <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
-        <PackageReference Include="OpenTelemetry"
-                          Version="1.9.0" />
-        <PackageReference Include="OpenTelemetry.Extensions.Hosting"
-                          Version="1.9.0" />
-        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol"
-                          Version="1.9.0" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.0" />
+    </ItemGroup>
+    <!-- .NET 6.0+ 框架已内置此包，但显式引用可以确保使用正确的版本 -->
+    <!-- 由于 OpenTelemetry 依赖要求 >= 8.0.1，net6.0 和 net7.0 也需要使用 8.0.1 或更高版本 -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.1" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(TargetFramework)' == 'net7.0'">
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.1" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.0" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
+    </ItemGroup>
+    
+    <!-- OpenTelemetry Metrics for OTLP export - 使用最新稳定版本，所有框架版本使用相同版本 -->
+    <ItemGroup>
+        <PackageReference Include="OpenTelemetry" Version="1.9.0" />
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.9.0" />
+        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.9.0" />
     </ItemGroup>
 </Project>

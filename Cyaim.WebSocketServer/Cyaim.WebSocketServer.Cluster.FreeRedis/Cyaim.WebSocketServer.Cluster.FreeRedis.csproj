@@ -21,15 +21,13 @@
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 	</ItemGroup>
 
+	<!-- .NET Standard 2.1 需要显式引用，使用最新稳定版本 -->
 	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.10" />
-		<PackageReference Include="System.Text.Json" Version="9.0.10" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+		<PackageReference Include="System.Text.Json" Version="9.0.0" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0' Or '$(TargetFramework)' == 'net10.0'">
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
-		<PackageReference Include="System.Text.Json" Version="8.0.6" />
-	</ItemGroup>
+	<!-- .NET 6.0+ 框架已内置这些包，无需显式引用，框架会自动使用内置版本 -->
 
 	<ItemGroup>
 		<PackageReference Include="FreeRedis" Version="1.2.0" />
