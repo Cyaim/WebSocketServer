@@ -79,7 +79,21 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
                 {
                     try
                     {
-                        var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(message);
+                        // RedisValue needs to be converted to string / RedisValue 需要转换为字符串
+                        var messageJson = message.ToString();
+                        if (string.IsNullOrEmpty(messageJson))
+                        {
+                            _logger.LogWarning("Received empty message from Redis");
+                            return;
+                        }
+                        
+                        var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
+                        if (clusterMessage == null)
+                        {
+                            _logger.LogWarning("Failed to deserialize cluster message from Redis");
+                            return;
+                        }
+                        
                         MessageReceived?.Invoke(this, new ClusterMessageEventArgs
                         {
                             FromNodeId = clusterMessage.FromNodeId,
@@ -97,7 +111,21 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
                 {
                     try
                     {
-                        var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(message);
+                        // RedisValue needs to be converted to string / RedisValue 需要转换为字符串
+                        var messageJson = message.ToString();
+                        if (string.IsNullOrEmpty(messageJson))
+                        {
+                            _logger.LogWarning("Received empty broadcast message from Redis");
+                            return;
+                        }
+                        
+                        var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
+                        if (clusterMessage == null)
+                        {
+                            _logger.LogWarning("Failed to deserialize cluster broadcast message from Redis");
+                            return;
+                        }
+                        
                         if (clusterMessage.FromNodeId != _nodeId)
                         {
                             MessageReceived?.Invoke(this, new ClusterMessageEventArgs
