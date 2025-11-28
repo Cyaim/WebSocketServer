@@ -7,6 +7,7 @@ using Cyaim.WebSocketServer.Middlewares;
 using Cyaim.WebSocketServer.Sample.Dashboard.Interfaces;
 using Cyaim.WebSocketServer.Sample.Dashboard.Services;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -162,7 +163,31 @@ var webSocketOptions = new WebSocketOptions()
 };
 
 app.UseWebSockets(webSocketOptions);
-app.UseWebSocketServer();
+
+// 方式一：使用原有的配置方式（在 ConfigureWebSocketRoute 中配置）
+// app.UseWebSocketServer();
+
+// 方式二：在中间件配置时进行配置（推荐，可以直接从容器获取服务）
+// 这种方式更友好，特别是当需要从容器中获取其他服务时
+app.UseWebSocketServer((option, services) =>
+{
+    // 此时可以直接从 services 获取已注册的服务，无需手动创建 ServiceProvider
+    var logger = services.GetRequiredService<ILogger<Program>>();
+    var configuration = services.GetRequiredService<IConfiguration>();
+    var httpClientFactory = services.GetRequiredService<IHttpClientFactory>();
+    
+    // 如果需要，可以在这里重新配置或补充配置
+    // 例如：如果需要根据运行时信息动态配置
+    var clusterConfig = configuration.GetSection("Cluster");
+    if (clusterConfig.Exists() && !string.IsNullOrEmpty(clusterConfig["NodeId"]))
+    {
+        logger.LogInformation("集群模式已启用");
+    }
+    
+    // 注意：如果之前在 ConfigureWebSocketRoute 中已经配置了基本选项（如 WebSocketChannels），
+    // 这里可以只进行补充配置。如果之前没有配置，需要在这里完成所有配置。
+    // 为了演示，这里假设已经在 ConfigureWebSocketRoute 中配置了基本选项
+});
 
 // 配置并启动集群（如果配置了集群）
 var clusterConfig = app.Configuration.GetSection("Cluster");
