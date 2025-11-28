@@ -24,6 +24,7 @@ Welcome to the Cyaim.WebSocketServer documentation center. This documentation pr
 - **[Cluster Transports](./en/CLUSTER_TRANSPORTS.md)** - Redis, RabbitMQ transport implementations
 - **[Metrics](./en/METRICS.md)** - OpenTelemetry integration, performance monitoring
 - **[Dashboard](./en/DASHBOARD.md)** - Monitoring panel, API interfaces, frontend UI
+- **[Clients](./en/CLIENTS.md)** - Multi-language client SDKs with automatic endpoint discovery
 
 ## 🚀 Quick Navigation
 
@@ -51,6 +52,12 @@ Welcome to the Cyaim.WebSocketServer documentation center. This documentation pr
 2. Refer to [API Reference](./en/API_REFERENCE.md) for detailed parameters
 3. Check configuration files in sample projects
 
+### I need to use the client SDK
+
+1. Read [Clients](./en/CLIENTS.md) to understand available client SDKs
+2. Choose your preferred language (C#, TypeScript, Rust, Java, Dart, Python)
+3. Follow the quick start guide for your language
+
 ## 📦 Project Structure
 
 ```
@@ -65,6 +72,13 @@ Cyaim.WebSocketServer/
 │   └── ...
 ├── Cyaim.WebSocketServer.Dashboard/    # Dashboard backend
 ├── Cyaim.WebSocketServer.Cluster.*/   # Cluster transport extensions
+├── Clients/                            # Multi-language client SDKs
+│   ├── Cyaim.WebSocketServer.Client/  # C# client
+│   ├── cyaim-websocket-client-js/    # TypeScript/JavaScript client
+│   ├── cyaim-websocket-client-rs/    # Rust client
+│   ├── cyaim-websocket-client-java/  # Java client
+│   ├── cyaim-websocket-client-dart/  # Dart client
+│   └── cyaim-websocket-client-python/ # Python client
 ├── Sample/                             # Sample projects
 └── docs/                               # Documentation directory
     ├── en/                             # English documentation
@@ -95,6 +109,13 @@ Cyaim.WebSocketServer/
 - ✅ **OpenTelemetry** - Standard metrics export
 - ✅ **Dashboard** - Visual monitoring interface
 - ✅ **Performance Analysis** - Detailed performance metrics
+
+### Client SDK Features
+
+- ✅ **Multi-language Support** - C#, TypeScript, Rust, Java, Dart, Python
+- ✅ **Automatic Endpoint Discovery** - Auto-fetch endpoints from server
+- ✅ **Interface Contract** - Type-safe interface-based calling
+- ✅ **Flexible Configuration** - Lazy loading, validation options
 
 ## 🔧 Supported .NET Versions
 
@@ -133,3 +154,16 @@ This project is licensed under [LICENSE](../LICENSE).
 ---
 
 **Last Updated**: 2024-12-XX
+
+## 📦 Client SDKs
+
+We now provide multi-language client SDKs for easy integration:
+
+- **C#** - Full .NET support with dynamic proxy
+- **TypeScript/JavaScript** - Type-safe client for web and Node.js
+- **Rust** - High-performance async client
+- **Java** - Maven package for Java applications
+- **Dart** - Flutter and Dart support
+- **Python** - Async client for Python 3.8+
+
+See [Clients Documentation](./en/CLIENTS.md) for details.

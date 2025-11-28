@@ -17,6 +17,7 @@
 - **[集群传输扩展](./CLUSTER_TRANSPORTS.md)** - Redis、RabbitMQ 传输实现
 - **[指标统计](./METRICS.md)** - OpenTelemetry 集成、性能监控
 - **[Dashboard](./DASHBOARD.md)** - 监控面板、API 接口、前端界面
+- **[客户端 SDK](./CLIENTS.md)** - 多语言客户端 SDK，支持自动 endpoint 发现
 
 ## 🚀 快速导航
 
@@ -44,6 +45,12 @@
 2. 参考 [API 参考](./API_REFERENCE.md) 了解详细参数
 3. 查看示例项目中的配置文件
 
+### 我需要使用客户端 SDK
+
+1. 阅读 [客户端 SDK](./CLIENTS.md) 了解可用的客户端 SDK
+2. 选择您偏好的语言（C#、TypeScript、Rust、Java、Dart、Python）
+3. 按照对应语言的快速开始指南
+
 ## 📦 项目结构
 
 ```
@@ -58,6 +65,13 @@ Cyaim.WebSocketServer/
 │   └── ...
 ├── Cyaim.WebSocketServer.Dashboard/    # Dashboard 后端
 ├── Cyaim.WebSocketServer.Cluster.*/   # 集群传输扩展
+├── Clients/                            # 多语言客户端 SDK
+│   ├── Cyaim.WebSocketServer.Client/  # C# 客户端
+│   ├── cyaim-websocket-client-js/    # TypeScript/JavaScript 客户端
+│   ├── cyaim-websocket-client-rs/    # Rust 客户端
+│   ├── cyaim-websocket-client-java/  # Java 客户端
+│   ├── cyaim-websocket-client-dart/  # Dart 客户端
+│   └── cyaim-websocket-client-python/ # Python 客户端
 ├── Sample/                             # 示例项目
 └── docs/                               # 文档目录
     ├── en/                             # 英文文档
@@ -88,6 +102,13 @@ Cyaim.WebSocketServer/
 - ✅ **OpenTelemetry** - 标准指标导出
 - ✅ **Dashboard** - 可视化监控界面
 - ✅ **性能分析** - 详细的性能指标
+
+### 客户端 SDK 功能
+
+- ✅ **多语言支持** - C#、TypeScript、Rust、Java、Dart、Python
+- ✅ **自动 Endpoint 发现** - 自动从服务器获取 endpoint 列表
+- ✅ **接口契约式调用** - 类型安全的接口调用
+- ✅ **灵活配置** - 延迟加载、验证选项
 
 ## 🔧 支持的 .NET 版本
 
@@ -126,4 +147,17 @@ Cyaim.WebSocketServer/
 ---
 
 **最后更新**: 2024-12-XX
+
+## 📦 客户端 SDK
+
+我们现在提供多语言客户端 SDK，方便集成：
+
+- **C#** - 完整的 .NET 支持，带动态代理
+- **TypeScript/JavaScript** - 适用于 Web 和 Node.js 的类型安全客户端
+- **Rust** - 高性能异步客户端
+- **Java** - 适用于 Java 应用的 Maven 包
+- **Dart** - Flutter 和 Dart 支持
+- **Python** - 适用于 Python 3.8+ 的异步客户端
+
+查看 [客户端文档](./CLIENTS.md) 了解详情。
 
