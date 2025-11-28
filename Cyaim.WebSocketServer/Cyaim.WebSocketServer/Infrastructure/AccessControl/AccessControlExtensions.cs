@@ -61,6 +61,48 @@ namespace Cyaim.WebSocketServer.Infrastructure.AccessControl
             services.AddSingleton<IGeoLocationProvider, T>();
             return services;
         }
+
+        /// <summary>
+        /// Add QPS priority policy service / 添加QPS优先级策略服务
+        /// </summary>
+        /// <param name="services">Service collection / 服务集合</param>
+        /// <param name="configure">Configuration action / 配置操作</param>
+        /// <returns>Service collection / 服务集合</returns>
+        public static IServiceCollection AddQpsPriorityPolicy(
+            this IServiceCollection services,
+            Action<QpsPriorityPolicy> configure = null)
+        {
+            var policy = new QpsPriorityPolicy();
+            configure?.Invoke(policy);
+
+            services.AddSingleton(policy);
+            services.AddSingleton<PriorityListService>();
+            services.AddSingleton<QpsPriorityManager>();
+
+            return services;
+        }
+
+        /// <summary>
+        /// Add QPS priority policy service from configuration / 从配置添加QPS优先级策略服务
+        /// </summary>
+        /// <param name="services">Service collection / 服务集合</param>
+        /// <param name="configuration">Configuration / 配置</param>
+        /// <param name="sectionName">Configuration section name (default: "QpsPriorityPolicy") / 配置节名称（默认："QpsPriorityPolicy"）</param>
+        /// <returns>Service collection / 服务集合</returns>
+        public static IServiceCollection AddQpsPriorityPolicy(
+            this IServiceCollection services,
+            IConfiguration configuration,
+            string sectionName = "QpsPriorityPolicy")
+        {
+            var policy = new QpsPriorityPolicy();
+            configuration.GetSection(sectionName).Bind(policy);
+
+            services.AddSingleton(policy);
+            services.AddSingleton<PriorityListService>();
+            services.AddSingleton<QpsPriorityManager>();
+
+            return services;
+        }
     }
 }
 

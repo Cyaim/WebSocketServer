@@ -157,7 +157,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 var loggerFactory = WebSocketRouteOption.ApplicationServices?.GetService<ILoggerFactory>();
                 var bandwidthLogger = loggerFactory?.CreateLogger<BandwidthLimitManager>();
-                bandwidthLimitManager = new BandwidthLimitManager(bandwidthLogger, policy);
+                var qpsPriorityManager = WebSocketRouteOption.ApplicationServices?.GetService<QpsPriorityManager>();
+                bandwidthLimitManager = new BandwidthLimitManager(bandwidthLogger, policy, qpsPriorityManager);
             }
 
             // 配置并行转发上限
@@ -359,6 +360,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                         context.Connection.Id,
                                         endPoint,
                                         result.Count,
+                                        context.Connection.RemoteIpAddress?.ToString(),
                                         CancellationToken.None);
                                 }
 
@@ -432,6 +434,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                         context.Connection.Id,
                                         endpoint,
                                         (int)wsReceiveReader.Length,
+                                        context.Connection.RemoteIpAddress?.ToString(),
                                         CancellationToken.None);
                                 }
                             }

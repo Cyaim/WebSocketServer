@@ -1,4 +1,5 @@
 using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Cyaim.WebSocketServer.Infrastructure.AccessControl;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
@@ -16,6 +17,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
     {
         private readonly ILogger<BandwidthLimitManager> _logger;
         private readonly BandwidthLimitPolicy _policy;
+        private readonly QpsPriorityManager _qpsPriorityManager;
         private readonly ConcurrentDictionary<string, ChannelBandwidthTracker> _channelTrackers = new ConcurrentDictionary<string, ChannelBandwidthTracker>();
         private readonly ConcurrentDictionary<string, EndPointBandwidthTracker> _endPointTrackers = new ConcurrentDictionary<string, EndPointBandwidthTracker>();
         private readonly ConcurrentDictionary<string, ConnectionBandwidthTracker> _connectionTrackers = new ConcurrentDictionary<string, ConnectionBandwidthTracker>();
@@ -25,10 +27,14 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// </summary>
         public event Action<BandwidthLimitPolicy> PolicyUpdated;
 
-        public BandwidthLimitManager(ILogger<BandwidthLimitManager> logger, BandwidthLimitPolicy policy)
+        public BandwidthLimitManager(
+            ILogger<BandwidthLimitManager> logger, 
+            BandwidthLimitPolicy policy,
+            QpsPriorityManager qpsPriorityManager = null)
         {
             _logger = logger;
             _policy = policy ?? new BandwidthLimitPolicy();
+            _qpsPriorityManager = qpsPriorityManager;
         }
 
         /// <summary>
@@ -60,14 +66,27 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// <param name="connectionId">连接ID</param>
         /// <param name="endPoint">端点路径（可选）</param>
         /// <param name="dataSize">要接收的数据大小（字节）</param>
+        /// <param name="ipAddress">IP地址（用于QPS优先级策略）</param>
         /// <param name="cancellationToken">取消令牌</param>
-        public async Task WaitForBandwidthAsync(string channel, string connectionId, string endPoint, int dataSize, CancellationToken cancellationToken = default)
+        public async Task WaitForBandwidthAsync(
+            string channel, 
+            string connectionId, 
+            string endPoint, 
+            int dataSize, 
+            string ipAddress = null,
+            CancellationToken cancellationToken = default)
         {
             if (!_policy.Enabled || dataSize <= 0)
                 return;
 
             try
             {
+                // 如果启用了QPS优先级策略，记录连接信息
+                if (_qpsPriorityManager != null && !string.IsNullOrEmpty(ipAddress))
+                {
+                    _qpsPriorityManager.RecordConnection(channel, connectionId, ipAddress);
+                }
+
                 // 获取或创建通道跟踪器
                 var channelTracker = _channelTrackers.GetOrAdd(channel, _ => new ChannelBandwidthTracker(channel, _policy));
 
@@ -81,8 +100,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     endPointTracker = _endPointTrackers.GetOrAdd(endPoint, _ => new EndPointBandwidthTracker(endPoint, _policy));
                 }
 
-                // 计算需要等待的时间
-                var waitTime = CalculateWaitTime(channelTracker, connectionTracker, endPointTracker, dataSize);
+                // 计算需要等待的时间（考虑QPS优先级策略）
+                var waitTime = CalculateWaitTime(channelTracker, connectionTracker, endPointTracker, dataSize, channel, connectionId, ipAddress);
 
                 if (waitTime > TimeSpan.Zero)
                 {
@@ -107,14 +126,39 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// <summary>
         /// 计算需要等待的时间
         /// </summary>
-        private TimeSpan CalculateWaitTime(ChannelBandwidthTracker channelTracker, ConnectionBandwidthTracker connectionTracker, EndPointBandwidthTracker endPointTracker, int dataSize)
+        private TimeSpan CalculateWaitTime(
+            ChannelBandwidthTracker channelTracker, 
+            ConnectionBandwidthTracker connectionTracker, 
+            EndPointBandwidthTracker endPointTracker, 
+            int dataSize,
+            string channel,
+            string connectionId,
+            string ipAddress)
         {
             var maxWaitTime = TimeSpan.Zero;
+
+            // 0. 如果启用了QPS优先级策略，先应用优先级带宽限制
+            long? priorityBandwidthLimit = null;
+            if (_qpsPriorityManager != null && !string.IsNullOrEmpty(ipAddress))
+            {
+                priorityBandwidthLimit = _qpsPriorityManager.GetEffectiveBandwidthLimit(channel, connectionId, ipAddress);
+                if (priorityBandwidthLimit.HasValue && priorityBandwidthLimit.Value < long.MaxValue)
+                {
+                    var priorityWaitTime = connectionTracker.CalculateWaitTime(dataSize, priorityBandwidthLimit.Value);
+                    if (priorityWaitTime > maxWaitTime)
+                        maxWaitTime = priorityWaitTime;
+                }
+            }
 
             // 1. 全局服务级别：通道限速
             if (_policy.GlobalChannelBandwidthLimit.TryGetValue(channelTracker.Channel, out var globalLimit) && globalLimit > 0)
             {
-                var channelWaitTime = channelTracker.CalculateWaitTime(dataSize, globalLimit);
+                // 如果优先级策略设置了更严格的限制，使用优先级限制
+                var effectiveLimit = priorityBandwidthLimit.HasValue && priorityBandwidthLimit.Value < globalLimit
+                    ? priorityBandwidthLimit.Value
+                    : globalLimit;
+
+                var channelWaitTime = channelTracker.CalculateWaitTime(dataSize, effectiveLimit);
                 if (channelWaitTime > maxWaitTime)
                     maxWaitTime = channelWaitTime;
             }
@@ -206,6 +250,9 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 tracker.Dispose();
             }
+
+            // 同时从QPS优先级管理器中移除
+            _qpsPriorityManager?.RemoveConnection(connectionId);
         }
 
         /// <summary>
