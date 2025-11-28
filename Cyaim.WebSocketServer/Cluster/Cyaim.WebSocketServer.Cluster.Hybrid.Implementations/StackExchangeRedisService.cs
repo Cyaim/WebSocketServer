@@ -206,7 +206,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
 
             _subscriptions[channel] = handler;
 
-            await _subscriber.SubscribeAsync(channel, (ch, message) =>
+            await _subscriber.SubscribeAsync(RedisChannel.Literal(channel), (ch, message) =>
             {
                 handler(ch, message).GetAwaiter().GetResult();
             });
@@ -222,7 +222,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
                 return;
             }
 
-            await _subscriber.UnsubscribeAsync(channel);
+            await _subscriber.UnsubscribeAsync(RedisChannel.Literal(channel));
             _subscriptions.Remove(channel);
         }
 
@@ -236,7 +236,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
                 throw new InvalidOperationException("Redis is not connected");
             }
 
-            await _subscriber.PublishAsync(channel, message);
+            await _subscriber.PublishAsync(RedisChannel.Literal(channel), message);
         }
 
         /// <summary>

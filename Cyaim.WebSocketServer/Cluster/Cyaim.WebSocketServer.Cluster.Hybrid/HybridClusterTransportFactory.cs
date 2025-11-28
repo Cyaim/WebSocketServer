@@ -15,6 +15,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         /// Create hybrid cluster transport / 创建混合集群传输
         /// </summary>
         /// <param name="logger">Logger instance / 日志实例</param>
+        /// <param name="loggerFactory">Logger factory for creating specific loggers / 用于创建特定 logger 的 logger factory</param>
         /// <param name="redisService">Redis service / Redis 服务</param>
         /// <param name="messageQueueService">Message queue service / 消息队列服务</param>
         /// <param name="nodeId">Node ID / 节点 ID</param>
@@ -26,6 +27,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         /// <returns>Hybrid cluster transport instance / 混合集群传输实例</returns>
         public static IClusterTransport Create(
             ILogger<HybridClusterTransport> logger,
+            ILoggerFactory loggerFactory,
             IRedisService redisService,
             IMessageQueueService messageQueueService,
             string nodeId,
@@ -37,6 +39,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         {
             if (logger == null)
                 throw new ArgumentNullException(nameof(logger));
+            if (loggerFactory == null)
+                throw new ArgumentNullException(nameof(loggerFactory));
             if (redisService == null)
                 throw new ArgumentNullException(nameof(redisService));
             if (messageQueueService == null)
@@ -60,6 +64,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
             return new HybridClusterTransport(
                 logger,
+                loggerFactory,
                 redisService,
                 messageQueueService,
                 nodeId,

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
 using Microsoft.Extensions.Logging;
@@ -18,6 +19,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         private readonly string _connectionString;
         private RedisClient _redis;
         private readonly Dictionary<string, Func<string, string, Task>> _subscriptions;
+        private readonly Dictionary<string, Task> _subscriptionTasks;
+        private readonly CancellationTokenSource _cancellationTokenSource;
         private bool _disposed = false;
 
         /// <summary>
@@ -30,6 +33,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
             _subscriptions = new Dictionary<string, Func<string, string, Task>>();
+            _subscriptionTasks = new Dictionary<string, Task>();
+            _cancellationTokenSource = new CancellationTokenSource();
         }
 
         /// <summary>
@@ -37,7 +42,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// </summary>
         public async Task ConnectAsync()
         {
-            if (_redis != null && _redis.IsConnected)
+            if (_redis != null)
             {
                 return;
             }
@@ -61,6 +66,9 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// </summary>
         public async Task DisconnectAsync()
         {
+            // Cancel all subscriptions / 取消所有订阅
+            _cancellationTokenSource.Cancel();
+
             if (_redis != null)
             {
                 try
@@ -70,6 +78,26 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
                     {
                         await UnsubscribeAsync(channel);
                     }
+
+                    // Wait for subscription tasks to complete (with timeout) / 等待订阅任务完成（带超时）
+                    var tasks = _subscriptionTasks.Values.ToArray();
+                    if (tasks.Length > 0)
+                    {
+                        try
+                        {
+                            await WaitWithTimeoutAsync(Task.WhenAll(tasks), TimeSpan.FromSeconds(5));
+                        }
+                        catch (TimeoutException)
+                        {
+                            _logger.LogWarning("Timeout waiting for subscription tasks to complete");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Error waiting for subscription tasks to complete");
+                        }
+                    }
+
+                    _subscriptionTasks.Clear();
 
                     _redis.Dispose();
                     _redis = null;
@@ -89,7 +117,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// </summary>
         public async Task SetAsync(string key, string value, TimeSpan? expiration = null)
         {
-            if (_redis == null || !_redis.IsConnected)
+            if (_redis == null)
             {
                 throw new InvalidOperationException("Redis is not connected");
             }
@@ -111,7 +139,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// </summary>
         public async Task<string> GetAsync(string key)
         {
-            if (_redis == null || !_redis.IsConnected)
+            if (_redis == null)
             {
                 throw new InvalidOperationException("Redis is not connected");
             }
@@ -125,7 +153,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// </summary>
         public async Task DeleteAsync(string key)
         {
-            if (_redis == null || !_redis.IsConnected)
+            if (_redis == null)
             {
                 throw new InvalidOperationException("Redis is not connected");
             }
@@ -139,7 +167,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// </summary>
         public async Task<List<string>> GetKeysAsync(string pattern)
         {
-            if (_redis == null || !_redis.IsConnected)
+            if (_redis == null)
             {
                 throw new InvalidOperationException("Redis is not connected");
             }
@@ -180,7 +208,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// </summary>
         public async Task SetExpirationAsync(string key, TimeSpan expiration)
         {
-            if (_redis == null || !_redis.IsConnected)
+            if (_redis == null)
             {
                 throw new InvalidOperationException("Redis is not connected");
             }
@@ -194,13 +222,12 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// </summary>
         public async Task<bool> ExistsAsync(string key)
         {
-            if (_redis == null || !_redis.IsConnected)
+            if (_redis == null)
             {
                 throw new InvalidOperationException("Redis is not connected");
             }
 
-            var exists = _redis.Exists(key) > 0;
-            return await Task.FromResult(exists);
+            return await _redis.ExistsAsync(key);
         }
 
         /// <summary>
@@ -208,7 +235,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// </summary>
         public async Task SubscribeAsync(string channel, Func<string, string, Task> handler)
         {
-            if (_redis == null || !_redis.IsConnected)
+            if (_redis == null)
             {
                 throw new InvalidOperationException("Redis is not connected");
             }
@@ -222,15 +249,28 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
             _subscriptions[channel] = handler;
 
             // Subscribe in background thread (FreeRedis Subscribe is blocking) / 在后台线程订阅（FreeRedis Subscribe 是阻塞的）
-            Task.Run(() =>
+            var subscriptionTask = Task.Run(() =>
             {
                 try
                 {
                     _redis.Subscribe(channel, (ch, msg) =>
                     {
+                        // Check cancellation token / 检查取消令牌
+                        if (_cancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            return;
+                        }
+
                         try
                         {
-                            handler(ch, msg).GetAwaiter().GetResult();
+                            // Convert message from object to string / 将消息从 object 转换为 string
+                            var messageStr = msg?.ToString() ?? string.Empty;
+                            handler(ch, messageStr).GetAwaiter().GetResult();
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // Expected when shutting down / 关闭时预期的异常
+                            throw;
                         }
                         catch (Exception ex)
                         {
@@ -238,12 +278,19 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
                         }
                     });
                 }
+                catch (OperationCanceledException)
+                {
+                    // Expected when shutting down / 关闭时预期的异常
+                    _logger.LogDebug($"Subscription to channel {channel} was cancelled");
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, $"Error subscribing to channel {channel}");
                     _subscriptions.Remove(channel);
                 }
-            });
+            }, _cancellationTokenSource.Token);
+
+            _subscriptionTasks[channel] = subscriptionTask;
 
             await Task.CompletedTask;
         }
@@ -253,7 +300,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// </summary>
         public async Task UnsubscribeAsync(string channel)
         {
-            if (_redis == null || !_redis.IsConnected)
+            if (_redis == null)
             {
                 return;
             }
@@ -262,6 +309,27 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
             {
                 _redis.UnSubscribe(channel);
                 _subscriptions.Remove(channel);
+
+                // Wait for subscription task to complete if it exists / 如果存在订阅任务，等待其完成
+                if (_subscriptionTasks.TryGetValue(channel, out var task))
+                {
+                    try
+                    {
+                        await WaitWithTimeoutAsync(task, TimeSpan.FromSeconds(2));
+                    }
+                    catch (TimeoutException)
+                    {
+                        _logger.LogWarning($"Timeout waiting for subscription task to complete for channel {channel}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, $"Error waiting for subscription task to complete for channel {channel}");
+                    }
+                    finally
+                    {
+                        _subscriptionTasks.Remove(channel);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -276,13 +344,37 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// </summary>
         public async Task PublishAsync(string channel, string message)
         {
-            if (_redis == null || !_redis.IsConnected)
+            if (_redis == null)
             {
                 throw new InvalidOperationException("Redis is not connected");
             }
 
             _redis.Publish(channel, message);
             await Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Wait for task with timeout (compatible with .NET Standard 2.1) / 等待任务完成（带超时，兼容 .NET Standard 2.1）
+        /// </summary>
+        private static async Task WaitWithTimeoutAsync(Task task, TimeSpan timeout)
+        {
+            using (var cts = new CancellationTokenSource())
+            {
+                var delayTask = Task.Delay(timeout, cts.Token);
+                var completedTask = await Task.WhenAny(task, delayTask);
+
+                if (completedTask == delayTask)
+                {
+                    // Timeout occurred / 超时
+                    throw new TimeoutException($"Task did not complete within {timeout.TotalSeconds} seconds");
+                }
+
+                // Cancel the delay task to avoid unnecessary delay / 取消延迟任务以避免不必要的延迟
+                cts.Cancel();
+
+                // Re-throw any exception from the original task / 重新抛出原始任务的任何异常
+                await task;
+            }
         }
 
         /// <summary>
@@ -295,6 +387,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
 
             _disposed = true;
             DisconnectAsync().GetAwaiter().GetResult();
+            _cancellationTokenSource.Dispose();
         }
     }
 }

@@ -18,6 +18,16 @@ namespace Cyaim.WebSocketServer.Cluster.FreeRedis
     /// </summary>
     public class FreeRedisClusterTransport : IClusterTransport
     {
+        /// <summary>
+        /// Redis channel prefix for node-specific messages / Redis 节点特定消息的通道前缀
+        /// </summary>
+        private const string ClusterNodeChannelPrefix = "cluster:node:";
+
+        /// <summary>
+        /// Redis channel name for broadcast messages / Redis 广播消息的通道名称
+        /// </summary>
+        private const string ClusterBroadcastChannel = "cluster:broadcast";
+
         private readonly ILogger<FreeRedisClusterTransport> _logger;
         private readonly string _nodeId;
         private readonly string _connectionString;
@@ -70,11 +80,24 @@ namespace Cyaim.WebSocketServer.Cluster.FreeRedis
                 _redis = new RedisClient(_connectionString);
 
                 // Subscribe to node-specific channel / 订阅节点特定通道
-                _redis.Subscribe($"cluster:node:{_nodeId}", (channel, message) =>
+                _redis.Subscribe($"{ClusterNodeChannelPrefix}{_nodeId}", (channel, message) =>
                 {
                     try
                     {
-                        var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(message);
+                        var messageJson = message?.ToString();
+                        if (string.IsNullOrEmpty(messageJson))
+                        {
+                            _logger.LogWarning("Received empty message from FreeRedis");
+                            return;
+                        }
+
+                        var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
+                        if (clusterMessage == null)
+                        {
+                            _logger.LogWarning("Failed to deserialize cluster message from FreeRedis");
+                            return;
+                        }
+
                         MessageReceived?.Invoke(this, new ClusterMessageEventArgs
                         {
                             FromNodeId = clusterMessage.FromNodeId,
@@ -88,11 +111,24 @@ namespace Cyaim.WebSocketServer.Cluster.FreeRedis
                 });
 
                 // Subscribe to broadcast channel / 订阅广播通道
-                _redis.Subscribe("cluster:broadcast", (channel, message) =>
+                _redis.Subscribe(ClusterBroadcastChannel, (channel, message) =>
                 {
                     try
                     {
-                        var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(message);
+                        var messageJson = message?.ToString();
+                        if (string.IsNullOrEmpty(messageJson))
+                        {
+                            _logger.LogWarning("Received empty broadcast message from FreeRedis");
+                            return;
+                        }
+
+                        var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
+                        if (clusterMessage == null)
+                        {
+                            _logger.LogWarning("Failed to deserialize cluster broadcast message from FreeRedis");
+                            return;
+                        }
+
                         if (clusterMessage.FromNodeId != _nodeId)
                         {
                             MessageReceived?.Invoke(this, new ClusterMessageEventArgs
@@ -131,8 +167,8 @@ namespace Cyaim.WebSocketServer.Cluster.FreeRedis
             {
                 if (_redis != null)
                 {
-                    _redis.UnSubscribe($"cluster:node:{_nodeId}");
-                    _redis.UnSubscribe("cluster:broadcast");
+                    _redis.UnSubscribe($"{ClusterNodeChannelPrefix}{_nodeId}");
+                    _redis.UnSubscribe(ClusterBroadcastChannel);
                     _redis.Dispose();
                     _redis = null;
                 }
@@ -163,13 +199,13 @@ namespace Cyaim.WebSocketServer.Cluster.FreeRedis
 
             try
             {
-                if (_redis == null || !_redis.IsConnected)
+                if (_redis == null)
                 {
-                    _logger.LogWarning("FreeRedis client is not initialized or connected");
+                    _logger.LogWarning("FreeRedis client is not initialized");
                     return;
                 }
 
-                _redis.Publish($"cluster:node:{nodeId}", messageJson);
+                _redis.Publish($"{ClusterNodeChannelPrefix}{nodeId}", messageJson);
 
                 _logger.LogDebug($"Sent message to node {nodeId} via FreeRedis");
             }
@@ -193,13 +229,13 @@ namespace Cyaim.WebSocketServer.Cluster.FreeRedis
 
             try
             {
-                if (_redis == null || !_redis.IsConnected)
+                if (_redis == null)
                 {
-                    _logger.LogWarning("FreeRedis client is not initialized or connected");
+                    _logger.LogWarning("FreeRedis client is not initialized");
                     return;
                 }
 
-                _redis.Publish("cluster:broadcast", messageJson);
+                _redis.Publish(ClusterBroadcastChannel, messageJson);
 
                 _logger.LogDebug("Broadcasted message via FreeRedis");
             }

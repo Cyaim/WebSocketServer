@@ -52,6 +52,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         /// Constructor / 构造函数
         /// </summary>
         /// <param name="logger">Logger instance / 日志实例</param>
+        /// <param name="loggerFactory">Logger factory for creating specific loggers / 用于创建特定 logger 的 logger factory</param>
         /// <param name="redisService">Redis service / Redis 服务</param>
         /// <param name="messageQueueService">Message queue service / 消息队列服务</param>
         /// <param name="nodeId">Current node ID / 当前节点 ID</param>
@@ -59,6 +60,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         /// <param name="loadBalancingStrategy">Load balancing strategy / 负载均衡策略</param>
         public HybridClusterTransport(
             ILogger<HybridClusterTransport> logger,
+            ILoggerFactory loggerFactory,
             IRedisService redisService,
             IMessageQueueService messageQueueService,
             string nodeId,
@@ -66,6 +68,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             LoadBalancingStrategy loadBalancingStrategy = LoadBalancingStrategy.LeastConnections)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
             _messageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
             _nodeId = nodeId ?? throw new ArgumentNullException(nameof(nodeId));
@@ -74,13 +77,17 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             _knownNodes = new ConcurrentDictionary<string, NodeInfo>();
             _cancellationTokenSource = new CancellationTokenSource();
 
+            // Create specific loggers using logger factory / 使用 logger factory 创建特定类型的 logger
+            var discoveryLogger = loggerFactory.CreateLogger<RedisNodeDiscoveryService>();
+            var loadBalancerLogger = loggerFactory.CreateLogger<LoadBalancer>();
+
             _discoveryService = new RedisNodeDiscoveryService(
-                logger,
+                discoveryLogger,
                 redisService,
                 nodeId,
                 nodeInfo);
 
-            _loadBalancer = new LoadBalancer(logger, loadBalancingStrategy);
+            _loadBalancer = new LoadBalancer(loadBalancerLogger, loadBalancingStrategy);
 
             // Subscribe to discovery events / 订阅发现事件
             _discoveryService.NodeDiscovered += OnNodeDiscovered;

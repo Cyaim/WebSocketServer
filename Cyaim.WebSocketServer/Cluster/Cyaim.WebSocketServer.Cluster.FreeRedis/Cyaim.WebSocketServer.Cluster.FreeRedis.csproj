@@ -12,8 +12,8 @@
 		<Version>1.7.8</Version>
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
 		<Description>
-			WebSocketServer Redis cluster transport extension using StackExchange.Redis
-			WebSocketServer Redis 集群传输扩展（基于 StackExchange.Redis）
+			WebSocketServer FreeRedis cluster transport extension
+			WebSocketServer FreeRedis 集群传输扩展
 		</Description>
 	</PropertyGroup>
 
@@ -28,19 +28,18 @@
 	</ItemGroup>
 
 	<!-- .NET 6.0+ 框架已内置这些包，无需显式引用，框架会自动使用内置版本 -->
-	<!-- 如果需要显式控制版本，可以使用以下配置，但通常不需要 -->
 
 	<ItemGroup>
-		<PackageReference Include="StackExchange.Redis" Version="2.7.33" />
-		<ProjectReference Include="..\Cyaim.WebSocketServer\Cyaim.WebSocketServer.csproj" />
+		<PackageReference Include="FreeRedis" Version="1.2.0" />
+		<ProjectReference Include="..\..\Cyaim.WebSocketServer\Cyaim.WebSocketServer.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="..\..\LICENSE">
+		<None Include="..\..\..\LICENSE">
 		  <Pack>True</Pack>
 		  <PackagePath>\</PackagePath>
 		</None>
-		<None Include="..\Cyaim.WebSocketServer\WebSocketRepository_Logo.png">
+		<None Include="..\..\Cyaim.WebSocketServer\WebSocketRepository_Logo.png">
 			<Pack>True</Pack>
 			<PackagePath></PackagePath>
 		</None>
