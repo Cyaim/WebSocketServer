@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿#nullable enable
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,7 +19,7 @@ namespace Cyaim.WebSocketServer.Example.Wpf
             _provider = provider;
         }
 
-        public IDisposable BeginScope<TState>(TState state) => null;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => logLevel >= _provider.LogLevel;
 

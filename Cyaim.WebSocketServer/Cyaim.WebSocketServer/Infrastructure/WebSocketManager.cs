@@ -267,8 +267,17 @@ namespace Cyaim.WebSocketServer.Infrastructure
             var buffer = ArrayPool<byte>.Shared.Rent((int)stream.Length);
             try
             {
-                await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken);
-                await webSocket.SendAsync(buffer, messageType, endOfMessage: true, cancellationToken);
+                int totalBytesRead = 0;
+                int bytesRead;
+                while (totalBytesRead < buffer.Length && (bytesRead = await stream.ReadAsync(buffer, totalBytesRead, buffer.Length - totalBytesRead, cancellationToken)) > 0)
+                {
+                    totalBytesRead += bytesRead;
+                }
+                
+                if (totalBytesRead > 0)
+                {
+                    await webSocket.SendAsync(new ArraySegment<byte>(buffer, 0, totalBytesRead), messageType, endOfMessage: true, cancellationToken);
+                }
             }
             catch (Exception)
             {

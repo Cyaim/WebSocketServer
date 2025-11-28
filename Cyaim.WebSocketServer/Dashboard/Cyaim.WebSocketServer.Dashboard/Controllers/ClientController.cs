@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -64,11 +65,11 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                     }
 
                     // Get connection info / 获取连接信息
-                    ClientConnectionInfo clientInfo = null;
+                    ClientConnectionInfo? clientInfo = null;
 
                     // Get connection metadata from cluster manager / 从集群管理器获取连接元数据
-                    ConnectionMetadata metadata = null;
-                    string endpoint = null;
+                    ConnectionMetadata? metadata = null;
+                    string? endpoint = null;
                     if (clusterManager != null)
                     {
                         metadata = clusterManager.GetConnectionMetadata(connectionId);
@@ -85,11 +86,11 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                             {
                                 ConnectionId = connectionId,
                                 NodeId = targetNodeId,
-                                RemoteIpAddress = metadata?.RemoteIpAddress,
+                                RemoteIpAddress = metadata?.RemoteIpAddress ?? string.Empty,
                                 RemotePort = metadata?.RemotePort ?? 0,
                                 State = webSocket.State.ToString(),
                                 ConnectedAt = metadata?.ConnectedAt,
-                                Endpoint = endpoint,
+                                Endpoint = endpoint ?? string.Empty,
                                 BytesSent = stats?.BytesSent ?? 0,
                                 BytesReceived = stats?.BytesReceived ?? 0,
                                 MessagesSent = stats?.MessagesSent ?? 0,
@@ -109,11 +110,11 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                         {
                             ConnectionId = connectionId,
                             NodeId = targetNodeId,
-                            RemoteIpAddress = metadata?.RemoteIpAddress,
+                            RemoteIpAddress = metadata?.RemoteIpAddress ?? string.Empty,
                             RemotePort = metadata?.RemotePort ?? 0,
                             State = state,
                             ConnectedAt = metadata?.ConnectedAt,
-                            Endpoint = endpoint,
+                            Endpoint = endpoint ?? string.Empty,
                             BytesSent = 0,
                             BytesReceived = 0,
                             MessagesSent = 0,
@@ -183,7 +184,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                     });
                 }
 
-                var client = clientsResult.Value.Data.FirstOrDefault(c => c.ConnectionId == connectionId);
+                var client = clientsResult.Value!.Data!.FirstOrDefault(c => c.ConnectionId == connectionId);
                 if (client == null)
                 {
                     return NotFound(new ApiResponse<ClientConnectionInfo>

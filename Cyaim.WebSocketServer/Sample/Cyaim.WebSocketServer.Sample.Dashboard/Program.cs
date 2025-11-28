@@ -151,10 +151,8 @@ app.UseCors("AllowAll");
 
 app.UseRouting();
 
-app.UseEndpoints(endpoints =>
-{
-    endpoints.MapControllers(); // Dashboard API requires this / Dashboard API 需要这个
-});
+// Map controllers / 映射控制器
+app.MapControllers(); // Dashboard API requires this / Dashboard API 需要这个
 
 // Configure WebSocket / 配置 WebSocket
 var webSocketOptions = new WebSocketOptions()

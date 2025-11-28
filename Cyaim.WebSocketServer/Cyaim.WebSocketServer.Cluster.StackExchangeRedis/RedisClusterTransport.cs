@@ -18,6 +18,16 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
     /// </summary>
     public class RedisClusterTransport : IClusterTransport
     {
+        /// <summary>
+        /// Redis channel prefix for node-specific messages / Redis 节点特定消息的通道前缀
+        /// </summary>
+        private const string ClusterNodeChannelPrefix = "cluster:node:";
+
+        /// <summary>
+        /// Redis channel name for broadcast messages / Redis 广播消息的通道名称
+        /// </summary>
+        private const string ClusterBroadcastChannel = "cluster:broadcast";
+
         private readonly ILogger<RedisClusterTransport> _logger;
         private readonly string _nodeId;
         private readonly string _connectionString;
@@ -45,7 +55,9 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
         /// <summary>
         /// Event triggered when node disconnected / 节点断开连接时触发的事件
         /// </summary>
+#pragma warning disable CS0067 // 事件从未使用，但可能是接口要求的一部分
         public event EventHandler<ClusterNodeEventArgs> NodeDisconnected;
+#pragma warning restore CS0067
 
         /// <summary>
         /// Constructor / 构造函数
@@ -75,7 +87,7 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
                 _subscriber = _redis.GetSubscriber();
                 
                 // Subscribe to node-specific channel / 订阅节点特定通道
-                await _subscriber.SubscribeAsync($"cluster:node:{_nodeId}", (channel, message) =>
+                await _subscriber.SubscribeAsync(RedisChannel.Literal($"{ClusterNodeChannelPrefix}{_nodeId}"), (channel, message) =>
                 {
                     try
                     {
@@ -107,7 +119,7 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
                 });
 
                 // Subscribe to broadcast channel / 订阅广播通道
-                await _subscriber.SubscribeAsync("cluster:broadcast", (channel, message) =>
+                await _subscriber.SubscribeAsync(RedisChannel.Literal(ClusterBroadcastChannel), (channel, message) =>
                 {
                     try
                     {
@@ -162,8 +174,8 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
             {
                 if (_subscriber != null)
                 {
-                    await _subscriber.UnsubscribeAsync($"cluster:node:{_nodeId}");
-                    await _subscriber.UnsubscribeAsync("cluster:broadcast");
+                    await _subscriber.UnsubscribeAsync(RedisChannel.Literal($"{ClusterNodeChannelPrefix}{_nodeId}"));
+                    await _subscriber.UnsubscribeAsync(RedisChannel.Literal(ClusterBroadcastChannel));
                 }
                 
                 _redis?.Close();
@@ -201,7 +213,7 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
                     return;
                 }
                 
-                await _subscriber.PublishAsync($"cluster:node:{nodeId}", messageJson);
+                await _subscriber.PublishAsync(RedisChannel.Literal($"{ClusterNodeChannelPrefix}{nodeId}"), messageJson);
                 
                 _logger.LogDebug($"Sent message to node {nodeId} via Redis");
             }
@@ -229,7 +241,7 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
                     return;
                 }
                 
-                await _subscriber.PublishAsync("cluster:broadcast", messageJson);
+                await _subscriber.PublishAsync(RedisChannel.Literal(ClusterBroadcastChannel), messageJson);
                 
                 _logger.LogDebug("Broadcasted message via Redis");
             }

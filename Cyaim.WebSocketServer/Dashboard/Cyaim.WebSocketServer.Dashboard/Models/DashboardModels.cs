@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 
@@ -16,12 +17,12 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Node ID / 节点 ID
         /// </summary>
-        public string NodeId { get; set; }
+        public string NodeId { get; set; } = string.Empty;
 
         /// <summary>
         /// Node address / 节点地址
         /// </summary>
-        public string Address { get; set; }
+        public string Address { get; set; } = string.Empty;
 
         /// <summary>
         /// Node port / 节点端口
@@ -31,7 +32,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Raft state (Follower, Candidate, Leader) / Raft 状态（跟随者、候选者、领导者）
         /// </summary>
-        public string State { get; set; }
+        public string State { get; set; } = string.Empty;
 
         /// <summary>
         /// Current term / 当前任期
@@ -46,7 +47,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Current leader node ID / 当前领导者节点 ID
         /// </summary>
-        public string LeaderId { get; set; }
+        public string LeaderId { get; set; } = string.Empty;
 
         /// <summary>
         /// Connection count on this node / 此节点上的连接数
@@ -77,17 +78,17 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Connection ID / 连接 ID
         /// </summary>
-        public string ConnectionId { get; set; }
+        public string ConnectionId { get; set; } = string.Empty;
 
         /// <summary>
         /// Node ID where connection is located / 连接所在的节点 ID
         /// </summary>
-        public string NodeId { get; set; }
+        public string NodeId { get; set; } = string.Empty;
 
         /// <summary>
         /// Remote IP address / 远程 IP 地址
         /// </summary>
-        public string RemoteIpAddress { get; set; }
+        public string RemoteIpAddress { get; set; } = string.Empty;
 
         /// <summary>
         /// Remote port / 远程端口
@@ -97,7 +98,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// WebSocket state / WebSocket 状态
         /// </summary>
-        public string State { get; set; }
+        public string State { get; set; } = string.Empty;
 
         /// <summary>
         /// Connected time / 连接时间
@@ -107,7 +108,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Endpoint path / 端点路径
         /// </summary>
-        public string Endpoint { get; set; }
+        public string Endpoint { get; set; } = string.Empty;
 
         /// <summary>
         /// Bytes sent / 发送的字节数
@@ -209,7 +210,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Current node ID / 当前节点 ID
         /// </summary>
-        public string CurrentNodeId { get; set; }
+        public string CurrentNodeId { get; set; } = string.Empty;
 
         /// <summary>
         /// Is current node leader / 当前节点是否为领导者
@@ -230,27 +231,27 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Message ID / 消息 ID
         /// </summary>
-        public string MessageId { get; set; }
+        public string MessageId { get; set; } = string.Empty;
 
         /// <summary>
         /// Connection ID / 连接 ID
         /// </summary>
-        public string ConnectionId { get; set; }
+        public string ConnectionId { get; set; } = string.Empty;
 
         /// <summary>
         /// Node ID / 节点 ID
         /// </summary>
-        public string NodeId { get; set; }
+        public string NodeId { get; set; } = string.Empty;
 
         /// <summary>
         /// Direction (Inbound/Outbound) / 方向（入站/出站）
         /// </summary>
-        public string Direction { get; set; }
+        public string Direction { get; set; } = string.Empty;
 
         /// <summary>
         /// Message type (Text/Binary) / 消息类型（文本/二进制）
         /// </summary>
-        public string MessageType { get; set; }
+        public string MessageType { get; set; } = string.Empty;
 
         /// <summary>
         /// Message size in bytes / 消息大小（字节）
@@ -260,7 +261,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Message content (truncated if too large) / 消息内容（如果太大则截断）
         /// </summary>
-        public string Content { get; set; }
+        public string Content { get; set; } = string.Empty;
 
         /// <summary>
         /// Timestamp / 时间戳
@@ -276,12 +277,12 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Connection ID / 连接 ID
         /// </summary>
-        public string ConnectionId { get; set; }
+        public string ConnectionId { get; set; } = string.Empty;
 
         /// <summary>
         /// Message content / 消息内容
         /// </summary>
-        public string Content { get; set; }
+        public string Content { get; set; } = string.Empty;
 
         /// <summary>
         /// Message type (Text/Binary) / 消息类型（文本/二进制）
@@ -302,12 +303,12 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
         /// <summary>
         /// Response data / 响应数据
         /// </summary>
-        public T Data { get; set; }
+        public T Data { get; set; } = default!;
 
         /// <summary>
         /// Error message / 错误消息
         /// </summary>
-        public string Error { get; set; }
+        public string Error { get; set; } = string.Empty;
 
         /// <summary>
         /// Timestamp / 时间戳

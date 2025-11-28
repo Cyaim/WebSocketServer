@@ -57,7 +57,9 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
         /// <summary>
         /// Event triggered when node disconnected / 节点断开连接时触发的事件
         /// </summary>
+#pragma warning disable CS0067 // 事件从未使用，但可能是接口要求的一部分
         public event EventHandler<ClusterNodeEventArgs> NodeDisconnected;
+#pragma warning restore CS0067
 
         /// <summary>
         /// Constructor / 构造函数

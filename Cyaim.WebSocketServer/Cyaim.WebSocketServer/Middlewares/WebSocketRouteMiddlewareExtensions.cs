@@ -139,8 +139,6 @@ namespace Cyaim.WebSocketServer.Middlewares
         /// <returns></returns>
         public static IApplicationBuilder UseWebSocketServer(this IApplicationBuilder app, IServiceProvider serviceProvider, Action<ClusterOption> clusterOption)
         {
-            throw new NotImplementedException();
-
             if (app == null)
             {
                 throw new ArgumentNullException(nameof(app));

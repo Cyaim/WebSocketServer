@@ -18,8 +18,8 @@ namespace Cyaim.WebSocketServer.Example.Wpf
     /// </summary>
     public partial class App : Application
     {
-        private IHost _webHost;
-        private MainWindow _mainWindow;
+        private IHost? _webHost;
+        private MainWindow? _mainWindow;
 
 
         private async void Application_Startup(object sender, StartupEventArgs e)
@@ -30,7 +30,7 @@ namespace Cyaim.WebSocketServer.Example.Wpf
             _webHost = CreateHostBuilder(e.Args).Build();
             await _webHost.StartAsync();
 
-            _mainWindow.Show();
+            _mainWindow!.Show();
         }
 
         private IHostBuilder CreateHostBuilder(string[] args) =>
@@ -56,7 +56,7 @@ namespace Cyaim.WebSocketServer.Example.Wpf
                 {
                     logging.ClearProviders();
                     logging.SetMinimumLevel(LogLevel.Trace);
-                    logging.AddProvider(new WebSocketLoggerProvider(LogLevel.Information, _mainWindow.AppendLog));
+                    logging.AddProvider(new WebSocketLoggerProvider(LogLevel.Information, _mainWindow!.AppendLog));
                 })
                 // 配置WebHost
                 .ConfigureWebHostDefaults(webBuilder =>
@@ -86,7 +86,6 @@ namespace Cyaim.WebSocketServer.Example.Wpf
             {
                 await _webHost.StopAsync(TimeSpan.FromSeconds(5));
                 _webHost.Dispose();
-                _webHost = null;
             }
             base.OnExit(e);
         }
