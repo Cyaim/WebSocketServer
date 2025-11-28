@@ -1,0 +1,21 @@
+[package]
+name = "cyaim-websocket-client"
+version = "1.0.0"
+edition = "2021"
+description = "WebSocket client for Cyaim.WebSocketServer with automatic endpoint discovery"
+authors = ["Cyaim Studio"]
+license = "MIT"
+repository = "https://github.com/cyaim/websocket-server"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json"] }
+async-trait = "0.1"
+uuid = { version = "1.0", features = ["v4"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
