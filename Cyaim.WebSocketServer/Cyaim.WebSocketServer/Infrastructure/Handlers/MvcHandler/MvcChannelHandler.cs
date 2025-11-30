@@ -107,13 +107,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
 
         #region Pipeline
-
-        const string PipeStr_RequestForwardPipeline = "RequestForwardPipeline";
-
-        const string PipeStr_RequestReceivePipeline = "RequestReceivePipeline";
-
-        const string PipeStr_RequestPipeline = "RequestPipeline";
-
         #endregion
 
         /// <summary>
@@ -218,7 +211,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 var remoteIpAddress = context.Connection.RemoteIpAddress?.ToString();
                                 var remotePort = context.Connection.RemotePort;
                                 await clusterManager.RegisterConnectionAsync(
-                                    context.Connection.Id, 
+                                    context.Connection.Id,
                                     context.Request.Path,
                                     remoteIpAddress,
                                     remotePort);
@@ -230,8 +223,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             }
                         }
 
-                        // 执行BeforeReceivingData管道
-                        _ = await InvokePipeline(RequestPipelineStage.Connected, context, webSocket, null, null);
+                        // 执行Connected管道
+                        _ = await InvokePipeline(RequestPipelineStage.Connected, PipelineContext.CreateReceive(context, webSocket, null, null, webSocketOptions));
 
                         IHostApplicationLifetime appLifetime = WebSocketRouteOption.ApplicationServices.GetRequiredService<IHostApplicationLifetime>();
 
@@ -277,7 +270,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 await MvcChannel_OnDisconnected(context, webSocketCloseStatus, webSocketOptions, logger);
 
                 // 执行管道 Disconnected
-                _ = await InvokePipeline(RequestPipelineStage.Disconnected, context, webSocketOptions);
+                _ = await InvokePipeline(RequestPipelineStage.Disconnected, PipelineContext.CreateBasic(context, webSocketOptions));
             }
         }
 
@@ -322,7 +315,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         // 执行BeforeReceivingData管道
-                        _ = await InvokePipeline(RequestPipelineStage.BeforeReceivingData, context, webSocket, null, null);
+                        _ = await InvokePipeline(RequestPipelineStage.BeforeReceivingData, PipelineContext.CreateReceive(context, webSocket, null, null, webSocketOption));
 
                         #region 接收数据
                         byte[] buffer = ArrayPool<byte>.Shared.Rent(ReceiveTextBufferSize);
@@ -370,12 +363,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 // 记录消息接收指标
                                 var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
                                 _metricsCollector?.RecordMessageReceived(result.Count, currentNodeId, context.Request.Path);
-                                
+
                                 // 记录统计信息（如果统计记录器可用）
                                 Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesReceived(context.Connection.Id, result.Count);
 
                                 // 执行ReceivingData管道
-                                _ = await InvokePipeline(RequestPipelineStage.ReceivingData, context, webSocket, result, buffer);
+                                _ = await InvokePipeline(RequestPipelineStage.ReceivingData, PipelineContext.CreateReceive(context, webSocket, result, buffer, webSocketOption));
 
                                 // 已经接受完数据了
                                 if (result.EndOfMessage || result.CloseStatus.HasValue)
@@ -412,7 +405,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         #endregion
 
                         // 执行AfterReceivingData管道
-                        _ = await InvokePipeline(RequestPipelineStage.ReceivingData, context, webSocket, result, wsReceiveReader.GetBuffer());
+                        _ = await InvokePipeline(RequestPipelineStage.AfterReceivingData, PipelineContext.CreateReceive(context, webSocket, result, wsReceiveReader.GetBuffer(), webSocketOption));
 
                         if (result == null)
                         {
@@ -480,7 +473,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         // 执行管道 BeforeForwardingData
-                        _ = await InvokePipeline(RequestPipelineStage.BeforeForwardingData, context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody);
+                        _ = await InvokePipeline(RequestPipelineStage.BeforeForwardingData, PipelineContext.CreateForward(context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody, webSocketOption));
 
                         //requestScheme = JsonSerializer.Deserialize<MvcRequestScheme>(wsReceiveReader.GetBuffer(), webSocketOption.DefaultRequestJsonSerialiazerOptions);
                         // 改异步转发
@@ -492,7 +485,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         // 执行管道 AfterForwardingData
-                        _ = await InvokePipeline(RequestPipelineStage.AfterForwardingData, context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody);
+                        _ = await InvokePipeline(RequestPipelineStage.AfterForwardingData, PipelineContext.CreateForward(context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody, webSocketOption));
 
                     CONTINUE_RECEIVE:;
                     }
@@ -566,13 +559,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 // 序列化响应以获取大小
                 string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
                 var responseBytes = Encoding.UTF8.GetBytes(serialJson);
-                
+
                 await invokeResult.SendAsync(webSocketOption.DefaultResponseJsonSerializerOptions, result.MessageType, timeout: ResponseSendTimeout, encoding: Encoding.UTF8, sendBufferSize: SendTextBufferSize, socket: webSocket).ConfigureAwait(false);
 
                 // 记录消息发送指标
                 var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
                 _metricsCollector?.RecordMessageSent(responseBytes.Length, currentNodeId, context.Request.Path);
-                
+
                 // 记录统计信息（如果统计记录器可用）
                 Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesSent(context.Connection.Id, responseBytes.Length);
             }
@@ -1069,7 +1062,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 if (wsExists)
                 {
                     Clients.TryRemove(context.Connection.Id, out var _);
-                    
+
                     // Unregister connection from cluster manager if cluster is enabled
                     // 如果启用了集群，从集群管理器注销连接
                     var clusterManager = Infrastructure.Cluster.GlobalClusterCenter.ClusterManager;
@@ -1112,7 +1105,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     {
                         var ipAddress = context.Connection.RemoteIpAddress?.ToString();
                         var isAllowed = await accessControlService.IsAllowedAsync(ipAddress);
-                        
+
                         if (!isAllowed)
                         {
                             var policy = WebSocketRouteOption.ApplicationServices.GetService<AccessControlPolicy>();
@@ -1140,7 +1133,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             {
                                 logger.LogWarning($"Access denied for IP {ipAddress} from {context.Request.Path}");
                             }
-                            
+
                             return false;
                         }
                     }
@@ -1206,69 +1199,48 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         #region Invoke pipeline
 
         /// <summary>
-        /// 通用的管道调用入口：统一排序与异常记录
+        /// 统一的管道调用方法
         /// </summary>
         /// <param name="requestStage">处理阶段</param>
-        /// <param name="invoker">对每个管道项的具体调用逻辑</param>
+        /// <param name="context">管道上下文（从对象池获取，使用完毕后自动归还）</param>
         /// <returns></returns>
-        private async Task<ConcurrentQueue<PipelineItem>> InvokePipelineInternal(RequestPipelineStage requestStage, Func<PipelineItem, Task> invoker)
+        /// <remarks>
+        /// 注意：context 对象会在所有管道处理器执行完毕后自动归还到对象池。
+        /// 管道处理器不应在异步操作中保存 context 的引用，因为方法返回后对象会被清理和重用。
+        /// </remarks>
+        private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, PipelineContext context)
         {
-            if (!RequestPipeline.TryGetValue(requestStage, out ConcurrentQueue<PipelineItem> invokes) || invokes == null)
+            try
             {
-                return await Task.FromResult<ConcurrentQueue<PipelineItem>>(null);
-            }
-
-            var ordered = invokes.OrderBy(x => x.Order);
-            foreach (PipelineItem item in ordered)
-            {
-                try
+                if (!RequestPipeline.TryGetValue(requestStage, out ConcurrentQueue<PipelineItem> invokes) || invokes == null)
                 {
-                    await invoker(item);
+                    return null;
                 }
-                catch (Exception ex)
+
+                var ordered = invokes.OrderBy(x => x.Order);
+                foreach (PipelineItem item in ordered)
                 {
-                    item.Exception = ex;
-                    item.ExceptionItem = item;
+                    try
+                    {
+                        if (item.Item != null)
+                        {
+                            await item.Item.InvokeAsync(context);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        item.Exception = ex;
+                        item.ExceptionItem = item;
+                    }
                 }
+
+                return invokes;
             }
-
-            return invokes;
-        }
-
-        /// <summary>
-        /// 调用请求转发阶段的管道
-        /// </summary>
-        private Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer, MvcRequestScheme request, JsonObject requestBody)
-        {
-            return InvokePipelineInternal(requestStage, async x =>
+            finally
             {
-                var p = (x.Item as RequestForwardPipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestForwardPipeline);
-                await p?.Invoke?.Invoke(context, webSocket, result, buffer, request, requestBody);
-            });
-        }
-
-        /// <summary>
-        /// 调用请求接收阶段的管道
-        /// </summary>
-        private Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] buffer)
-        {
-            return InvokePipelineInternal(requestStage, async x =>
-            {
-                var p = (x.Item as RequestReceivePipeline) ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestReceivePipeline);
-                await p?.Invoke?.Invoke(context, webSocket, result, buffer);
-            });
-        }
-
-        /// <summary>
-        /// 调用基础阶段的管道
-        /// </summary>
-        private Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, HttpContext context, WebSocketRouteOption webSocketOptions)
-        {
-            return InvokePipelineInternal(requestStage, async x =>
-            {
-                var p = x.Item ?? throw new NotSupportedException(I18nText.AtThisStagePipelineNotSupport + PipeStr_RequestPipeline);
-                await p?.Invoke?.Invoke(context, webSocketOptions);
-            });
+                // 使用完毕后归还到对象池，确保即使发生异常也能正确归还
+                context?.Return();
+            }
         }
 
 
