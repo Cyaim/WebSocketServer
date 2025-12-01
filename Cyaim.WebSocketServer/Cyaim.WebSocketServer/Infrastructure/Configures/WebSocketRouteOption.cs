@@ -64,6 +64,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         internal EndpointInjectorFactory InjectorFactory { get; set; }
 
         /// <summary>
+        /// 方法调用器工厂（用于优化方法调用性能，支持源代码生成和反射两种方式）
+        /// </summary>
+        internal MethodInvokerFactory MethodInvokerFactory { get; set; }
+
+        /// <summary>
         /// Watch assembly path
         /// </summary>
         public string WatchAssemblyPath { get; set; }

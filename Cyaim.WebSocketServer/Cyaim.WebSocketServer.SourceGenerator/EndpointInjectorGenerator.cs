@@ -50,8 +50,22 @@ namespace Cyaim.WebSocketServer.SourceGenerator
                     continue;
 
                 // 生成注入器代码
-                var source = GenerateInjectorCode(namespaceName, className, classFullName, httpContextProperty, webSocketProperty);
-                context.AddSource($"{className}Injector.g.cs", SourceText.From(source, Encoding.UTF8));
+                var injectorSource = GenerateInjectorCode(namespaceName, className, classFullName, httpContextProperty, webSocketProperty);
+                context.AddSource($"{className}Injector.g.cs", SourceText.From(injectorSource, Encoding.UTF8));
+
+                // 为每个带有 WebSocketAttribute 的方法生成调用器
+                var methods = classSymbol.GetMembers()
+                    .OfType<IMethodSymbol>()
+                    .Where(m => m.GetAttributes().Any(attr =>
+                        attr.AttributeClass?.Name == "WebSocketAttribute" ||
+                        attr.AttributeClass?.ToDisplayString() == "Cyaim.WebSocketServer.Infrastructure.Attributes.WebSocketAttribute"))
+                    .ToList();
+
+                foreach (var method in methods)
+                {
+                    var methodInvokerSource = GenerateMethodInvokerCode(namespaceName, className, classFullName, method);
+                    context.AddSource($"{className}_{method.Name}Invoker.g.cs", SourceText.From(methodInvokerSource, Encoding.UTF8));
+                }
             }
         }
 
@@ -92,6 +106,114 @@ namespace Cyaim.WebSocketServer.SourceGenerator
             }
 
             sb.AppendLine("            }");
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+
+            return sb.ToString();
+        }
+
+        private string GenerateMethodInvokerCode(string namespaceName, string className, string classFullName, IMethodSymbol method)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("using Cyaim.WebSocketServer.Infrastructure.Injectors;");
+            sb.AppendLine("using System;");
+            sb.AppendLine();
+            sb.AppendLine($"namespace {namespaceName}");
+            sb.AppendLine("{");
+            sb.AppendLine($"    /// <summary>");
+            sb.AppendLine($"    /// 源代码生成的方法调用器：{className}.{method.Name}");
+            sb.AppendLine($"    /// </summary>");
+            sb.AppendLine($"    public class {className}_{method.Name}Invoker : IMethodInvoker");
+            sb.AppendLine("    {");
+            sb.AppendLine("        public object Invoke(object instance, object[] args)");
+            sb.AppendLine("        {");
+            sb.AppendLine($"            if (instance is {classFullName} target)");
+            sb.AppendLine("            {");
+
+            // 构建方法调用参数
+            var parameters = method.Parameters;
+            var hasParameters = parameters.Length > 0;
+
+            if (hasParameters)
+            {
+                for (int i = 0; i < parameters.Length; i++)
+                {
+                    var param = parameters[i];
+                    var paramType = param.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                    var paramName = param.Name;
+                    var isValueType = param.Type.IsValueType;
+                    
+                    // 检查是否为可空值类型 (Nullable<T>)
+                    var isNullable = param.Type is INamedTypeSymbol nullableNamedType && 
+                                    nullableNamedType.IsGenericType && 
+                                    nullableNamedType.ConstructedFrom?.ToDisplayString() == "System.Nullable<T>";
+                    
+                    sb.AppendLine($"                var arg{i} = args.Length > {i} ? args[{i}] : null;");
+                    
+                    if (isValueType && !isNullable)
+                    {
+                        // 值类型需要转换
+                        sb.AppendLine($"                {paramType} {paramName};");
+                        sb.AppendLine($"                if (arg{i} == null)");
+                        sb.AppendLine($"                {{");
+                        sb.AppendLine($"                    {paramName} = default({paramType});");
+                        sb.AppendLine($"                }}");
+                        sb.AppendLine($"                else if (arg{i} is {paramType} typed{i})");
+                        sb.AppendLine($"                {{");
+                        sb.AppendLine($"                    {paramName} = typed{i};");
+                        sb.AppendLine($"                }}");
+                        sb.AppendLine($"                else");
+                        sb.AppendLine($"                {{");
+                        sb.AppendLine($"                    {paramName} = ({paramType})Convert.ChangeType(arg{i}, typeof({paramType}));");
+                        sb.AppendLine($"                }}");
+                    }
+                    else
+                    {
+                        // 引用类型或可空类型
+                        sb.AppendLine($"                var {paramName} = arg{i} as {paramType};");
+                    }
+                }
+            }
+
+            // 构建方法调用
+            var methodName = method.Name;
+            var returnType = method.ReturnType;
+            var isVoid = returnType.SpecialType == SpecialType.System_Void;
+            var isTask = returnType.Name == "Task";
+            var isTaskOfT = returnType is INamedTypeSymbol taskNamedType && 
+                           taskNamedType.IsGenericType && 
+                           taskNamedType.ConstructedFrom?.ToDisplayString() == "System.Threading.Tasks.Task<TResult>";
+
+            sb.Append("                ");
+            if (!isVoid)
+            {
+                sb.Append("var result = ");
+            }
+            sb.Append($"target.{methodName}(");
+            
+            if (hasParameters)
+            {
+                var paramNames = parameters.Select(p => p.Name);
+                sb.Append(string.Join(", ", paramNames));
+            }
+            
+            sb.AppendLine(");");
+
+            // 处理返回值
+            if (isVoid)
+            {
+                sb.AppendLine("                return null;");
+            }
+            else
+            {
+                sb.AppendLine("                return result;");
+            }
+
+            sb.AppendLine("            }");
+            sb.AppendLine();
+            sb.AppendLine("            // 如果类型不匹配，返回 null（兼容性回退）");
+            sb.AppendLine("            return null;");
             sb.AppendLine("        }");
             sb.AppendLine("    }");
             sb.AppendLine("}");

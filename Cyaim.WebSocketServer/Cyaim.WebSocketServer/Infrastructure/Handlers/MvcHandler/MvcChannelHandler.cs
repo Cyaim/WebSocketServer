@@ -37,6 +37,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         private BandwidthLimitManager bandwidthLimitManager;
         private WebSocketMetricsCollector _metricsCollector;
         private EndpointInjectorFactory _injectorFactory;
+        private MethodInvokerFactory _methodInvokerFactory;
 
         /// <summary>
         /// Get instance
@@ -129,6 +130,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 webSocketOptions.InjectorFactory = new EndpointInjectorFactory(webSocketOptions);
             }
             _injectorFactory = webSocketOptions.InjectorFactory;
+
+            // 初始化方法调用器工厂（如果尚未初始化）
+            if (webSocketOptions.MethodInvokerFactory == null)
+            {
+                webSocketOptions.MethodInvokerFactory = new MethodInvokerFactory();
+            }
+            _methodInvokerFactory = webSocketOptions.MethodInvokerFactory;
 
             // 获取指标收集器
             if (WebSocketRouteOption.ApplicationServices != null)
@@ -931,8 +939,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 // 使用lifetime实现直接结束执行/等待执行完成后再结束
                 appLifetime.ApplicationStopping.ThrowIfCancellationRequested();
 
-                // 调用目标方法 
-                invokeResult = method.Invoke(inst, args);
+                // 使用方法调用器工厂调用目标方法（支持源代码生成和反射两种方式）
+                var methodInvokerFactory = webSocketOptions.MethodInvokerFactory ?? new MethodInvokerFactory();
+                var methodInvoker = methodInvokerFactory.GetOrCreateInvoker(method);
+                invokeResult = methodInvoker.Invoke(inst, args);
 
                 // Async api support
                 if (invokeResult is Task)

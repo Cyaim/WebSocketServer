@@ -2,6 +2,7 @@ using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Net.WebSockets;
 using System.Reflection;
 
@@ -51,9 +52,35 @@ namespace Cyaim.WebSocketServer.Infrastructure.Injectors
         {
             try
             {
-                // 查找生成的注入器类型：{TypeName}Injector
-                var injectorTypeName = $"{endpointType.FullName}Injector";
+                // 源生成器生成的注入器类名格式：{ClassName}Injector（在同一个命名空间中）
+                // 例如：MyController -> MyControllerInjector
+                var className = endpointType.Name;
+                var injectorTypeName = $"{endpointType.Namespace}.{className}Injector";
+                
+                // 首先尝试在同一程序集中查找
                 var injectorType = endpointType.Assembly.GetType(injectorTypeName);
+                
+                // 如果找不到，尝试在所有已加载的程序集中查找（处理嵌套类型等情况）
+                if (injectorType == null)
+                {
+                    // 尝试使用完整名称查找（处理嵌套类型）
+                    var fullName = endpointType.FullName;
+                    if (fullName != null)
+                    {
+                        var fullInjectorName = $"{fullName}Injector";
+                        injectorType = endpointType.Assembly.GetType(fullInjectorName);
+                    }
+                }
+                
+                // 如果还是找不到，尝试在同一个命名空间下查找所有类型
+                if (injectorType == null)
+                {
+                    var allTypes = endpointType.Assembly.GetTypes();
+                    injectorType = allTypes.FirstOrDefault(t => 
+                        t.Namespace == endpointType.Namespace &&
+                        t.Name == $"{className}Injector" &&
+                        typeof(IEndpointInjector).IsAssignableFrom(t));
+                }
                 
                 if (injectorType != null && typeof(IEndpointInjector).IsAssignableFrom(injectorType))
                 {
