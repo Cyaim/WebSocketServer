@@ -173,20 +173,95 @@ jobs:
         echo "Package count:"
         find Cyaim.WebSocketServer/artifacts -name "*.nupkg" -type f | wc -l
     
+    - name: Verify NuGet API Key
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      run: |
+        if [ -z "$NUGET_APIKEY" ]; then
+          echo "❌ Error: NUGET_APIKEY secret is not set!"
+          echo "Please set the NUGET_APIKEY secret in GitHub repository settings."
+          echo "Go to: Settings → Secrets and variables → Actions → New repository secret"
+          exit 1
+        else
+          echo "✅ NUGET_APIKEY secret is set (length: ${#NUGET_APIKEY} characters)"
+        fi
+      env:
+        NUGET_APIKEY: ${{ secrets.NUGET_APIKEY }}
+    
+    - name: Configure NuGet source
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      run: |
+        echo "Configuring NuGet source..."
+        # 移除可能存在的默认源
+        dotnet nuget remove source "nuget.org" 2>/dev/null || true
+        # 添加正确的 NuGet 源
+        dotnet nuget add source "https://api.nuget.org/v3/index.json" \
+          --name "nuget.org" \
+          --username "GitHubActions" \
+          --password "$NUGET_APIKEY" \
+          --store-password-in-clear-text || true
+        echo "✅ NuGet source configured"
+      env:
+        NUGET_APIKEY: ${{ secrets.NUGET_APIKEY }}
+    
     - name: Push to NuGet
       if: steps.check_commit.outputs.trigger_release == 'true'
       working-directory: Cyaim.WebSocketServer/artifacts
+      env:
+        NUGET_APIKEY: ${{ secrets.NUGET_APIKEY }}
       run: |
         # 推送所有包到 NuGet
+        PUSH_COUNT=0
+        SUCCESS_COUNT=0
+        FAIL_COUNT=0
+        
+        # 确保只推送可发布的包（排除 Sample 和 Tests）
         for package in *.nupkg; do
           if [ -f "$package" ]; then
-            echo "Pushing $package to NuGet..."
-            dotnet nuget push "$package" \
+            # 排除示例和测试包
+            if [[ "$package" == *"Sample"* ]] || [[ "$package" == *"Tests"* ]] || [[ "$package" == *"Example"* ]]; then
+              echo "⊘ Skipping (Sample/Tests): $package"
+              continue
+            fi
+            
+            PUSH_COUNT=$((PUSH_COUNT + 1))
+            echo ""
+            echo "[$PUSH_COUNT] Pushing $package to NuGet..."
+            echo "  Source: https://api.nuget.org/v3/index.json"
+            
+            # 使用环境变量中的 API Key 和明确的源
+            if dotnet nuget push "$package" \
               --source "https://api.nuget.org/v3/index.json" \
-              --api-key "${{ secrets.NUGET_APIKEY }}" \
-              --skip-duplicate || echo "⚠️  Failed to push $package (may already exist)"
+              --api-key "$NUGET_APIKEY" \
+              --skip-duplicate \
+              --no-symbols; then
+              echo "  ✅ Successfully pushed: $package"
+              SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+            else
+              EXIT_CODE=$?
+              if [ $EXIT_CODE -eq 0 ]; then
+                echo "  ⊘ Skipped (already exists): $package"
+              else
+                echo "  ❌ Failed to push: $package (exit code: $EXIT_CODE)"
+                FAIL_COUNT=$((FAIL_COUNT + 1))
+              fi
+            fi
           fi
         done
+        
+        echo ""
+        echo "=== Push Summary ==="
+        echo "Total packages: $PUSH_COUNT"
+        echo "Success: $SUCCESS_COUNT"
+        echo "Failed: $FAIL_COUNT"
+        
+        if [ $FAIL_COUNT -gt 0 ]; then
+          echo "⚠️  Some packages failed to push. Check the errors above."
+          echo "Common issues:"
+          echo "  1. NUGET_APIKEY secret not set or incorrect"
+          echo "  2. API Key expired or invalid"
+          echo "  3. Package already exists (if not using --skip-duplicate)"
+          exit 1
+        fi
     
     - name: Create GitHub Release
       if: steps.check_commit.outputs.trigger_release == 'true'

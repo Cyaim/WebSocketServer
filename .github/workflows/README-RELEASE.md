@@ -120,9 +120,33 @@ git push origin main
 
 ### 发布失败
 
-1. **检查 NuGet API Key**：确保 `NUGET_APIKEY` secret 已正确设置
-2. **检查 commit message**：确保包含 `release version`（不区分大小写）
-3. **检查提交者邮箱**：确保 Git 配置的邮箱是 `lbhdr@outlook.com`（区分大小写）
+#### 常见错误：401 Unauthorized（API Key 问题）
+
+如果看到以下错误：
+```
+error: Response status code does not indicate success: 401 (An API key must be provided...)
+```
+
+**解决方法**：
+
+1. **检查 Secret 名称**：确保 GitHub Secret 名称是 `NUGET_APIKEY`（不是 `NUGET_API_KEY`）
+   - 进入：Settings → Secrets and variables → Actions
+   - 检查是否存在 `NUGET_APIKEY` secret
+
+2. **检查 API Key 有效性**：
+   - 访问 [NuGet.org](https://www.nuget.org/) → API Keys
+   - 确认 API Key 未过期
+   - 确认 API Key 有推送权限
+
+3. **重新设置 Secret**：
+   - 删除旧的 `NUGET_APIKEY` secret
+   - 创建新的 secret，名称：`NUGET_APIKEY`
+   - 值：你的 NuGet API Key
+
+#### 其他常见问题
+
+1. **检查 commit message**：确保包含 `release version`（不区分大小写）
+2. **检查提交者邮箱**：确保 Git 配置的邮箱是 `lbhdr@outlook.com`（区分大小写）
    ```bash
    # 查看当前 Git 邮箱
    git config user.email
@@ -133,7 +157,8 @@ git push origin main
    # 全局设置（可选）
    git config --global user.email "lbhdr@outlook.com"
    ```
-4. **查看 workflow 日志**：在 Actions 页面查看详细的错误信息和检查结果
+3. **查看 workflow 日志**：在 Actions 页面查看详细的错误信息和检查结果
+4. **检查包是否已存在**：如果包已存在，workflow 会跳过（使用 `--skip-duplicate`）
 
 ### 版本号格式错误
 
