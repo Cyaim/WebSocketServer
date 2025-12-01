@@ -158,7 +158,7 @@ jobs:
             echo "Pushing $package to NuGet..."
             dotnet nuget push "$package" \
               --source "https://api.nuget.org/v3/index.json" \
-              --api-key "${{ secrets.NUGET_API_KEY }}" \
+              --api-key "${{ secrets.NUGET_APIKEY }}" \
               --skip-duplicate || echo "⚠️  Failed to push $package (may already exist)"
           fi
         done

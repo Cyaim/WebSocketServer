@@ -36,7 +36,7 @@
 1. 打开你的 GitHub 仓库
 2. 进入 **Settings** → **Secrets and variables** → **Actions**
 3. 点击 **New repository secret**
-4. 名称：`NUGET_API_KEY`
+4. 名称：`NUGET_APIKEY`
 5. 值：粘贴你的 NuGet API Key
 6. 点击 **Add secret**
 
@@ -108,7 +108,7 @@ git push origin main
 
 ### 发布失败
 
-1. **检查 NuGet API Key**：确保 `NUGET_API_KEY` secret 已正确设置
+1. **检查 NuGet API Key**：确保 `NUGET_APIKEY` secret 已正确设置
 2. **检查 commit message**：确保包含 `release version`（不区分大小写）
 3. **检查提交者邮箱**：确保 Git 配置的邮箱是 `lbhdr@outlook.com`（区分大小写）
    ```bash
