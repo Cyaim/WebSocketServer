@@ -1,5 +1,6 @@
 ﻿using Cyaim.WebSocketServer.Infrastructure.AccessControl;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Cyaim.WebSocketServer.Infrastructure.Injectors;
 using Cyaim.WebSocketServer.Infrastructure.Metrics;
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
@@ -35,6 +36,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         private WebSocketRouteOption webSocketOption;
         private BandwidthLimitManager bandwidthLimitManager;
         private WebSocketMetricsCollector _metricsCollector;
+        private EndpointInjectorFactory _injectorFactory;
 
         /// <summary>
         /// Get instance
@@ -120,6 +122,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             this.logger = logger;
             webSocketOption = webSocketOptions;
+
+            // 初始化注入器工厂（如果尚未初始化）
+            if (webSocketOptions.InjectorFactory == null)
+            {
+                webSocketOptions.InjectorFactory = new EndpointInjectorFactory(webSocketOptions);
+            }
+            _injectorFactory = webSocketOptions.InjectorFactory;
 
             // 获取指标收集器
             if (WebSocketRouteOption.ApplicationServices != null)
@@ -723,9 +732,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 }
 
                 #region 注入Socket的HttpContext和WebSocket客户端
-                PropertyInfo contextInfo = clss.GetProperty(webSocketOptions.InjectionHttpContextPropertyName);
-                PropertyInfo socketInfo = clss.GetProperty(webSocketOptions.InjectionWebSocketClientPropertyName);
-
                 webSocketOptions.WatchAssemblyContext.MaxConstructorParameters.TryGetValue(clss, out ConstructorParameter constructorParameter);
 
                 object[] instanceParmas = new object[constructorParameter.ParameterInfos.Length];
@@ -756,15 +762,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                 object inst = Activator.CreateInstance(clss, instanceParmas);
 
-                // 注入目标类中的帮助属性HttpContext、WebSocket
-                if (contextInfo != null && contextInfo.CanWrite)
-                {
-                    contextInfo.SetValue(inst, context);
-                }
-                if (socketInfo != null && socketInfo.CanWrite)
-                {
-                    socketInfo.SetValue(inst, webSocket);
-                }
+                // 使用注入器工厂注入 HttpContext 和 WebSocket（支持源代码生成和反射两种方式）
+                var injectorFactory = webSocketOptions.InjectorFactory ?? new EndpointInjectorFactory(webSocketOptions);
+                var injector = injectorFactory.GetOrCreateInjector(clss);
+                injector.Inject(inst, context, webSocket);
                 #endregion
 
                 MvcResponseScheme mvcResponse = new MvcResponseScheme() { Status = 0, RequestTime = requestTime };

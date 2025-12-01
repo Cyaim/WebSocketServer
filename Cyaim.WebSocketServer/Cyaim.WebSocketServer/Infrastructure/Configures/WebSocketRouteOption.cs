@@ -1,4 +1,5 @@
-﻿using Cyaim.WebSocketServer.Middlewares;
+﻿using Cyaim.WebSocketServer.Infrastructure.Injectors;
+using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -56,6 +57,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// Watch assembly context
         /// </summary>
         public WatchAssemblyContext WatchAssemblyContext { get; set; }
+
+        /// <summary>
+        /// Endpoint 注入器工厂（用于优化注入性能，支持源代码生成和反射两种方式）
+        /// </summary>
+        internal EndpointInjectorFactory InjectorFactory { get; set; }
 
         /// <summary>
         /// Watch assembly path
