@@ -1,0 +1,201 @@
+name: Release NuGet Packages
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    # 当 commit message 包含 "release version" 且提交者邮箱是 "lbhdr@outlook.com" 时触发
+    # 使用 git log 检查最后一个 commit message 和提交者邮箱
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    # 检查 commit message 是否包含 "release version" 且提交者邮箱是 "lbhdr@outlook.com"
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 获取完整历史以检查 commit message
+    
+    - name: Check commit message and author email
+      id: check_commit
+      run: |
+        COMMIT_MSG=$(git log -1 --pretty=%B)
+        COMMIT_AUTHOR_EMAIL=$(git log -1 --pretty=%ae)
+        
+        echo "Last commit message: $COMMIT_MSG"
+        echo "Last commit author email: $COMMIT_AUTHOR_EMAIL"
+        
+        # 检查 commit message 是否包含 "release version" 且提交者邮箱是 "lbhdr@outlook.com"
+        if echo "$COMMIT_MSG" | grep -qi "release version"; then
+          if [ "$COMMIT_AUTHOR_EMAIL" = "lbhdr@outlook.com" ]; then
+            echo "trigger_release=true" >> $GITHUB_OUTPUT
+            echo "✅ Commit message contains 'release version' and author email is 'lbhdr@outlook.com', triggering release"
+          else
+            echo "trigger_release=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Commit message contains 'release version' but author email is '$COMMIT_AUTHOR_EMAIL' (not 'lbhdr@outlook.com'), skipping release"
+          fi
+        else
+          echo "trigger_release=false" >> $GITHUB_OUTPUT
+          echo "ℹ️ Commit message does not contain 'release version', skipping release"
+        fi
+    
+    - name: Generate version number
+      id: version
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      run: |
+        # 主版本号
+        MAJOR_VERSION=2
+        
+        # 获取当前时间（UTC）
+        YEAR=$(date -u +%y)           # 年后两位，例如 25
+        MONTH=$(date -u +%m)          # 月份，例如 12
+        DAY=$(date -u +%d)            # 日期，例如 25
+        HOUR=$(date -u +%H)           # 小时，例如 14
+        MINUTE=$(date -u +%M)         # 分钟，例如 30
+        
+        # 组合版本号：主版本号.年后两位.月日.时分
+        # 格式：2.YY.MMDD.HHmm
+        VERSION="${MAJOR_VERSION}.${YEAR}.${MONTH}${DAY}.${HOUR}${MINUTE}"
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Generated version: $VERSION"
+        echo "Version format: ${MAJOR_VERSION}.${YEAR}.${MONTH}${DAY}.${HOUR}${MINUTE}"
+        echo "Example: 2.25.1225.1430 = Version 2, Year 2025, Dec 25, 14:30 UTC"
+    
+    - name: Setup .NET
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'  # 使用最新的 .NET 10 SDK
+    
+    - name: Update version in all project files
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        echo "Updating version to $VERSION in all .csproj files..."
+        
+        # 需要更新的项目列表（排除 Sample 和 Tests）
+        PROJECTS=(
+          "Cyaim.WebSocketServer/Cyaim.WebSocketServer/Cyaim.WebSocketServer.csproj"
+          "Cyaim.WebSocketServer/Cyaim.WebSocketServer.MessagePack/Cyaim.WebSocketServer.MessagePack.csproj"
+          "Cyaim.WebSocketServer/Dashboard/Cyaim.WebSocketServer.Dashboard/Cyaim.WebSocketServer.Dashboard.csproj"
+          "Cyaim.WebSocketServer/Cluster/Cyaim.WebSocketServer.Cluster.StackExchangeRedis/Cyaim.WebSocketServer.Cluster.StackExchangeRedis.csproj"
+          "Cyaim.WebSocketServer/Cluster/Cyaim.WebSocketServer.Cluster.RabbitMQ/Cyaim.WebSocketServer.Cluster.RabbitMQ.csproj"
+          "Cyaim.WebSocketServer/Cluster/Cyaim.WebSocketServer.Cluster.FreeRedis/Cyaim.WebSocketServer.Cluster.FreeRedis.csproj"
+          "Cyaim.WebSocketServer/Cluster/Cyaim.WebSocketServer.Cluster.Hybrid/Cyaim.WebSocketServer.Cluster.Hybrid.csproj"
+          "Cyaim.WebSocketServer/Cluster/Cyaim.WebSocketServer.Cluster.Hybrid.Implementations/Cyaim.WebSocketServer.Cluster.Hybrid.Implementations.csproj"
+        )
+        
+        UPDATED_COUNT=0
+        FAILED_COUNT=0
+        
+        for file in "${PROJECTS[@]}"; do
+          if [ -f "$file" ]; then
+            echo "Updating: $file"
+            # 使用 sed 更新版本号
+            if sed -i "s/<Version>[0-9.]*<\/Version>/<Version>${VERSION}<\/Version>/g" "$file"; then
+              # 验证更新
+              if grep -q "<Version>${VERSION}</Version>" "$file"; then
+                echo "  ✅ Updated successfully"
+                UPDATED_COUNT=$((UPDATED_COUNT + 1))
+              else
+                echo "  ⚠️  Warning: Version tag not found in expected format"
+                FAILED_COUNT=$((FAILED_COUNT + 1))
+              fi
+            else
+              echo "  ❌ Failed to update"
+              FAILED_COUNT=$((FAILED_COUNT + 1))
+            fi
+          else
+            echo "⚠️  File not found: $file"
+            FAILED_COUNT=$((FAILED_COUNT + 1))
+          fi
+        done
+        
+        echo ""
+        echo "Update summary:"
+        echo "  Updated: $UPDATED_COUNT"
+        echo "  Failed: $FAILED_COUNT"
+        
+        if [ $FAILED_COUNT -gt 0 ]; then
+          echo "⚠️  Some files failed to update, but continuing..."
+        fi
+    
+    - name: Restore dependencies
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      working-directory: Cyaim.WebSocketServer
+      run: dotnet restore
+    
+    - name: Build
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      working-directory: Cyaim.WebSocketServer
+      run: dotnet build --configuration Release --no-restore
+    
+    - name: Pack
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      working-directory: Cyaim.WebSocketServer
+      run: dotnet pack --configuration Release --no-build --output ./artifacts
+    
+    - name: List packages
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      run: |
+        echo "Generated NuGet packages:"
+        find Cyaim.WebSocketServer/artifacts -name "*.nupkg" -type f | sort
+        echo ""
+        echo "Package count:"
+        find Cyaim.WebSocketServer/artifacts -name "*.nupkg" -type f | wc -l
+    
+    - name: Push to NuGet
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      working-directory: Cyaim.WebSocketServer/artifacts
+      run: |
+        # 推送所有包到 NuGet
+        for package in *.nupkg; do
+          if [ -f "$package" ]; then
+            echo "Pushing $package to NuGet..."
+            dotnet nuget push "$package" \
+              --source "https://api.nuget.org/v3/index.json" \
+              --api-key "${{ secrets.NUGET_API_KEY }}" \
+              --skip-duplicate || echo "⚠️  Failed to push $package (may already exist)"
+          fi
+        done
+    
+    - name: Create GitHub Release
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.version.outputs.version }}
+        name: Release v${{ steps.version.outputs.version }}
+        body: |
+          ## Version ${{ steps.version.outputs.version }}
+          
+          Automated release triggered by commit message containing "release version".
+          
+          ### Published Packages
+          
+          The following NuGet packages have been published:
+          
+          - Cyaim.WebSocketServer
+          - Cyaim.WebSocketServer.MessagePack
+          - Cyaim.WebSocketServer.Dashboard
+          - Cyaim.WebSocketServer.Cluster.StackExchangeRedis
+          - Cyaim.WebSocketServer.Cluster.RabbitMQ
+          - Cyaim.WebSocketServer.Cluster.FreeRedis
+          - Cyaim.WebSocketServer.Cluster.Hybrid
+          - Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
+          
+          ### Version Format
+          
+          Version format: `主版本号.年后两位.月日.时分`
+          
+          Example: `2.25.1225.1430` = Version 2, Year 2025, Dec 25, 14:30 UTC
+        files: |
+          Cyaim.WebSocketServer/artifacts/*.nupkg
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

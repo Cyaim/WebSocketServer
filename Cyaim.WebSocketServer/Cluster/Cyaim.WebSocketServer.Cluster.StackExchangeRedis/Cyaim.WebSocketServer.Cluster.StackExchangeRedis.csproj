@@ -9,8 +9,16 @@
 		<PackageLicenseFile>LICENSE</PackageLicenseFile>
 		<RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
 		<Copyright>Copyright © Cyaim Studio</Copyright>
-		<Version>1.7.8</Version>
+		<Version>2.0.0</Version>
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
+		<PackageReleaseNotes>
+			Version 2.0.0 - Major Release
+            
+            - Updated to support WebSocketServer 2.0.0
+            - Enhanced cluster transport with improved reliability
+            - Better error handling and connection management
+            - Support for .NET 9.0 and .NET 10.0
+        </PackageReleaseNotes>
 		<Description>
 			WebSocketServer Redis cluster transport extension using StackExchange.Redis
 			WebSocketServer Redis 集群传输扩展（基于 StackExchange.Redis）

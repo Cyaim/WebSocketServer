@@ -12,10 +12,54 @@
         <PackageLicenseFile>LICENSE</PackageLicenseFile>
         <RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
         <Copyright>Copyright © Cyaim Studio</Copyright>
-        <Version>1.7.8</Version>
-        <PackageReleaseNotes>            
-            fix: When fixing a Task type with no return value as the target endpoint, an exception will be thrown.
-            perf: Exception information will be displayed internally.
+        <Version>2.0.0</Version>
+        <PackageReleaseNotes>
+            ## Version 2.0.0 - Major Release
+            
+            ### 🎉 New Features
+            
+            - **Request ID Validation**: Added `RequireRequestId` configuration option (default: true) to reject requests without Id property, ensuring clients can distinguish response sources
+            - **Bandwidth Limiting**: Comprehensive bandwidth rate limiting system with channel-level and endpoint-level policies
+            - **Cluster Support**: Full cluster functionality with Raft protocol, automatic routing, and fault tolerance
+            - **Dashboard**: Complete monitoring dashboard with real-time statistics, bandwidth monitoring, and cluster management
+            - **Source Generator**: Performance-optimized source generator for endpoint injection and method invocation
+            - **OpenTelemetry Integration**: Standard metrics export support for observability
+            - **Access Control**: IP-based access control with configurable policies
+            
+            ### ⚡ Performance Improvements
+            
+            - Optimized endpoint injection using source generators (fallback to reflection)
+            - Optimized method invocation using source generators (fallback to reflection)
+            - Improved connection management and resource cleanup
+            - Enhanced pipeline processing performance
+            
+            ### 🔧 Enhancements
+            
+            - Enhanced error handling and logging
+            - Improved cluster connection registration and unregistration
+            - Better support for .NET 9.0 and .NET 10.0
+            - Enhanced metrics collection and statistics recording
+            
+            ### 📦 Cluster Extensions
+            
+            - **StackExchange.Redis**: Redis cluster transport using StackExchange.Redis
+            - **FreeRedis**: Redis cluster transport using FreeRedis
+            - **RabbitMQ**: RabbitMQ cluster transport
+            - **Hybrid**: Hybrid cluster transport with Redis for service discovery and RabbitMQ for message routing
+            
+            ### 🐛 Bug Fixes
+            
+            - Fixed Task return type handling for endpoint methods
+            - Fixed source generator injector type lookup logic
+            - Improved exception handling and error messages
+            - Fixed connection cleanup in cluster scenarios
+            
+            ### 📚 Documentation
+            
+            - Updated documentation with new features
+            - Added bandwidth limiting configuration guide
+            - Enhanced cluster setup documentation
+            - Improved API reference documentation
         </PackageReleaseNotes>
         <PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
         <Description>            
