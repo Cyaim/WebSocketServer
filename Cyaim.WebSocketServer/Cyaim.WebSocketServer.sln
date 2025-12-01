@@ -39,6 +39,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cyaim.WebSocketServer.Tests
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tests", "Tests", "{81668B5E-0334-4CFF-AEA3-60E037A1008D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cyaim.WebSocketServer.MessagePack", "Cyaim.WebSocketServer.MessagePack\Cyaim.WebSocketServer.MessagePack.csproj", "{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -205,6 +207,18 @@ Global
 		{D6FABA52-2524-2BA9-62DC-C53CF5F70ACA}.Release|x64.Build.0 = Release|Any CPU
 		{D6FABA52-2524-2BA9-62DC-C53CF5F70ACA}.Release|x86.ActiveCfg = Release|Any CPU
 		{D6FABA52-2524-2BA9-62DC-C53CF5F70ACA}.Release|x86.Build.0 = Release|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Debug|x64.Build.0 = Debug|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Debug|x86.Build.0 = Debug|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Release|x64.ActiveCfg = Release|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Release|x64.Build.0 = Release|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Release|x86.ActiveCfg = Release|Any CPU
+		{9787F8E6-9DDB-9AFC-660B-EC01857C2A0F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
