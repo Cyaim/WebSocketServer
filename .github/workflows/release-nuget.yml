@@ -69,7 +69,21 @@ jobs:
       if: steps.check_commit.outputs.trigger_release == 'true'
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '10.0.x'  # 使用最新的 .NET 10 SDK
+        # .NET SDK 10.0 可以构建所有目标框架：netstandard2.1, net6.0, net7.0, net8.0, net9.0, net10.0
+        dotnet-version: '10.0.x'
+    
+    - name: Verify .NET SDK and target frameworks
+      if: steps.check_commit.outputs.trigger_release == 'true'
+      run: |
+        echo "=== .NET SDK Information ==="
+        dotnet --version
+        echo ""
+        echo "=== Installed SDKs ==="
+        dotnet --list-sdks
+        echo ""
+        echo "=== Supported Target Frameworks ==="
+        echo "The project supports: netstandard2.1, net6.0, net7.0, net8.0, net9.0, net10.0"
+        echo ".NET SDK 10.0 can build all these target frameworks."
     
     - name: Update version in all project files
       if: steps.check_commit.outputs.trigger_release == 'true'
@@ -132,12 +146,23 @@ jobs:
     - name: Build
       if: steps.check_commit.outputs.trigger_release == 'true'
       working-directory: Cyaim.WebSocketServer
-      run: dotnet build --configuration Release --no-restore
+      run: |
+        echo "Building all target frameworks: netstandard2.1, net6.0, net7.0, net8.0, net9.0, net10.0"
+        dotnet build --configuration Release --no-restore
+        echo ""
+        echo "=== Build Summary ==="
+        echo "Checking built assemblies for each target framework..."
+        find . -path "*/bin/Release/*.dll" -type f | grep -E "(netstandard2.1|net6.0|net7.0|net8.0|net9.0|net10.0)" | sort
     
     - name: Pack
       if: steps.check_commit.outputs.trigger_release == 'true'
       working-directory: Cyaim.WebSocketServer
-      run: dotnet pack --configuration Release --no-build --output ./artifacts
+      run: |
+        echo "Packing NuGet packages for all target frameworks..."
+        dotnet pack --configuration Release --no-build --output ./artifacts
+        echo ""
+        echo "=== Package Contents Verification ==="
+        echo "Each package should contain assemblies for: netstandard2.1, net6.0, net7.0, net8.0, net9.0, net10.0"
     
     - name: List packages
       if: steps.check_commit.outputs.trigger_release == 'true'

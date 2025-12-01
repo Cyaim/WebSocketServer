@@ -81,6 +81,18 @@ git push origin main
 5. **发布到 NuGet**：自动推送所有包到 NuGet.org
 6. **创建 GitHub Release**：自动创建带标签的 GitHub Release
 
+## 支持的目标框架
+
+所有发布的包都支持以下目标框架：
+- **.NET Standard 2.1**
+- **.NET 6.0**
+- **.NET 7.0**
+- **.NET 8.0**
+- **.NET 9.0**
+- **.NET 10.0**
+
+**说明**：.NET SDK 10.0 向后兼容，可以构建所有上述目标框架。workflow 会自动为每个目标框架生成对应的程序集并打包到 NuGet 包中。
+
 ## 会发布的项目
 
 以下项目会被自动更新版本号并发布：
