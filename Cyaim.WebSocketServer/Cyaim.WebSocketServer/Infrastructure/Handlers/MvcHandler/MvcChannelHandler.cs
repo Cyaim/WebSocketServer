@@ -489,6 +489,37 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             requestBody = body.ValueKind == JsonValueKind.Undefined ? null : (JsonNode.Parse(body.GetRawText())?.AsObject());
                         }
 
+                        // 检查请求是否包含Id属性
+                        if (webSocketOption.RequireRequestId && (requestScheme == null || string.IsNullOrWhiteSpace(requestScheme.Id)))
+                        {
+                            // 创建错误响应
+                            MvcResponseScheme errorResponse = new MvcResponseScheme()
+                            {
+                                Status = 1,
+                                RequestTime = requestTime,
+                                CompleteTime = DateTime.Now.Ticks,
+                                Target = requestScheme?.Target,
+                                Id = requestScheme?.Id,
+                                Msg = string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestIdRequired)
+                            };
+
+                            // 发送错误响应
+                            string serialJson = JsonSerializer.Serialize(errorResponse, webSocketOption.DefaultResponseJsonSerializerOptions);
+                            var responseBytes = Encoding.UTF8.GetBytes(serialJson);
+                            await webSocket.SendAsync(new ArraySegment<byte>(responseBytes), result.MessageType, result.EndOfMessage, CancellationToken.None);
+
+                            logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestIdRequired));
+
+                            // 记录消息发送指标
+                            var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
+                            _metricsCollector?.RecordMessageSent(responseBytes.Length, currentNodeId, context.Request.Path);
+
+                            // 记录统计信息（如果统计记录器可用）
+                            Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesSent(context.Connection.Id, responseBytes.Length);
+
+                            continue;
+                        }
+
                         // 执行管道 BeforeForwardingData
                         _ = await InvokePipeline(RequestPipelineStage.BeforeForwardingData, PipelineContext.CreateForward(context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody, webSocketOption));
 

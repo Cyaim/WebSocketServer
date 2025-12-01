@@ -120,6 +120,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// </summary>
         public BandwidthLimitPolicy BandwidthLimitPolicy { get; set; }
 
+        /// <summary>
+        /// 是否要求请求必须包含Id属性。如果为true，未包含Id的请求将被拒绝响应。
+        /// 默认为true，因为客户端需要Id来区分响应来源。
+        /// </summary>
+        public bool RequireRequestId { get; set; } = true;
+
         #region Event
 
         /// <summary>

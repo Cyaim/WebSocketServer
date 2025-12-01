@@ -142,6 +142,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
 
         public static readonly string MvcDistributeAsync_EndPointNotFound = "Endpoint not found: ";
 
+        public static readonly string MvcForwardSendData_RequestIdRequired = "Request must contain an Id property. The client cannot distinguish the response source without an Id." + Environment.NewLine;
+
 
     }
 }
