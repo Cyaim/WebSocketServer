@@ -213,10 +213,35 @@ builder.Services.AddSingleton<IClusterTransport>(provider =>
 });
 ```
 
-### 3. 启动集群传输
+### 3. 配置 WebSocket 服务器（必需）
+
+⚠️ **重要提示**: 使用集群传输时，您**必须**仍然使用 `ConfigureWebSocketRoute` 配置 WebSocket 服务器。集群传输（`IClusterTransport`）只处理节点间通信，不处理客户端连接。客户端 WebSocket 连接仍需要通过常规的 WebSocket 服务器通道。
+
+```csharp
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+
+// 配置 WebSocket 服务器通道
+builder.Services.ConfigureWebSocketRoute(x =>
+{
+    var mvcHandler = new MvcChannelHandler();
+    
+    // 定义客户端连接的业务通道
+    x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
+    {
+        { "/ws", mvcHandler.ConnectionEntry }  // ← 必需：客户端连接端点
+    };
+    x.ApplicationServiceCollection = builder.Services;
+});
+```
+
+### 4. 启动集群传输
 
 ```csharp
 var app = builder.Build();
+
+// 配置 WebSocket 中间件
+app.UseWebSockets();
+app.UseWebSocketServer();
 
 // 获取集群传输并启动
 var clusterTransport = app.Services.GetRequiredService<IClusterTransport>();
@@ -224,6 +249,172 @@ await clusterTransport.StartAsync();
 
 app.Run();
 ```
+
+## ⚠️ 重要注意事项
+
+### 单节点配置必须保留
+
+**关键点**: `IClusterTransport`（包括 `HybridClusterTransport`）**仅**负责节点间通信（服务发现和消息路由）。它**不**处理客户端 WebSocket 连接。
+
+#### 架构概览
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│         WebSocket Server (单节点配置)                   │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  ConfigureWebSocketRoute                          │  │
+│  │  └── /ws (业务通道) ← 客户端连接这里               │  │
+│  └──────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+                        │
+                        │ 使用 IClusterTransport
+                        ▼
+┌─────────────────────────────────────────────────────────┐
+│      HybridClusterTransport (集群传输)                   │
+│  ┌──────────────┐         ┌──────────────┐            │
+│  │ Redis        │         │ RabbitMQ    │            │
+│  │ (服务发现)    │         │ (消息路由)   │            │
+│  └──────────────┘         └──────────────┘            │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### 职责划分
+
+| 组件 | 职责 | 必需 |
+|------|------|------|
+| `ConfigureWebSocketRoute` | 处理客户端 WebSocket 连接 | ✅ **是** |
+| `IClusterTransport` | 节点间通信 | ✅ **是** |
+
+#### 完整配置示例
+
+以下是一个完整的示例，展示两种配置：
+
+```csharp
+using Cyaim.WebSocketServer.Cluster.Hybrid;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis;
+using Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+using Microsoft.Extensions.DependencyInjection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// ============================================
+// 步骤 1：配置 Redis 服务
+// ============================================
+builder.Services.AddSingleton<IRedisService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<FreeRedisService>>();
+    return new FreeRedisService(logger, "localhost:6379");
+});
+
+// ============================================
+// 步骤 2：配置 RabbitMQ 服务
+// ============================================
+builder.Services.AddSingleton<IMessageQueueService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<RabbitMQMessageQueueService>>();
+    return new RabbitMQMessageQueueService(logger, "amqp://guest:guest@localhost:5672/");
+});
+
+// ============================================
+// 步骤 3：配置 WebSocket 服务器
+// ⚠️ 这是必需的 - 不要跳过
+// ============================================
+builder.Services.ConfigureWebSocketRoute(x =>
+{
+    var mvcHandler = new MvcChannelHandler();
+    
+    // 定义客户端连接的业务通道
+    x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
+    {
+        { "/ws", mvcHandler.ConnectionEntry }  // 客户端连接端点
+    };
+    x.ApplicationServiceCollection = builder.Services;
+});
+
+// ============================================
+// 步骤 4：配置集群传输
+// ============================================
+builder.Services.AddSingleton<IClusterTransport>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<HybridClusterTransport>>();
+    var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+    var redisService = provider.GetRequiredService<IRedisService>();
+    var messageQueueService = provider.GetRequiredService<IMessageQueueService>();
+    
+    var nodeInfo = new NodeInfo
+    {
+        NodeId = "node1",
+        Address = "localhost",
+        Port = 5001,
+        Endpoint = "/ws",  // 这仅用于节点信息，不能替代 ConfigureWebSocketRoute
+        MaxConnections = 10000,
+        Status = NodeStatus.Active
+    };
+    
+    return new HybridClusterTransport(
+        logger,
+        loggerFactory,
+        redisService,
+        messageQueueService,
+        nodeId: "node1",
+        nodeInfo: nodeInfo,
+        loadBalancingStrategy: LoadBalancingStrategy.LeastConnections
+    );
+});
+
+var app = builder.Build();
+
+// ============================================
+// 步骤 5：配置中间件
+// ============================================
+app.UseWebSockets();
+app.UseWebSocketServer();  // WebSocket 服务器必需
+
+// ============================================
+// 步骤 6：启动集群传输
+// ============================================
+var clusterTransport = app.Services.GetRequiredService<IClusterTransport>();
+await clusterTransport.StartAsync();
+
+app.Run();
+```
+
+#### 常见错误
+
+❌ **错误**: 只配置 `IClusterTransport` 而不配置 `ConfigureWebSocketRoute`
+
+```csharp
+// ❌ 这不会工作 - 客户端无法连接
+builder.Services.AddSingleton<IClusterTransport>(...);
+// 缺少 ConfigureWebSocketRoute
+```
+
+✅ **正确**: 同时配置 `ConfigureWebSocketRoute` 和 `IClusterTransport`
+
+```csharp
+// ✅ 正确 - 两者都是必需的
+builder.Services.ConfigureWebSocketRoute(...);  // 用于客户端连接
+builder.Services.AddSingleton<IClusterTransport>(...);  // 用于节点间通信
+```
+
+#### 为什么两者都需要
+
+1. **客户端连接**:
+   - 客户端连接到通过 `ConfigureWebSocketRoute` 配置的 `/ws` 端点
+   - 这由 WebSocket 服务器处理，而不是集群传输
+
+2. **节点间通信**:
+   - 当需要将消息发送到另一个节点上的客户端时，`IClusterTransport` 进行路由
+   - 这使用 Redis 进行发现，使用 RabbitMQ 进行路由
+
+#### 总结
+
+- ✅ **始终配置** `ConfigureWebSocketRoute` 用于客户端连接
+- ✅ **始终配置** `IClusterTransport` 用于节点间通信
+- ❌ **永远不要跳过** 使用集群传输时的 `ConfigureWebSocketRoute`
 
 ## 安装
 

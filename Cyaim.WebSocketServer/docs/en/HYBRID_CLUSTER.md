@@ -213,10 +213,35 @@ builder.Services.AddSingleton<IClusterTransport>(provider =>
 });
 ```
 
-### 3. Start Cluster Transport
+### 3. Configure WebSocket Server (Required)
+
+⚠️ **Important**: When using cluster transport, you **MUST** still configure the WebSocket server with `ConfigureWebSocketRoute`. The cluster transport (`IClusterTransport`) only handles inter-node communication, not client connections. Client WebSocket connections still need to go through the regular WebSocket server channels.
+
+```csharp
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+
+// Configure WebSocket server channels
+builder.Services.ConfigureWebSocketRoute(x =>
+{
+    var mvcHandler = new MvcChannelHandler();
+    
+    // Define business channels for client connections
+    x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
+    {
+        { "/ws", mvcHandler.ConnectionEntry }  // ← Required: Client connection endpoint
+    };
+    x.ApplicationServiceCollection = builder.Services;
+});
+```
+
+### 4. Start Cluster Transport
 
 ```csharp
 var app = builder.Build();
+
+// Configure WebSocket middleware
+app.UseWebSockets();
+app.UseWebSocketServer();
 
 // Get cluster transport and start it
 var clusterTransport = app.Services.GetRequiredService<IClusterTransport>();
@@ -224,6 +249,172 @@ await clusterTransport.StartAsync();
 
 app.Run();
 ```
+
+## ⚠️ Important Notes
+
+### Single Node Configuration Must Be Retained
+
+**Key Point**: `IClusterTransport` (including `HybridClusterTransport`) is **only** responsible for inter-node communication (service discovery and message routing). It does **NOT** handle client WebSocket connections.
+
+#### Architecture Overview
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│         WebSocket Server (Single Node Config)          │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  ConfigureWebSocketRoute                          │  │
+│  │  └── /ws (Business Channel) ← Clients connect    │  │
+│  └──────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+                        │
+                        │ Uses IClusterTransport
+                        ▼
+┌─────────────────────────────────────────────────────────┐
+│      HybridClusterTransport (Cluster Transport)         │
+│  ┌──────────────┐         ┌──────────────┐            │
+│  │ Redis        │         │ RabbitMQ    │            │
+│  │ (Discovery)  │         │ (Routing)   │            │
+│  └──────────────┘         └──────────────┘            │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### Responsibilities
+
+| Component | Responsibility | Required |
+|-----------|---------------|----------|
+| `ConfigureWebSocketRoute` | Handle client WebSocket connections | ✅ **Yes** |
+| `IClusterTransport` | Inter-node communication | ✅ **Yes** |
+
+#### Complete Configuration Example
+
+Here's a complete example showing both configurations:
+
+```csharp
+using Cyaim.WebSocketServer.Cluster.Hybrid;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis;
+using Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+using Microsoft.Extensions.DependencyInjection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// ============================================
+// Step 1: Configure Redis Service
+// ============================================
+builder.Services.AddSingleton<IRedisService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<FreeRedisService>>();
+    return new FreeRedisService(logger, "localhost:6379");
+});
+
+// ============================================
+// Step 2: Configure RabbitMQ Service
+// ============================================
+builder.Services.AddSingleton<IMessageQueueService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<RabbitMQMessageQueueService>>();
+    return new RabbitMQMessageQueueService(logger, "amqp://guest:guest@localhost:5672/");
+});
+
+// ============================================
+// Step 3: Configure WebSocket Server
+// ⚠️ THIS IS REQUIRED - DO NOT SKIP
+// ============================================
+builder.Services.ConfigureWebSocketRoute(x =>
+{
+    var mvcHandler = new MvcChannelHandler();
+    
+    // Define business channels for client connections
+    x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
+    {
+        { "/ws", mvcHandler.ConnectionEntry }  // Client connection endpoint
+    };
+    x.ApplicationServiceCollection = builder.Services;
+});
+
+// ============================================
+// Step 4: Configure Cluster Transport
+// ============================================
+builder.Services.AddSingleton<IClusterTransport>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<HybridClusterTransport>>();
+    var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+    var redisService = provider.GetRequiredService<IRedisService>();
+    var messageQueueService = provider.GetRequiredService<IMessageQueueService>();
+    
+    var nodeInfo = new NodeInfo
+    {
+        NodeId = "node1",
+        Address = "localhost",
+        Port = 5001,
+        Endpoint = "/ws",  // This is just for node info, NOT a replacement for ConfigureWebSocketRoute
+        MaxConnections = 10000,
+        Status = NodeStatus.Active
+    };
+    
+    return new HybridClusterTransport(
+        logger,
+        loggerFactory,
+        redisService,
+        messageQueueService,
+        nodeId: "node1",
+        nodeInfo: nodeInfo,
+        loadBalancingStrategy: LoadBalancingStrategy.LeastConnections
+    );
+});
+
+var app = builder.Build();
+
+// ============================================
+// Step 5: Configure Middleware
+// ============================================
+app.UseWebSockets();
+app.UseWebSocketServer();  // Required for WebSocket server
+
+// ============================================
+// Step 6: Start Cluster Transport
+// ============================================
+var clusterTransport = app.Services.GetRequiredService<IClusterTransport>();
+await clusterTransport.StartAsync();
+
+app.Run();
+```
+
+#### Common Mistakes
+
+❌ **Wrong**: Only configuring `IClusterTransport` without `ConfigureWebSocketRoute`
+
+```csharp
+// ❌ This will NOT work - clients cannot connect
+builder.Services.AddSingleton<IClusterTransport>(...);
+// Missing ConfigureWebSocketRoute
+```
+
+✅ **Correct**: Configuring both `ConfigureWebSocketRoute` and `IClusterTransport`
+
+```csharp
+// ✅ Correct - both are required
+builder.Services.ConfigureWebSocketRoute(...);  // For client connections
+builder.Services.AddSingleton<IClusterTransport>(...);  // For inter-node communication
+```
+
+#### Why Both Are Needed
+
+1. **Client Connections**:
+   - Clients connect to `/ws` endpoint configured via `ConfigureWebSocketRoute`
+   - This is handled by the WebSocket server, not the cluster transport
+
+2. **Inter-Node Communication**:
+   - When a message needs to be sent to a client on another node, `IClusterTransport` routes it
+   - This uses Redis for discovery and RabbitMQ for routing
+
+#### Summary
+
+- ✅ **Always configure** `ConfigureWebSocketRoute` for client connections
+- ✅ **Always configure** `IClusterTransport` for inter-node communication
+- ❌ **Never skip** `ConfigureWebSocketRoute` when using cluster transport
 
 ## Installation
 
