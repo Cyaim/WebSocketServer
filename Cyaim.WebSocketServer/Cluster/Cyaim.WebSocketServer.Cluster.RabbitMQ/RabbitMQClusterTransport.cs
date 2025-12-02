@@ -15,6 +15,8 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
     /// <summary>
     /// RabbitMQ-based cluster transport
     /// 基于 RabbitMQ 的集群传输
+    /// Supports RabbitMQ.Client 7.0+ (uses AsyncEventingBasicConsumer)
+    /// 支持 RabbitMQ.Client 7.0+（使用 AsyncEventingBasicConsumer）
     /// </summary>
     public class RabbitMQClusterTransport : IClusterTransport
     {
@@ -31,8 +33,10 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
         private IConnection _connection;
         /// <summary>
         /// RabbitMQ channel / RabbitMQ 通道
+        /// RabbitMQ.Client 7.0+ uses IChannel instead of IModel
+        /// RabbitMQ.Client 7.0+ 使用 IChannel 替代 IModel
         /// </summary>
-        private IModel _channel;
+        private IChannel _channel;
         /// <summary>
         /// Queue name for this node / 此节点的队列名称
         /// </summary>
@@ -86,29 +90,32 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
             try
             {
                 var factory = new ConnectionFactory { Uri = new Uri(_connectionString) };
-                _connection = factory.CreateConnection();
-                _channel = _connection.CreateModel();
+                _connection = await factory.CreateConnectionAsync();
+                _channel = await _connection.CreateChannelAsync();
                 
                 // Declare exchange / 声明交换机
-                _channel.ExchangeDeclare(ExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
+                await _channel.ExchangeDeclareAsync(ExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
                 
                 // Declare queue for this node / 为此节点声明队列
-                _queueName = _channel.QueueDeclare(
+                var queueDeclareResult = await _channel.QueueDeclareAsync(
                     queue: $"cluster:node:{_nodeId}",
                     durable: false,
                     exclusive: false,
                     autoDelete: true,
-                    arguments: null).QueueName;
+                    arguments: null);
+                _queueName = queueDeclareResult.QueueName;
                 
                 // Bind queue to node-specific routing key / 将队列绑定到节点特定的路由键
-                _channel.QueueBind(_queueName, ExchangeName, _nodeId);
+                await _channel.QueueBindAsync(_queueName, ExchangeName, _nodeId);
                 
                 // Also bind to broadcast / 同时绑定到广播
-                _channel.QueueBind(_queueName, ExchangeName, BroadcastRoutingKey);
+                await _channel.QueueBindAsync(_queueName, ExchangeName, BroadcastRoutingKey);
                 
                 // Start consuming / 开始消费
-                var consumer = new EventingBasicConsumer(_channel);
-                consumer.Received += (model, ea) =>
+                // Use AsyncEventingBasicConsumer for RabbitMQ.Client 7.0+
+                // 使用 AsyncEventingBasicConsumer 支持 RabbitMQ.Client 7.0+
+                var consumer = new AsyncEventingBasicConsumer(_channel);
+                consumer.ReceivedAsync += async (model, ea) =>
                 {
                     try
                     {
@@ -119,7 +126,7 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
                         // Skip messages from self / 跳过来自自己的消息
                         if (clusterMessage.FromNodeId == _nodeId)
                         {
-                            _channel.BasicAck(ea.DeliveryTag, false);
+                            await _channel.BasicAckAsync(ea.DeliveryTag, false);
                             return;
                         }
                         
@@ -129,16 +136,16 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
                             Message = clusterMessage
                         });
                         
-                        _channel.BasicAck(ea.DeliveryTag, false);
+                        await _channel.BasicAckAsync(ea.DeliveryTag, false);
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Failed to process RabbitMQ message");
-                        _channel.BasicNack(ea.DeliveryTag, false, true);
+                        await _channel.BasicNackAsync(ea.DeliveryTag, false, true);
                     }
                 };
                 
-                _channel.BasicConsume(
+                await _channel.BasicConsumeAsync(
                     queue: _queueName,
                     autoAck: false,
                     consumer: consumer);
@@ -164,10 +171,18 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
             
             try
             {
-                _channel?.Close();
-                _channel?.Dispose();
-                _connection?.Close();
-                _connection?.Dispose();
+                if (_channel != null)
+                {
+                    await _channel.CloseAsync();
+                    _channel.Dispose();
+                    _channel = null;
+                }
+                if (_connection != null)
+                {
+                    await _connection.CloseAsync();
+                    _connection.Dispose();
+                    _connection = null;
+                }
                 
                 _nodes.Clear();
             }
@@ -196,22 +211,23 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
             
             try
             {
-                if (_channel == null || !_channel.IsOpen)
+                if (_channel == null)
                 {
                     _logger.LogWarning("RabbitMQ channel is not available");
                     return;
                 }
                 
-                var properties = _channel.CreateBasicProperties();
+                var properties = new BasicProperties();
                 properties.Persistent = false;
                 properties.MessageId = message.MessageId;
                 properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 
-                _channel.BasicPublish(
+                await _channel.BasicPublishAsync(
                     exchange: ExchangeName,
                     routingKey: nodeId,
+                    mandatory: false,
                     basicProperties: properties,
-                    body: messageBytes);
+                    body: new ReadOnlyMemory<byte>(messageBytes));
                 
                 _logger.LogDebug($"Sent message to node {nodeId} via RabbitMQ");
             }
@@ -236,22 +252,23 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
             
             try
             {
-                if (_channel == null || !_channel.IsOpen)
+                if (_channel == null)
                 {
                     _logger.LogWarning("RabbitMQ channel is not available");
                     return;
                 }
                 
-                var properties = _channel.CreateBasicProperties();
+                var properties = new BasicProperties();
                 properties.Persistent = false;
                 properties.MessageId = message.MessageId;
                 properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 
-                _channel.BasicPublish(
+                await _channel.BasicPublishAsync(
                     exchange: ExchangeName,
                     routingKey: BroadcastRoutingKey,
+                    mandatory: false,
                     basicProperties: properties,
-                    body: messageBytes);
+                    body: new ReadOnlyMemory<byte>(messageBytes));
                 
                 _logger.LogDebug("Broadcasted message via RabbitMQ");
             }

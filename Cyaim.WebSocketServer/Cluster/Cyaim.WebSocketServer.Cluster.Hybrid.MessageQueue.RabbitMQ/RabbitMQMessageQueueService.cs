@@ -19,7 +19,11 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         private readonly ILogger<RabbitMQMessageQueueService> _logger;
         private readonly string _connectionString;
         private IConnection _connection;
-        private IModel _channel;
+        // RabbitMQ.Client 7.0+ uses IChannel instead of IModel
+        // RabbitMQ.Client 7.0+ 使用 IChannel 替代 IModel
+        private IChannel _channel;
+        // RabbitMQ.Client 7.0+ uses AsyncEventingBasicConsumer
+        // RabbitMQ.Client 7.0+ 使用 AsyncEventingBasicConsumer
         private readonly Dictionary<string, AsyncEventingBasicConsumer> _consumers;
         private bool _disposed = false;
 
@@ -48,8 +52,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             try
             {
                 var factory = new ConnectionFactory { Uri = new Uri(_connectionString) };
-                _connection = factory.CreateConnection();
-                _channel = _connection.CreateModel();
+                _connection = await factory.CreateConnectionAsync();
+                _channel = await _connection.CreateChannelAsync();
                 _logger.LogInformation("Connected to RabbitMQ");
             }
             catch (Exception ex)
@@ -69,14 +73,14 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
 
             if (_channel != null)
             {
-                _channel.Close();
+                await _channel.CloseAsync();
                 _channel.Dispose();
                 _channel = null;
             }
 
             if (_connection != null)
             {
-                _connection.Close();
+                await _connection.CloseAsync();
                 _connection.Dispose();
                 _connection = null;
                 _logger.LogInformation("Disconnected from RabbitMQ");
@@ -95,8 +99,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 throw new InvalidOperationException("RabbitMQ is not connected");
             }
 
-            _channel.ExchangeDeclare(exchangeName, exchangeType, durable: durable, autoDelete: false);
-            await Task.CompletedTask;
+            await _channel.ExchangeDeclareAsync(exchangeName, exchangeType, durable: durable, autoDelete: false);
         }
 
         /// <summary>
@@ -109,14 +112,14 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 throw new InvalidOperationException("RabbitMQ is not connected");
             }
 
-            var result = _channel.QueueDeclare(
+            var result = await _channel.QueueDeclareAsync(
                 queue: queueName,
                 durable: durable,
                 exclusive: exclusive,
                 autoDelete: autoDelete,
                 arguments: null);
 
-            return await Task.FromResult(result.QueueName);
+            return result.QueueName;
         }
 
         /// <summary>
@@ -129,8 +132,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 throw new InvalidOperationException("RabbitMQ is not connected");
             }
 
-            _channel.QueueBind(queueName, exchangeName, routingKey);
-            await Task.CompletedTask;
+            await _channel.QueueBindAsync(queueName, exchangeName, routingKey);
         }
 
         /// <summary>
@@ -143,7 +145,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 throw new InvalidOperationException("RabbitMQ is not connected");
             }
 
-            var basicProperties = _channel.CreateBasicProperties();
+            var basicProperties = new BasicProperties();
             
             if (properties != null)
             {
@@ -167,8 +169,12 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 }
             }
 
-            _channel.BasicPublish(exchangeName, routingKey, basicProperties, message);
-            await Task.CompletedTask;
+            await _channel.BasicPublishAsync(
+                exchange: exchangeName,
+                routingKey: routingKey,
+                mandatory: false,
+                basicProperties: basicProperties,
+                body: new ReadOnlyMemory<byte>(message));
         }
 
         /// <summary>
@@ -192,7 +198,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             var consumer = new AsyncEventingBasicConsumer(_channel);
             _consumers[queueName] = consumer;
 
-            consumer.Received += async (model, ea) =>
+            consumer.ReceivedAsync += async (model, ea) =>
             {
                 try
                 {
@@ -224,11 +230,11 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                     {
                         if (success)
                         {
-                            _channel.BasicAck(ea.DeliveryTag, false);
+                            await _channel.BasicAckAsync(ea.DeliveryTag, false);
                         }
                         else
                         {
-                            _channel.BasicNack(ea.DeliveryTag, false, true); // Requeue / 重新入队
+                            await _channel.BasicNackAsync(ea.DeliveryTag, false, true); // Requeue / 重新入队
                         }
                     }
                 }
@@ -237,13 +243,12 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                     _logger.LogError(ex, $"Error processing message from queue {queueName}");
                     if (!autoAck)
                     {
-                        _channel.BasicNack(ea.DeliveryTag, false, true);
+                        await _channel.BasicNackAsync(ea.DeliveryTag, false, true);
                     }
                 }
             };
 
-            _channel.BasicConsume(queueName, autoAck, consumer);
-            await Task.CompletedTask;
+            await _channel.BasicConsumeAsync(queueName, autoAck, consumer);
         }
 
         /// <summary>
@@ -256,8 +261,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 throw new InvalidOperationException("RabbitMQ is not connected");
             }
 
-            _channel.BasicAck(deliveryTag, false);
-            await Task.CompletedTask;
+            await _channel.BasicAckAsync(deliveryTag, false);
         }
 
         /// <summary>
@@ -270,8 +274,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 throw new InvalidOperationException("RabbitMQ is not connected");
             }
 
-            _channel.BasicNack(deliveryTag, false, requeue);
-            await Task.CompletedTask;
+            await _channel.BasicNackAsync(deliveryTag, false, requeue);
         }
 
         /// <summary>

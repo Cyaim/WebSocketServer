@@ -37,8 +37,9 @@
 
 	<!-- .NET 6.0+ 框架已内置这些包，无需显式引用，框架会自动使用内置版本 -->
 
+	<!-- RabbitMQ.Client 7.0+ 支持 .NET Standard 2.0+，统一使用 7.2.0 -->
 	<ItemGroup>
-		<PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
+		<PackageReference Include="RabbitMQ.Client" Version="7.2.0" />
 		<ProjectReference Include="..\..\Cyaim.WebSocketServer\Cyaim.WebSocketServer.csproj" />
 	</ItemGroup>
 
