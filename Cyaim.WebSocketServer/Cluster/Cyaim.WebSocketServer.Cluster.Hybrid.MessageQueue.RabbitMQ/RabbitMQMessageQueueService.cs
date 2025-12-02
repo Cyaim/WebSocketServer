@@ -38,7 +38,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
             _consumers = new Dictionary<string, AsyncEventingBasicConsumer>();
         }
-
+         
         /// <summary>
         /// Connect to message queue / 连接到消息队列
         /// </summary>
