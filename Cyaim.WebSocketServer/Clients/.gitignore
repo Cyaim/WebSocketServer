@@ -1,0 +1,47 @@
+# Clients 通用忽略文件
+
+# 所有客户端库的编译和发布文件
+# 各子目录的 .gitignore 会处理具体的忽略规则
+
+# 通用构建目录
+**/bin/
+**/obj/
+**/target/
+**/build/
+**/dist/
+**/node_modules/
+**/.dart_tool/
+**/__pycache__/
+**/*.egg-info/
+
+# 通用编译产物
+**/*.dll
+**/*.exe
+**/*.pdb
+**/*.class
+**/*.jar
+**/*.war
+**/*.nupkg
+**/*.whl
+**/*.tar.gz
+**/*.rlib
+**/*.rmeta
+**/*.d
+
+# 通用 IDE 文件
+**/.vs/
+**/.vscode/
+**/.idea/
+**/*.iml
+**/*.swp
+**/*.swo
+
+# 通用 OS 文件
+**/.DS_Store
+**/Thumbs.db
+
+# 通用日志和缓存
+**/*.log
+**/.cache/
+**/.tmp/
+

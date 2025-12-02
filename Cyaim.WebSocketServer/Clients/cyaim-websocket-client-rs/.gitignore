@@ -1,0 +1,33 @@
+# Rust
+
+# Compiled files
+target/
+**/*.rs.bk
+*.pdb
+
+# Cargo
+# Cargo.lock - 对于库项目，应该提交此文件以锁定依赖版本
+# 如果需要忽略，取消下面的注释
+# Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.tmp
+
+# Rust analyzer
+rust-project.json
+
+# Debug files
+*.dSYM/
+

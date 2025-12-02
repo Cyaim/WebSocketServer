@@ -79,9 +79,15 @@
    - 可配置验证选项
    - 自定义错误处理
 
+5. **多种序列化协议支持**
+   - **JSON**：文本消息，易于调试（默认）
+   - **MessagePack**：二进制消息，更小的数据体积和更快的序列化速度
+
 ## 使用示例
 
 ### C#
+
+#### 使用 JSON（默认）
 
 ```csharp
 var factory = new WebSocketClientFactory("http://localhost:5000", "/ws");
@@ -89,7 +95,21 @@ var client = await factory.CreateClientAsync<IWeatherService>();
 var forecasts = await client.GetForecastsAsync();
 ```
 
+#### 使用 MessagePack
+
+```csharp
+var options = new WebSocketClientOptions
+{
+    Protocol = SerializationProtocol.MessagePack
+};
+var factory = new WebSocketClientFactory("http://localhost:5000", "/ws", options);
+var client = await factory.CreateClientAsync<IWeatherService>();
+var forecasts = await client.GetForecastsAsync();
+```
+
 ### TypeScript
+
+#### 使用 JSON（默认）
 
 ```typescript
 const factory = new WebSocketClientFactory('http://localhost:5000', '/ws');
@@ -99,7 +119,21 @@ const client = await factory.createClient<IWeatherService>({
 const forecasts = await client.getForecasts();
 ```
 
+#### 使用 MessagePack
+
+```typescript
+const options = new WebSocketClientOptions();
+options.protocol = SerializationProtocol.MessagePack;
+const factory = new WebSocketClientFactory('http://localhost:5000', '/ws', options);
+const client = await factory.createClient<IWeatherService>({
+  getForecasts: async () => {}
+});
+const forecasts = await client.getForecasts();
+```
+
 ### Rust
+
+#### 使用 JSON（默认）
 
 ```rust
 let mut factory = WebSocketClientFactory::new(
@@ -113,7 +147,27 @@ let forecasts: Vec<WeatherForecast> = client
     .await?;
 ```
 
+#### 使用 MessagePack
+
+```rust
+use cyaim_websocket_client::options::{WebSocketClientOptions, SerializationProtocol};
+
+let mut options = WebSocketClientOptions::default();
+options.protocol = SerializationProtocol::MessagePack;
+let mut factory = WebSocketClientFactory::new(
+    "http://localhost:5000".to_string(),
+    "/ws".to_string(),
+    Some(options),
+);
+let client = factory.create_client();
+let forecasts: Vec<WeatherForecast> = client
+    .send_request("weatherforecast.get", None::<()>)
+    .await?;
+```
+
 ### Java
+
+#### 使用 JSON（默认）
 
 ```java
 WebSocketClientFactory factory = new WebSocketClientFactory(
@@ -125,7 +179,23 @@ List<WeatherForecast> forecasts = client.sendRequest(
 ).get();
 ```
 
+#### 使用 MessagePack
+
+```java
+WebSocketClientOptions options = new WebSocketClientOptions();
+options.protocol = SerializationProtocol.MessagePack;
+WebSocketClientFactory factory = new WebSocketClientFactory(
+    "http://localhost:5000", "/ws", options);
+WebSocketClient client = factory.createClient();
+client.connect().get();
+List<WeatherForecast> forecasts = client.sendRequest(
+    "weatherforecast.get", null, new TypeToken<List<WeatherForecast>>(){}.getType()
+).get();
+```
+
 ### Dart
+
+#### 使用 JSON（默认）
 
 ```dart
 final factory = WebSocketClientFactory('http://localhost:5000', '/ws');
@@ -136,10 +206,37 @@ final forecasts = await client.sendRequest<List<Map<String, dynamic>>>(
 );
 ```
 
+#### 使用 MessagePack
+
+```dart
+final options = WebSocketClientOptions();
+options.protocol = SerializationProtocol.messagePack;
+final factory = WebSocketClientFactory('http://localhost:5000', '/ws', options);
+final client = factory.createClient();
+await client.connect();
+final forecasts = await client.sendRequest<List<Map<String, dynamic>>>(
+  'weatherforecast.get',
+);
+```
+
 ### Python
+
+#### 使用 JSON（默认）
 
 ```python
 factory = WebSocketClientFactory('http://localhost:5000', '/ws')
+client = factory.create_client()
+await client.connect()
+forecasts = await client.send_request('weatherforecast.get')
+```
+
+#### 使用 MessagePack
+
+```python
+from cyaim_websocket_client import WebSocketClientFactory, WebSocketClientOptions, SerializationProtocol
+
+options = WebSocketClientOptions(protocol=SerializationProtocol.MESSAGEPACK)
+factory = WebSocketClientFactory('http://localhost:5000', '/ws', options)
 client = factory.create_client()
 await client.connect()
 forecasts = await client.send_request('weatherforecast.get')

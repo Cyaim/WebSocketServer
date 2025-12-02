@@ -1,9 +1,12 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using MessagePack;
 
 namespace Cyaim.WebSocketServer.Client
 {
@@ -15,6 +18,7 @@ namespace Cyaim.WebSocketServer.Client
     {
         private readonly string _serverUri;
         private readonly string _channel;
+        private readonly WebSocketClientOptions _options;
         private ClientWebSocket? _webSocket;
         private bool _disposed = false;
 
@@ -23,10 +27,12 @@ namespace Cyaim.WebSocketServer.Client
         /// </summary>
         /// <param name="serverUri">Server URI (e.g., "ws://localhost:5000/ws") / 服务器 URI（例如："ws://localhost:5000/ws"）</param>
         /// <param name="channel">WebSocket channel (default: "/ws") / WebSocket 通道（默认："/ws"）</param>
-        public WebSocketClient(string serverUri, string channel = "/ws")
+        /// <param name="options">Client options / 客户端选项</param>
+        public WebSocketClient(string serverUri, string channel = "/ws", WebSocketClientOptions? options = null)
         {
             _serverUri = serverUri ?? throw new ArgumentNullException(nameof(serverUri));
             _channel = channel ?? throw new ArgumentNullException(nameof(channel));
+            _options = options ?? new WebSocketClientOptions();
         }
 
         /// <summary>
@@ -66,20 +72,40 @@ namespace Cyaim.WebSocketServer.Client
             }
 
             var requestId = Guid.NewGuid().ToString();
-            var request = new MvcRequestScheme
-            {
-                Id = requestId,
-                Target = target,
-                Body = requestBody
-            };
 
-            var requestJson = JsonSerializer.Serialize(request);
-            var requestBytes = Encoding.UTF8.GetBytes(requestJson);
+            byte[] requestBytes;
+            WebSocketMessageType messageType;
+
+            if (_options.Protocol == SerializationProtocol.MessagePack)
+            {
+                // 使用 MessagePack 序列化
+                var request = new MessagePackRequestScheme
+                {
+                    Id = requestId,
+                    Target = target,
+                    Body = requestBody
+                };
+                requestBytes = MessagePackSerializer.Serialize(request);
+                messageType = WebSocketMessageType.Binary;
+            }
+            else
+            {
+                // 使用 JSON 序列化
+                var request = new MvcRequestScheme
+                {
+                    Id = requestId,
+                    Target = target,
+                    Body = requestBody
+                };
+                var requestJson = JsonSerializer.Serialize(request);
+                requestBytes = Encoding.UTF8.GetBytes(requestJson);
+                messageType = WebSocketMessageType.Text;
+            }
 
             // Send request / 发送请求
             await _webSocket.SendAsync(
                 new ArraySegment<byte>(requestBytes),
-                WebSocketMessageType.Text,
+                messageType,
                 true,
                 cancellationToken);
 
@@ -97,12 +123,31 @@ namespace Cyaim.WebSocketServer.Client
             }
 
             // Deserialize response body / 反序列化响应体
-            if (response.Body is JsonElement jsonElement)
+            if (_options.Protocol == SerializationProtocol.MessagePack)
             {
-                return JsonSerializer.Deserialize<TResponse>(jsonElement.GetRawText())!;
+                // MessagePack 响应体已经是反序列化的对象，直接转换
+                if (response.Body == null)
+                {
+                    return default(TResponse)!;
+                }
+                // 如果 Body 已经是目标类型，直接返回
+                if (response.Body is TResponse directResponse)
+                {
+                    return directResponse;
+                }
+                // 否则通过 JSON 序列化/反序列化进行转换
+                var jsonString = JsonSerializer.Serialize(response.Body);
+                return JsonSerializer.Deserialize<TResponse>(jsonString)!;
             }
-
-            return JsonSerializer.Deserialize<TResponse>(JsonSerializer.Serialize(response.Body))!;
+            else
+            {
+                // JSON 反序列化
+                if (response.Body is JsonElement jsonElement)
+                {
+                    return JsonSerializer.Deserialize<TResponse>(jsonElement.GetRawText())!;
+                }
+                return JsonSerializer.Deserialize<TResponse>(JsonSerializer.Serialize(response.Body))!;
+            }
         }
 
         /// <summary>
@@ -118,31 +163,93 @@ namespace Cyaim.WebSocketServer.Client
                 throw new Exception("WebSocket connection closed");
             }
 
-            var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-            var response = JsonSerializer.Deserialize<MvcResponseScheme>(
-                message,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-            );
+            MvcResponseScheme response;
 
-            if (response == null)
+            if (_options.Protocol == SerializationProtocol.MessagePack)
             {
-                throw new Exception("Failed to deserialize response");
+                // 使用 MessagePack 反序列化
+                var messagePackResponse = await ReceiveMessagePackResponseAsync(requestId, result, buffer, cancellationToken);
+                
+                // 转换为 MvcResponseScheme 格式
+                response = new MvcResponseScheme
+                {
+                    Id = messagePackResponse.Id,
+                    Target = messagePackResponse.Target,
+                    Status = messagePackResponse.Status,
+                    Msg = messagePackResponse.Msg,
+                    Body = messagePackResponse.Body
+                };
             }
+            else
+            {
+                // 使用 JSON 反序列化
+                var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                response = JsonSerializer.Deserialize<MvcResponseScheme>(
+                    message,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                ) ?? throw new Exception("Failed to deserialize response");
+
+                // Wait for matching response ID / 等待匹配的响应 ID
+                while (response.Id != requestId)
+                {
+                    result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+                    message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    response = JsonSerializer.Deserialize<MvcResponseScheme>(
+                        message,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                    ) ?? throw new Exception("Failed to deserialize response");
+                }
+            }
+
+            return response;
+        }
+
+        /// <summary>
+        /// Receive MessagePack response / 接收 MessagePack 响应
+        /// </summary>
+        private async Task<MessagePackResponseScheme> ReceiveMessagePackResponseAsync(
+            string requestId, 
+            WebSocketReceiveResult initialResult, 
+            byte[] buffer, 
+            CancellationToken cancellationToken)
+        {
+            using var ms = new MemoryStream();
+            
+            // 接收完整消息（可能分片）
+            do
+            {
+                ms.Write(buffer, 0, initialResult.Count);
+                if (initialResult.EndOfMessage)
+                {
+                    break;
+                }
+                initialResult = await _webSocket!.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+            } while (initialResult.MessageType != WebSocketMessageType.Close);
+
+            var messageBytes = ms.ToArray();
+            var response = MessagePackSerializer.Deserialize<MessagePackResponseScheme>(messageBytes);
 
             // Wait for matching response ID / 等待匹配的响应 ID
             while (response.Id != requestId)
             {
-                result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
-                message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                response = JsonSerializer.Deserialize<MvcResponseScheme>(
-                    message,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                );
-
-                if (response == null)
+                var result = await _webSocket!.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+                if (result.MessageType == WebSocketMessageType.Close)
                 {
-                    throw new Exception("Failed to deserialize response");
+                    throw new Exception("WebSocket connection closed");
                 }
+
+                using var nextMs = new MemoryStream();
+                do
+                {
+                    nextMs.Write(buffer, 0, result.Count);
+                    if (result.EndOfMessage)
+                    {
+                        break;
+                    }
+                    result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+                } while (result.MessageType != WebSocketMessageType.Close);
+
+                response = MessagePackSerializer.Deserialize<MessagePackResponseScheme>(nextMs.ToArray());
             }
 
             return response;

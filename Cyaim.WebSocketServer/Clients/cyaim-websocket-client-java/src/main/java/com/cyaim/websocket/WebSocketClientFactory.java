@@ -72,7 +72,7 @@ public class WebSocketClientFactory {
         String wsUri = serverBaseUrl
             .replace("http://", "ws://")
             .replace("https://", "wss://");
-        return new WebSocketClient(wsUri, channel);
+        return new WebSocketClient(wsUri, channel, options);
     }
 
     private static class ApiResponse<T> {

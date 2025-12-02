@@ -1,6 +1,8 @@
 use crate::types::{MvcRequestScheme, MvcResponseScheme};
+use crate::options::{WebSocketClientOptions, SerializationProtocol};
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
@@ -10,16 +12,23 @@ use futures_util::{SinkExt, StreamExt};
 pub struct WebSocketClient {
     server_uri: String,
     channel: String,
-    pending_responses: tokio::sync::Mutex<HashMap<String, oneshot::Sender<MvcResponseScheme>>>,
+    options: WebSocketClientOptions,
+    pending_responses: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<MvcResponseScheme>>>>,
 }
 
 impl WebSocketClient {
     /// Constructor / 构造函数
     pub fn new(server_uri: String, channel: String) -> Self {
+        Self::new_with_options(server_uri, channel, WebSocketClientOptions::default())
+    }
+
+    /// Constructor with options / 带选项的构造函数
+    pub fn new_with_options(server_uri: String, channel: String, options: WebSocketClientOptions) -> Self {
         Self {
             server_uri,
             channel,
-            pending_responses: tokio::sync::Mutex::new(HashMap::new()),
+            options,
+            pending_responses: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -44,8 +53,14 @@ impl WebSocketClient {
             body: request_body.map(|b| serde_json::to_value(b).unwrap()),
         };
 
-        let request_json = serde_json::to_string(&request)?;
-        write.send(Message::Text(request_json)).await?;
+        // 根据协议选择序列化方式
+        if self.options.protocol == SerializationProtocol::MessagePack {
+            let request_bytes = rmp_serde::to_vec(&request)?;
+            write.send(Message::Binary(request_bytes)).await?;
+        } else {
+            let request_json = serde_json::to_string(&request)?;
+            write.send(Message::Text(request_json)).await?;
+        }
 
         // Create channel for response / 创建响应通道
         let (tx, rx) = oneshot::channel();
@@ -56,11 +71,20 @@ impl WebSocketClient {
 
         // Spawn task to handle messages / 生成任务处理消息
         let pending_clone = self.pending_responses.clone();
+        let protocol = self.options.protocol;
         tokio::spawn(async move {
             while let Some(msg) = read.next().await {
                 match msg {
-                    Ok(Message::Text(text)) => {
+                    Ok(Message::Text(text)) if protocol == SerializationProtocol::Json => {
                         if let Ok(response) = serde_json::from_str::<MvcResponseScheme>(&text) {
+                            let mut pending = pending_clone.lock().await;
+                            if let Some(tx) = pending.remove(&response.id) {
+                                let _ = tx.send(response);
+                            }
+                        }
+                    }
+                    Ok(Message::Binary(bytes)) if protocol == SerializationProtocol::MessagePack => {
+                        if let Ok(response) = rmp_serde::from_slice::<MvcResponseScheme>(&bytes) {
                             let mut pending = pending_clone.lock().await;
                             if let Some(tx) = pending.remove(&response.id) {
                                 let _ = tx.send(response);

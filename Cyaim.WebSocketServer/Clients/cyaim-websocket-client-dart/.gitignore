@@ -1,0 +1,72 @@
+# Dart / Flutter
+
+# Pub
+.packages
+.pub-cache/
+.pub/
+build/
+# pubspec.lock - 对于库项目，应该提交此文件以锁定依赖版本
+# 如果需要忽略，取消下面的注释
+# pubspec.lock
+
+# Directory created by dartdoc
+doc/api/
+
+# Dart/Flutter specific
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+*.iml
+*.lock
+
+# Coverage
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated files
+*.g.dart
+*.freezed.dart
+
+# Test files
+test/.test_coverage.dart
+
+# Build outputs
+build/
+.dart_tool/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+

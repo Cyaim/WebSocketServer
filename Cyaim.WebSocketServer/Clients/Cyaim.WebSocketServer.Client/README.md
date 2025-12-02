@@ -43,14 +43,32 @@ var client = await factory.CreateClientAsync<IWeatherService>();
 ```csharp
 var options = new WebSocketClientOptions
 {
-    ValidateAllMethods = false,        // 不验证所有方法（默认）
-    LazyLoadEndpoints = true,           // 延迟加载 endpoint
-    ThrowOnEndpointNotFound = true       // 找不到 endpoint 时抛出异常
+    Protocol = SerializationProtocol.Json,  // 序列化协议：Json（默认）或 MessagePack
+    ValidateAllMethods = false,             // 不验证所有方法（默认）
+    LazyLoadEndpoints = true,                // 延迟加载 endpoint
+    ThrowOnEndpointNotFound = true           // 找不到 endpoint 时抛出异常
 };
 
 var factory = new WebSocketClientFactory("http://localhost:5000", "/ws", options);
 var client = await factory.CreateClientAsync<IWeatherService>();
 ```
+
+#### 使用 MessagePack 协议
+
+MessagePack 是二进制序列化格式，相比 JSON 具有更小的数据体积和更快的序列化速度，适合对性能要求较高的场景。
+
+```csharp
+var options = new WebSocketClientOptions
+{
+    Protocol = SerializationProtocol.MessagePack  // 使用 MessagePack 协议
+};
+
+var factory = new WebSocketClientFactory("http://localhost:5000", "/ws", options);
+var client = await factory.CreateClientAsync<IWeatherService>();
+var forecasts = await client.GetForecastsAsync();
+```
+
+**注意**：使用 MessagePack 时，服务端也需要配置 MessagePack 处理器。请参考服务端 MessagePack 扩展文档。
 
 ### 3. 调用服务端方法
 
@@ -121,6 +139,9 @@ var endpoints = await factory.GetEndpointsAsync();
 
 #### 属性
 
+- `Protocol` (SerializationProtocol, 默认: Json): 序列化协议
+  - `SerializationProtocol.Json`: JSON 协议（文本消息，默认）
+  - `SerializationProtocol.MessagePack`: MessagePack 协议（二进制消息）
 - `ValidateAllMethods` (bool, 默认: false): 是否验证所有方法都有对应的端点
 - `LazyLoadEndpoints` (bool, 默认: false): 是否延迟加载端点（在调用方法时才获取）
 - `ThrowOnEndpointNotFound` (bool, 默认: true): 如果找不到端点是否抛出异常

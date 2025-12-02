@@ -43,5 +43,5 @@ class WebSocketClientFactory:
     def create_client(self) -> WebSocketClient:
         """Create a client"""
         ws_uri = self.server_base_url.replace('http://', 'ws://').replace('https://', 'wss://')
-        return WebSocketClient(ws_uri, self.channel)
+        return WebSocketClient(ws_uri, self.channel, self.options)
 

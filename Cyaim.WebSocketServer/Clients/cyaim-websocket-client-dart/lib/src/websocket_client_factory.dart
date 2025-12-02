@@ -32,8 +32,10 @@ class WebSocketClientFactory {
       final apiResponse = jsonDecode(response.body) as Map<String, dynamic>;
       
       if (apiResponse['success'] == true && apiResponse['data'] != null) {
-        final data = apiResponse['data'] as List;
-        _cachedEndpoints = data.map((e) => WebSocketEndpointInfo.fromJson(e)).toList();
+        final data = apiResponse['data'] as List<dynamic>;
+        _cachedEndpoints = data
+            .map((e) => WebSocketEndpointInfo.fromJson(e as Map<String, dynamic>))
+            .toList();
         return _cachedEndpoints!;
       }
 
@@ -48,7 +50,7 @@ class WebSocketClientFactory {
     final wsUri = serverBaseUrl
         .replaceAll('http://', 'ws://')
         .replaceAll('https://', 'wss://');
-    return WebSocketClient(wsUri, channel);
+    return WebSocketClient(wsUri, channel, options);
   }
 }
 

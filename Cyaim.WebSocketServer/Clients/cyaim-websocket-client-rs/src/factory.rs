@@ -2,7 +2,6 @@ use crate::client::WebSocketClient;
 use crate::options::WebSocketClientOptions;
 use crate::types::{ApiResponse, WebSocketEndpointInfo};
 use async_trait::async_trait;
-use std::collections::HashMap;
 
 /// Factory for creating WebSocket client proxies based on server endpoints
 /// 基于服务器端点创建 WebSocket 客户端代理的工厂
@@ -55,7 +54,7 @@ impl WebSocketClientFactory {
         let ws_uri = self.server_base_url
             .replace("http://", "ws://")
             .replace("https://", "wss://");
-        WebSocketClient::new(ws_uri, self.channel.clone())
+        WebSocketClient::new_with_options(ws_uri, self.channel.clone(), self.options.clone())
     }
 
     /// Find endpoint by method name or target / 通过方法名或目标查找端点

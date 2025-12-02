@@ -86,7 +86,7 @@ namespace Cyaim.WebSocketServer.Client
 
             // Create WebSocket client / 创建 WebSocket 客户端
             var wsUri = _serverBaseUrl.Replace("http://", "ws://").Replace("https://", "wss://");
-            var client = new WebSocketClient(wsUri, _channel);
+            var client = new WebSocketClient(wsUri, _channel, _options);
 
             // Get endpoints if not lazy loading / 如果不是延迟加载，则获取端点
             List<WebSocketEndpointInfo>? endpoints = null;

@@ -1,6 +1,25 @@
+/// Serialization protocol for WebSocket messages
+/// WebSocket 消息的序列化协议
+enum SerializationProtocol {
+  /// JSON protocol (text messages)
+  /// JSON 协议（文本消息）
+  json(0),
+
+  /// MessagePack protocol (binary messages)
+  /// MessagePack 协议（二进制消息）
+  messagePack(1);
+
+  final int value;
+  const SerializationProtocol(this.value);
+}
+
 /// Options for creating WebSocket client
 /// 创建 WebSocket 客户端的选项
 class WebSocketClientOptions {
+  /// Serialization protocol (default: Json)
+  /// 序列化协议（默认：Json）
+  SerializationProtocol protocol = SerializationProtocol.json;
+
   /// Whether to validate all methods have corresponding endpoints (default: false)
   /// 是否验证所有方法都有对应的端点（默认：false）
   bool validateAllMethods = false;

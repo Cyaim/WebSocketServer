@@ -6,6 +6,12 @@ package com.cyaim.websocket;
  */
 public class WebSocketClientOptions {
     /**
+     * Serialization protocol (default: Json)
+     * 序列化协议（默认：Json）
+     */
+    public SerializationProtocol protocol = SerializationProtocol.Json;
+
+    /**
      * Whether to validate all methods have corresponding endpoints (default: false)
      * 是否验证所有方法都有对应的端点（默认：false）
      */

@@ -21,7 +21,10 @@ class WebSocketEndpointInfo {
       controller: json['controller'] as String,
       action: json['action'] as String,
       methodPath: json['methodPath'] as String,
-      methods: (json['methods'] as List?)?.map((e) => e.toString()).toList() ?? [],
+      methods: (json['methods'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          <String>[],
       fullName: json['fullName'] as String,
       target: json['target'] as String,
     );

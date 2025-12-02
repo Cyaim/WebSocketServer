@@ -4,15 +4,18 @@ import uuid
 from typing import Dict, Any, Optional, TypeVar, Type
 import websockets
 from websockets.client import WebSocketClientProtocol
+import msgpack
+from .websocket_client_options import WebSocketClientOptions, SerializationProtocol
 
 T = TypeVar('T')
 
 class WebSocketClient:
     """WebSocket client for connecting to Cyaim.WebSocketServer"""
     
-    def __init__(self, server_uri: str, channel: str = "/ws"):
+    def __init__(self, server_uri: str, channel: str = "/ws", options: Optional[WebSocketClientOptions] = None):
         self.server_uri = server_uri.rstrip('/')
         self.channel = channel
+        self.options = options or WebSocketClientOptions()
         self.websocket: Optional[WebSocketClientProtocol] = None
         self.pending_responses: Dict[str, asyncio.Future] = {}
 
@@ -35,10 +38,22 @@ class WebSocketClient:
         except websockets.exceptions.ConnectionClosed:
             pass
 
-    async def _handle_message(self, message: str):
+    async def _handle_message(self, message):
         """Handle incoming message"""
         try:
-            response = json.loads(message)
+            if isinstance(message, str):
+                # Text message (JSON)
+                if self.options.protocol != SerializationProtocol.JSON:
+                    return
+                response = json.loads(message)
+            elif isinstance(message, bytes):
+                # Binary message (MessagePack)
+                if self.options.protocol != SerializationProtocol.MESSAGEPACK:
+                    return
+                response = msgpack.unpackb(message, raw=False)
+            else:
+                return
+                
             request_id = response.get('id')
             
             if request_id and request_id in self.pending_responses:
@@ -69,7 +84,12 @@ class WebSocketClient:
         future = asyncio.Future()
         self.pending_responses[request_id] = future
 
-        await self.websocket.send(json.dumps(request))
+        # 根据协议选择序列化方式
+        if self.options.protocol == SerializationProtocol.MESSAGEPACK:
+            request_bytes = msgpack.packb(request)
+            await self.websocket.send(request_bytes)
+        else:
+            await self.websocket.send(json.dumps(request))
 
         # Timeout after 30 seconds
         try:
