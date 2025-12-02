@@ -126,6 +126,35 @@ builder.Services.AddSingleton<IMessageQueueService>(provider =>
     var logger = provider.GetRequiredService<ILogger<RabbitMQMessageQueueService>>();
     return new RabbitMQMessageQueueService(logger, "amqp://guest:guest@localhost:5672/");
 });
+
+// 注册混合集群传输
+builder.Services.AddSingleton<IClusterTransport>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<HybridClusterTransport>>();
+    var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+    var redisService = provider.GetRequiredService<IRedisService>();
+    var messageQueueService = provider.GetRequiredService<IMessageQueueService>();
+    
+    var nodeInfo = new NodeInfo
+    {
+        NodeId = "node1",
+        Address = "localhost",
+        Port = 5001,
+        Endpoint = "/ws",
+        MaxConnections = 10000,
+        Status = NodeStatus.Active
+    };
+    
+    return new HybridClusterTransport(
+        logger,
+        loggerFactory,
+        redisService,
+        messageQueueService,
+        nodeId: "node1",
+        nodeInfo: nodeInfo,
+        loadBalancingStrategy: LoadBalancingStrategy.LeastConnections
+    );
+});
 ```
 
 **示例：FreeRedis + RabbitMQ**
@@ -153,7 +182,6 @@ builder.Services.AddSingleton<IMessageQueueService>(provider =>
     var logger = provider.GetRequiredService<ILogger<RabbitMQMessageQueueService>>();
     return new RabbitMQMessageQueueService(logger, "amqp://guest:guest@localhost:5672/");
 });
-```
 
 // 注册混合集群传输
 builder.Services.AddSingleton<IClusterTransport>(provider =>
