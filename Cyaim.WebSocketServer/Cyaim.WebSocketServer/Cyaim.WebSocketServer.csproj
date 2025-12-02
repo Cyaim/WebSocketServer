@@ -62,10 +62,7 @@
             - Improved API reference documentation
         </PackageReleaseNotes>
         <PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
-        <Description>            
-            WebSocketServer is lightweight and high performance WebSocket server library.Support route, full duplex communication, multiplexing, pipeline, encryption.
-            WebSocketServer 是一个轻量级、高性能WebSocket服务端库。支�?WebApi 路由、全双工通信、多路复用、管道、加密等。\\r
-        </Description>
+        <Description>WebSocketServer is lightweight and high performance WebSocket server library. Support route, full duplex communication, multiplexing, pipeline, encryption. WebSocketServer 是一个轻量级、高性能WebSocket服务端库。支持 WebApi 路由、全双工通信、多路复用、管道、加密等。</Description>
         <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
     <ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0' Or '$(TargetFramework)' == 'net10.0'">
@@ -133,7 +130,7 @@
             <Pack>True</Pack>
             <PackagePath />
         </None>
-        <None Include="..\..\README.md">
+        <None Include="..\..EADME.md">
             <Pack>True</Pack>
             <PackagePath>\</PackagePath>
         </None>
