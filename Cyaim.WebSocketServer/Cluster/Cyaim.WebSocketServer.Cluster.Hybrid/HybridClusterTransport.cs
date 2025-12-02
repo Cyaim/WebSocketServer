@@ -58,6 +58,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         /// <param name="nodeId">Current node ID / 当前节点 ID</param>
         /// <param name="nodeInfo">Current node information / 当前节点信息</param>
         /// <param name="loadBalancingStrategy">Load balancing strategy / 负载均衡策略</param>
+        /// <param name="nodeInfoProvider">Optional function to automatically get latest node info during heartbeat / 可选函数，用于在心跳时自动获取最新节点信息</param>
         public HybridClusterTransport(
             ILogger<HybridClusterTransport> logger,
             ILoggerFactory loggerFactory,
@@ -65,7 +66,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             IMessageQueueService messageQueueService,
             string nodeId,
             NodeInfo nodeInfo,
-            LoadBalancingStrategy loadBalancingStrategy = LoadBalancingStrategy.LeastConnections)
+            LoadBalancingStrategy loadBalancingStrategy = LoadBalancingStrategy.LeastConnections,
+            Func<Task<NodeInfo>> nodeInfoProvider = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
@@ -81,11 +83,21 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             var discoveryLogger = loggerFactory.CreateLogger<RedisNodeDiscoveryService>();
             var loadBalancerLogger = loggerFactory.CreateLogger<LoadBalancer>();
 
+            // If no provider is provided, try to create a default one that auto-detects connection count
+            // 如果没有提供 provider，尝试创建一个默认的，自动检测连接数
+            Func<Task<NodeInfo>> finalProvider = nodeInfoProvider;
+            if (finalProvider == null)
+            {
+                finalProvider = CreateDefaultNodeInfoProvider(nodeInfo);
+            }
+
             _discoveryService = new RedisNodeDiscoveryService(
                 discoveryLogger,
                 redisService,
                 nodeId,
-                nodeInfo);
+                nodeInfo,
+                clusterPrefix: "websocket:cluster",
+                nodeInfoProvider: finalProvider);
 
             _loadBalancer = new LoadBalancer(loadBalancerLogger, loadBalancingStrategy);
 
@@ -289,6 +301,42 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         }
 
         /// <summary>
+        /// Update current node information in Redis / 更新 Redis 中的当前节点信息
+        /// </summary>
+        /// <param name="nodeInfo">Updated node information / 更新的节点信息</param>
+        /// <remarks>
+        /// This method allows you to update dynamic node information such as connection count, CPU usage, and memory usage.
+        /// The updated information will be stored in Redis and used for load balancing.
+        /// 此方法允许您更新动态节点信息，如连接数、CPU 使用率和内存使用率。
+        /// 更新的信息将存储在 Redis 中，并用于负载均衡。
+        /// </remarks>
+        public async Task UpdateNodeInfoAsync(NodeInfo nodeInfo)
+        {
+            if (nodeInfo == null)
+            {
+                throw new ArgumentNullException(nameof(nodeInfo));
+            }
+
+            // Update internal node info / 更新内部节点信息
+            _nodeInfo.NodeId = nodeInfo.NodeId;
+            _nodeInfo.Address = nodeInfo.Address;
+            _nodeInfo.Port = nodeInfo.Port;
+            _nodeInfo.Endpoint = nodeInfo.Endpoint;
+            _nodeInfo.ConnectionCount = nodeInfo.ConnectionCount;
+            _nodeInfo.MaxConnections = nodeInfo.MaxConnections;
+            _nodeInfo.CpuUsage = nodeInfo.CpuUsage;
+            _nodeInfo.MemoryUsage = nodeInfo.MemoryUsage;
+            _nodeInfo.Status = nodeInfo.Status;
+            if (nodeInfo.Metadata != null)
+            {
+                _nodeInfo.Metadata = nodeInfo.Metadata;
+            }
+
+            // Update in Redis via discovery service / 通过发现服务更新到 Redis
+            await _discoveryService.UpdateNodeInfoAsync(_nodeInfo);
+        }
+
+        /// <summary>
         /// Handle incoming message / 处理传入消息
         /// </summary>
         private async Task<bool> HandleMessageAsync(byte[] body, MessageProperties properties)
@@ -370,6 +418,120 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 _logger.LogInformation($"Node {nodeId} removed from cluster");
                 NodeDisconnected?.Invoke(this, new ClusterNodeEventArgs { NodeId = nodeId });
             }
+        }
+
+        /// <summary>
+        /// Create default node info provider that auto-detects connection count
+        /// 创建默认的节点信息提供者，自动检测连接数
+        /// </summary>
+        /// <param name="baseNodeInfo">Base node info to use / 要使用的基础节点信息</param>
+        /// <returns>Node info provider function / 节点信息提供者函数</returns>
+        private Func<Task<NodeInfo>> CreateDefaultNodeInfoProvider(NodeInfo baseNodeInfo)
+        {
+            return async () =>
+            {
+                try
+                {
+                    // Try to get connection count from MvcChannelHandler (most common case)
+                    // 尝试从 MvcChannelHandler 获取连接数（最常见的情况）
+                    int connectionCount = 0;
+                    try
+                    {
+                        // Use reflection to avoid direct dependency / 使用反射避免直接依赖
+                        var mvcHandlerType = Type.GetType("Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcChannelHandler, Cyaim.WebSocketServer");
+                        if (mvcHandlerType != null)
+                        {
+                            var clientsProperty = mvcHandlerType.GetProperty("Clients", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                            if (clientsProperty != null)
+                            {
+                                var clients = clientsProperty.GetValue(null);
+                                if (clients is System.Collections.ICollection collection)
+                                {
+                                    connectionCount = collection.Count;
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore reflection errors / 忽略反射错误
+                    }
+
+                    // Try to get from ClusterManager if available / 如果可用，尝试从 ClusterManager 获取
+                    if (connectionCount == 0)
+                    {
+                        try
+                        {
+                            var clusterCenterType = Type.GetType("Cyaim.WebSocketServer.Infrastructure.Cluster.GlobalClusterCenter, Cyaim.WebSocketServer");
+                            if (clusterCenterType != null)
+                            {
+                                var clusterManagerProperty = clusterCenterType.GetProperty("ClusterManager", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                                if (clusterManagerProperty != null)
+                                {
+                                    var clusterManager = clusterManagerProperty.GetValue(null);
+                                    if (clusterManager != null)
+                                    {
+                                        var getLocalConnectionCountMethod = clusterManager.GetType().GetMethod("GetLocalConnectionCount");
+                                        if (getLocalConnectionCountMethod != null)
+                                        {
+                                            var count = getLocalConnectionCountMethod.Invoke(clusterManager, null);
+                                            if (count is int localCount)
+                                            {
+                                                connectionCount = localCount;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // Ignore reflection errors / 忽略反射错误
+                        }
+                    }
+
+                    // Get CPU and memory usage / 获取 CPU 和内存使用率
+                    double cpuUsage = 0.0;
+                    double memoryUsage = 0.0;
+                    try
+                    {
+                        var process = System.Diagnostics.Process.GetCurrentProcess();
+                        var totalProcessorTime = process.TotalProcessorTime.TotalMilliseconds;
+                        var uptime = (DateTime.UtcNow - process.StartTime.ToUniversalTime()).TotalMilliseconds;
+                        cpuUsage = uptime > 0 ? (totalProcessorTime / uptime) * 100 : 0.0;
+
+                        var workingSet = process.WorkingSet64;
+                        memoryUsage = (double)workingSet / (1024 * 1024); // Convert to MB / 转换为 MB
+                    }
+                    catch
+                    {
+                        // Ignore errors / 忽略错误
+                    }
+
+                    // Return updated node info / 返回更新的节点信息
+                    return new NodeInfo
+                    {
+                        NodeId = baseNodeInfo.NodeId,
+                        Address = baseNodeInfo.Address,
+                        Port = baseNodeInfo.Port,
+                        Endpoint = baseNodeInfo.Endpoint,
+                        ConnectionCount = connectionCount,
+                        MaxConnections = baseNodeInfo.MaxConnections,
+                        CpuUsage = cpuUsage,
+                        MemoryUsage = memoryUsage,
+                        Status = baseNodeInfo.Status,
+                        Metadata = baseNodeInfo.Metadata ?? new Dictionary<string, string>(),
+                        RegisteredAt = baseNodeInfo.RegisteredAt
+                    };
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to auto-update node info, using cached info");
+                    // Return base info with updated heartbeat / 返回基础信息并更新心跳
+                    baseNodeInfo.LastHeartbeat = DateTime.UtcNow;
+                    return baseNodeInfo;
+                }
+            };
         }
 
         /// <summary>

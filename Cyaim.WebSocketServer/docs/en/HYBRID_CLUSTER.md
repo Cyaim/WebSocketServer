@@ -547,32 +547,256 @@ public class NodeInfo
     public double CpuUsage { get; set; }         // CPU usage %
     public double MemoryUsage { get; set; }      // Memory usage %
     public DateTime LastHeartbeat { get; set; }  // Last heartbeat
+    public DateTime RegisteredAt { get; set; }   // Registration time
     public NodeStatus Status { get; set; }       // Node status
+    public Dictionary<string, string> Metadata { get; set; }  // Metadata
 }
 ```
 
-### Updating Node Information
+### ✅ Auto-Update Node Information (Enabled by Default)
 
-You can update node information (e.g., connection count) regularly to enable better load balancing:
+**Good News**: `HybridClusterTransport` **automatically updates** node information by default! During each heartbeat (every 5 seconds), the system automatically:
+
+1. **Auto-detects connection count** - Gets from `MvcChannelHandler.Clients` or `ClusterManager`
+2. **Auto-gets CPU usage** - Calculated from process information
+3. **Auto-gets memory usage** - Retrieved from process information
+
+**No additional configuration needed** - node information stays up-to-date automatically!
+
+If you need custom update logic, you can pass a `nodeInfoProvider` parameter.
+
+### Auto-Update Mechanism
+
+#### Default Auto-Update (No Configuration Needed)
+
+`HybridClusterTransport` **automatically updates** node information by default, no additional configuration needed:
 
 ```csharp
-var discoveryService = new RedisNodeDiscoveryService(
-    logger,
-    redisService,
-    nodeId,
-    nodeInfo);
-
-await discoveryService.UpdateNodeInfoAsync(new NodeInfo
+// Standard configuration - auto-update is enabled
+builder.Services.AddSingleton<IClusterTransport>(provider =>
 {
-    NodeId = nodeId,
+    var logger = provider.GetRequiredService<ILogger<HybridClusterTransport>>();
+    var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+    var redisService = provider.GetRequiredService<IRedisService>();
+    var messageQueueService = provider.GetRequiredService<IMessageQueueService>();
+    
+    var nodeInfo = new NodeInfo
+    {
+        NodeId = "node1",
+        Address = "localhost",
+        Port = 5001,
+        Endpoint = "/ws",
+        MaxConnections = 10000,
+        Status = NodeStatus.Active
+    };
+    
+    // No additional configuration needed - auto-update is enabled!
+    return new HybridClusterTransport(
+        logger,
+        loggerFactory,
+        redisService,
+        messageQueueService,
+        nodeId: "node1",
+        nodeInfo: nodeInfo,
+        loadBalancingStrategy: LoadBalancingStrategy.LeastConnections
+    );
+});
+```
+
+**Auto-update will**:
+- ✅ Automatically update every 5 seconds (heartbeat interval)
+- ✅ Automatically get connection count from `MvcChannelHandler.Clients`
+- ✅ Automatically get connection count from `ClusterManager` (if available)
+- ✅ Automatically calculate CPU usage
+- ✅ Automatically get memory usage
+
+#### Custom Update Logic
+
+If you need custom update logic, you can pass a `nodeInfoProvider` parameter:
+
+```csharp
+builder.Services.AddSingleton<IClusterTransport>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<HybridClusterTransport>>();
+    var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+    var redisService = provider.GetRequiredService<IRedisService>();
+    var messageQueueService = provider.GetRequiredService<IMessageQueueService>();
+    
+    var nodeInfo = new NodeInfo
+    {
+        NodeId = "node1",
+        Address = "localhost",
+        Port = 5001,
+        Endpoint = "/ws",
+        MaxConnections = 10000,
+        Status = NodeStatus.Active
+    };
+    
+    // Custom node info provider
+    return new HybridClusterTransport(
+        logger,
+        loggerFactory,
+        redisService,
+        messageQueueService,
+        nodeId: "node1",
+        nodeInfo: nodeInfo,
+        loadBalancingStrategy: LoadBalancingStrategy.LeastConnections,
+        nodeInfoProvider: async () =>
+        {
+            // Custom logic: get information from your business system
+            return new NodeInfo
+            {
+                NodeId = "node1",
+                Address = "localhost",
+                Port = 5001,
+                Endpoint = "/ws",
+                ConnectionCount = YourCustomService.GetConnectionCount(),
+                MaxConnections = 10000,
+                CpuUsage = YourCustomService.GetCpuUsage(),
+                MemoryUsage = YourCustomService.GetMemoryUsage(),
+                Status = NodeStatus.Active
+            };
+        }
+    );
+});
+```
+
+#### Manual Update (Optional)
+
+If you need to update node information immediately (without waiting for heartbeat), you can call `UpdateNodeInfoAsync`:
+
+```csharp
+var clusterTransport = app.Services.GetRequiredService<IClusterTransport>();
+await clusterTransport.UpdateNodeInfoAsync(new NodeInfo
+{
+    NodeId = "node1",
     Address = "localhost",
     Port = 5001,
-    ConnectionCount = currentConnectionCount,
+    Endpoint = "/ws",
+    ConnectionCount = 100,
     MaxConnections = 10000,
-    CpuUsage = GetCpuUsage(),
-    MemoryUsage = GetMemoryUsage(),
+    CpuUsage = 25.5,
+    MemoryUsage = 512.0,
     Status = NodeStatus.Active
 });
+```
+
+### Getting Current Connection Count
+
+You need to implement your own method to get the current WebSocket connection count. Here are some examples:
+
+```csharp
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
+
+private int GetCurrentConnectionCount()
+{
+    // Method 1: Get from MvcChannelHandler's static Clients collection (if using MVC handler)
+    // This is the simplest method, suitable for scenarios using MvcChannelHandler
+    return MvcChannelHandler.Clients?.Count ?? 0;
+    
+    // Method 2: Get from ClusterManager (if cluster is enabled)
+    // var clusterManager = GlobalClusterCenter.ClusterManager;
+    // if (clusterManager != null)
+    // {
+    //     return clusterManager.GetLocalConnectionCount();
+    // }
+    // return 0;
+    
+    // Method 3: Use static counter (update on connect/disconnect)
+    // return WebSocketConnectionCounter.CurrentCount;
+    
+    // Method 4: Get from your business logic
+    // return YourService.GetActiveConnectionCount();
+}
+
+private double GetCpuUsage()
+{
+    // Note: Getting CPU usage requires cross-platform compatibility considerations
+    // Here's a simple example; you may need to use PerformanceCounter or other libraries
+    
+    // Windows platform can use PerformanceCounter
+    // #if WINDOWS
+    // using System.Diagnostics;
+    // var cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
+    // cpuCounter.NextValue(); // First call returns 0
+    // await Task.Delay(100);
+    // return cpuCounter.NextValue();
+    // #endif
+    
+    // Cross-platform solution: Use System.Diagnostics.Process to get process CPU time
+    // But this is cumulative CPU time, not real-time usage
+    var process = System.Diagnostics.Process.GetCurrentProcess();
+    var totalProcessorTime = process.TotalProcessorTime.TotalMilliseconds;
+    var uptime = (DateTime.UtcNow - process.StartTime.ToUniversalTime()).TotalMilliseconds;
+    return uptime > 0 ? (totalProcessorTime / uptime) * 100 : 0.0;
+}
+
+private double GetMemoryUsage()
+{
+    // Get current process memory usage (MB)
+    var process = System.Diagnostics.Process.GetCurrentProcess();
+    var workingSet = process.WorkingSet64;
+    return (double)workingSet / (1024 * 1024); // Convert to MB
+    
+    // Or get memory usage percentage (need to know total memory)
+    // var totalMemory = // Need to get total memory from system
+    // return (double)workingSet / totalMemory * 100;
+}
+```
+
+### Complete Example: Periodically Update Node Information
+
+```csharp
+var app = builder.Build();
+
+// Configure WebSocket middleware
+app.UseWebSockets();
+app.UseWebSocketServer();
+
+// Start cluster transport
+var clusterTransport = app.Services.GetRequiredService<IClusterTransport>();
+await clusterTransport.StartAsync();
+
+// Periodically update node info (every 5 seconds)
+var updateTimer = new System.Timers.Timer(5000);
+updateTimer.Elapsed += async (sender, e) =>
+{
+    try
+    {
+        // Get current connection count
+        var connectionCount = MvcChannelHandler.Clients?.Count ?? 0;
+        
+        // Get system resource usage
+        var cpuUsage = GetCpuUsage();
+        var memoryUsage = GetMemoryUsage();
+        
+        // Update node information
+        await clusterTransport.UpdateNodeInfoAsync(new NodeInfo
+        {
+            NodeId = "node1",
+            Address = "localhost",
+            Port = 5001,
+            Endpoint = "/ws",
+            ConnectionCount = connectionCount,  // ← This will update to Redis
+            MaxConnections = 10000,
+            CpuUsage = cpuUsage,                // ← This will update to Redis
+            MemoryUsage = memoryUsage,          // ← This will update to Redis
+            Status = NodeStatus.Active
+        });
+        
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogDebug($"Updated node info: Connections={connectionCount}, CPU={cpuUsage:F2}%, Memory={memoryUsage:F2}MB");
+    }
+    catch (Exception ex)
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Failed to update node info");
+    }
+};
+updateTimer.Start();
+
+app.Run();
 ```
 
 ## Custom Implementations

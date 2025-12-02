@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
 using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Microsoft.Extensions.Logging;
@@ -24,6 +25,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         /// <param name="endpoint">WebSocket endpoint / WebSocket 端点</param>
         /// <param name="maxConnections">Maximum connections / 最大连接数</param>
         /// <param name="loadBalancingStrategy">Load balancing strategy / 负载均衡策略</param>
+        /// <param name="nodeInfoProvider">Optional function to automatically get latest node info during heartbeat / 可选函数，用于在心跳时自动获取最新节点信息</param>
         /// <returns>Hybrid cluster transport instance / 混合集群传输实例</returns>
         public static IClusterTransport Create(
             ILogger<HybridClusterTransport> logger,
@@ -35,7 +37,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             int nodePort,
             string endpoint = "/ws",
             int maxConnections = 0,
-            LoadBalancingStrategy loadBalancingStrategy = LoadBalancingStrategy.LeastConnections)
+            LoadBalancingStrategy loadBalancingStrategy = LoadBalancingStrategy.LeastConnections,
+            Func<Task<NodeInfo>> nodeInfoProvider = null)
         {
             if (logger == null)
                 throw new ArgumentNullException(nameof(logger));
@@ -69,8 +72,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 messageQueueService,
                 nodeId,
                 nodeInfo,
-                loadBalancingStrategy);
+                loadBalancingStrategy,
+                nodeInfoProvider);
         }
     }
 }
-

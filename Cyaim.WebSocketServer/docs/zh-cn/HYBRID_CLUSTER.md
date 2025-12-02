@@ -547,32 +547,256 @@ public class NodeInfo
     public double CpuUsage { get; set; }         // CPU 使用率 %
     public double MemoryUsage { get; set; }      // 内存使用率 %
     public DateTime LastHeartbeat { get; set; }  // 最后心跳时间
+    public DateTime RegisteredAt { get; set; }   // 注册时间
     public NodeStatus Status { get; set; }       // 节点状态
+    public Dictionary<string, string> Metadata { get; set; }  // 元数据
 }
 ```
 
-### 更新节点信息
+### ✅ 自动更新节点信息（默认启用）
 
-您可以定期更新节点信息（例如连接数）以实现更好的负载均衡：
+**好消息**: `HybridClusterTransport` **默认会自动更新**节点信息！每次心跳时（每 5 秒），系统会自动：
+
+1. **自动检测连接数** - 从 `MvcChannelHandler.Clients` 或 `ClusterManager` 获取
+2. **自动获取 CPU 使用率** - 从进程信息计算
+3. **自动获取内存使用率** - 从进程信息获取
+
+**无需任何额外配置**，节点信息会自动保持最新！
+
+如果您需要自定义更新逻辑，可以传入 `nodeInfoProvider` 参数。
+
+### 自动更新机制
+
+#### 默认自动更新（无需配置）
+
+`HybridClusterTransport` **默认会自动更新**节点信息，无需任何额外配置：
 
 ```csharp
-var discoveryService = new RedisNodeDiscoveryService(
-    logger,
-    redisService,
-    nodeId,
-    nodeInfo);
-
-await discoveryService.UpdateNodeInfoAsync(new NodeInfo
+// 标准配置 - 自动更新已启用
+builder.Services.AddSingleton<IClusterTransport>(provider =>
 {
-    NodeId = nodeId,
+    var logger = provider.GetRequiredService<ILogger<HybridClusterTransport>>();
+    var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+    var redisService = provider.GetRequiredService<IRedisService>();
+    var messageQueueService = provider.GetRequiredService<IMessageQueueService>();
+    
+    var nodeInfo = new NodeInfo
+    {
+        NodeId = "node1",
+        Address = "localhost",
+        Port = 5001,
+        Endpoint = "/ws",
+        MaxConnections = 10000,
+        Status = NodeStatus.Active
+    };
+    
+    // 无需额外配置，自动更新已启用！
+    return new HybridClusterTransport(
+        logger,
+        loggerFactory,
+        redisService,
+        messageQueueService,
+        nodeId: "node1",
+        nodeInfo: nodeInfo,
+        loadBalancingStrategy: LoadBalancingStrategy.LeastConnections
+    );
+});
+```
+
+**自动更新会**：
+- ✅ 每 5 秒（心跳间隔）自动更新一次
+- ✅ 自动从 `MvcChannelHandler.Clients` 获取连接数
+- ✅ 自动从 `ClusterManager` 获取连接数（如果可用）
+- ✅ 自动计算 CPU 使用率
+- ✅ 自动获取内存使用率
+
+#### 自定义更新逻辑
+
+如果您需要自定义更新逻辑，可以传入 `nodeInfoProvider` 参数：
+
+```csharp
+builder.Services.AddSingleton<IClusterTransport>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<HybridClusterTransport>>();
+    var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+    var redisService = provider.GetRequiredService<IRedisService>();
+    var messageQueueService = provider.GetRequiredService<IMessageQueueService>();
+    
+    var nodeInfo = new NodeInfo
+    {
+        NodeId = "node1",
+        Address = "localhost",
+        Port = 5001,
+        Endpoint = "/ws",
+        MaxConnections = 10000,
+        Status = NodeStatus.Active
+    };
+    
+    // 自定义节点信息提供者
+    return new HybridClusterTransport(
+        logger,
+        loggerFactory,
+        redisService,
+        messageQueueService,
+        nodeId: "node1",
+        nodeInfo: nodeInfo,
+        loadBalancingStrategy: LoadBalancingStrategy.LeastConnections,
+        nodeInfoProvider: async () =>
+        {
+            // 自定义逻辑：从您的业务系统获取信息
+            return new NodeInfo
+            {
+                NodeId = "node1",
+                Address = "localhost",
+                Port = 5001,
+                Endpoint = "/ws",
+                ConnectionCount = YourCustomService.GetConnectionCount(),
+                MaxConnections = 10000,
+                CpuUsage = YourCustomService.GetCpuUsage(),
+                MemoryUsage = YourCustomService.GetMemoryUsage(),
+                Status = NodeStatus.Active
+            };
+        }
+    );
+});
+```
+
+#### 手动更新（可选）
+
+如果您需要立即更新节点信息（不等待心跳），可以调用 `UpdateNodeInfoAsync`：
+
+```csharp
+var clusterTransport = app.Services.GetRequiredService<IClusterTransport>();
+await clusterTransport.UpdateNodeInfoAsync(new NodeInfo
+{
+    NodeId = "node1",
     Address = "localhost",
     Port = 5001,
-    ConnectionCount = currentConnectionCount,
+    Endpoint = "/ws",
+    ConnectionCount = 100,
     MaxConnections = 10000,
-    CpuUsage = GetCpuUsage(),
-    MemoryUsage = GetMemoryUsage(),
+    CpuUsage = 25.5,
+    MemoryUsage = 512.0,
     Status = NodeStatus.Active
 });
+```
+
+### 获取当前连接数
+
+您需要自己实现获取当前 WebSocket 连接数的方法。以下是一些示例：
+
+```csharp
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
+
+private int GetCurrentConnectionCount()
+{
+    // 方法 1：从 MvcChannelHandler 的静态 Clients 集合获取（如果使用 MVC 处理器）
+    // 这是最简单的方法，适用于使用 MvcChannelHandler 的场景
+    return MvcChannelHandler.Clients?.Count ?? 0;
+    
+    // 方法 2：从 ClusterManager 获取（如果启用了集群）
+    // var clusterManager = GlobalClusterCenter.ClusterManager;
+    // if (clusterManager != null)
+    // {
+    //     return clusterManager.GetLocalConnectionCount();
+    // }
+    // return 0;
+    
+    // 方法 3：使用静态计数器（需要在连接建立/断开时更新）
+    // return WebSocketConnectionCounter.CurrentCount;
+    
+    // 方法 4：从您的业务逻辑中获取
+    // return YourService.GetActiveConnectionCount();
+}
+
+private double GetCpuUsage()
+{
+    // 注意：获取 CPU 使用率需要跨平台兼容性考虑
+    // 这里提供一个简单的示例，实际使用时可能需要使用 PerformanceCounter 或其他库
+    
+    // Windows 平台可以使用 PerformanceCounter
+    // #if WINDOWS
+    // using System.Diagnostics;
+    // var cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
+    // cpuCounter.NextValue(); // 第一次调用返回 0
+    // await Task.Delay(100);
+    // return cpuCounter.NextValue();
+    // #endif
+    
+    // 跨平台方案：可以使用 System.Diagnostics.Process 获取进程 CPU 时间
+    // 但这不是实时 CPU 使用率，而是累计值
+    var process = System.Diagnostics.Process.GetCurrentProcess();
+    var totalProcessorTime = process.TotalProcessorTime.TotalMilliseconds;
+    var uptime = (DateTime.UtcNow - process.StartTime.ToUniversalTime()).TotalMilliseconds;
+    return uptime > 0 ? (totalProcessorTime / uptime) * 100 : 0.0;
+}
+
+private double GetMemoryUsage()
+{
+    // 获取当前进程的内存使用（MB）
+    var process = System.Diagnostics.Process.GetCurrentProcess();
+    var workingSet = process.WorkingSet64;
+    return (double)workingSet / (1024 * 1024); // 转换为 MB
+    
+    // 或者获取内存使用百分比（需要知道总内存）
+    // var totalMemory = // 需要从系统获取总内存
+    // return (double)workingSet / totalMemory * 100;
+}
+```
+
+### 完整示例：定期更新节点信息
+
+```csharp
+var app = builder.Build();
+
+// 配置 WebSocket 中间件
+app.UseWebSockets();
+app.UseWebSocketServer();
+
+// 启动集群传输
+var clusterTransport = app.Services.GetRequiredService<IClusterTransport>();
+await clusterTransport.StartAsync();
+
+// 定期更新节点信息（每 5 秒）
+var updateTimer = new System.Timers.Timer(5000);
+updateTimer.Elapsed += async (sender, e) =>
+{
+    try
+    {
+        // 获取当前连接数
+        var connectionCount = MvcChannelHandler.Clients?.Count ?? 0;
+        
+        // 获取系统资源使用率
+        var cpuUsage = GetCpuUsage();
+        var memoryUsage = GetMemoryUsage();
+        
+        // 更新节点信息
+        await clusterTransport.UpdateNodeInfoAsync(new NodeInfo
+        {
+            NodeId = "node1",
+            Address = "localhost",
+            Port = 5001,
+            Endpoint = "/ws",
+            ConnectionCount = connectionCount,  // ← 这里会更新到 Redis
+            MaxConnections = 10000,
+            CpuUsage = cpuUsage,                // ← 这里会更新到 Redis
+            MemoryUsage = memoryUsage,           // ← 这里会更新到 Redis
+            Status = NodeStatus.Active
+        });
+        
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogDebug($"Updated node info: Connections={connectionCount}, CPU={cpuUsage:F2}%, Memory={memoryUsage:F2}MB");
+    }
+    catch (Exception ex)
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Failed to update node info");
+    }
+};
+updateTimer.Start();
+
+app.Run();
 ```
 
 ## 自定义实现

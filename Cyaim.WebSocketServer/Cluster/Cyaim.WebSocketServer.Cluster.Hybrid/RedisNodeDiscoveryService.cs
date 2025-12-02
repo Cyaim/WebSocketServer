@@ -18,11 +18,12 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         private readonly ILogger<RedisNodeDiscoveryService> _logger;
         private readonly IRedisService _redisService;
         private readonly string _nodeId;
-        private readonly NodeInfo _nodeInfo;
+        private NodeInfo _nodeInfo;
         private readonly string _clusterPrefix;
         private readonly Timer _heartbeatTimer;
         private readonly Timer _discoveryTimer;
         private readonly CancellationTokenSource _cancellationTokenSource;
+        private readonly Func<Task<NodeInfo>> _nodeInfoProvider;
         private bool _disposed = false;
 
         /// <summary>
@@ -43,18 +44,21 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         /// <param name="nodeId">Current node ID / 当前节点 ID</param>
         /// <param name="nodeInfo">Current node information / 当前节点信息</param>
         /// <param name="clusterPrefix">Cluster prefix for Redis keys / Redis 键的集群前缀</param>
+        /// <param name="nodeInfoProvider">Optional function to get latest node info for heartbeat / 可选函数，用于在心跳时获取最新节点信息</param>
         public RedisNodeDiscoveryService(
             ILogger<RedisNodeDiscoveryService> logger,
             IRedisService redisService,
             string nodeId,
             NodeInfo nodeInfo,
-            string clusterPrefix = "websocket:cluster")
+            string clusterPrefix = "websocket:cluster",
+            Func<Task<NodeInfo>> nodeInfoProvider = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _redisService = redisService ?? throw new ArgumentNullException(nameof(redisService));
             _nodeId = nodeId ?? throw new ArgumentNullException(nameof(nodeId));
             _nodeInfo = nodeInfo ?? throw new ArgumentNullException(nameof(nodeInfo));
             _clusterPrefix = clusterPrefix;
+            _nodeInfoProvider = nodeInfoProvider;
             _cancellationTokenSource = new CancellationTokenSource();
 
             // Heartbeat every 5 seconds / 每 5 秒发送一次心跳
@@ -193,7 +197,38 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
             try
             {
-                _nodeInfo.LastHeartbeat = DateTime.UtcNow;
+                // If node info provider is available, get latest info / 如果节点信息提供者可用，获取最新信息
+                NodeInfo nodeInfoToUpdate;
+                if (_nodeInfoProvider != null)
+                {
+                    try
+                    {
+                        nodeInfoToUpdate = await _nodeInfoProvider();
+                        if (nodeInfoToUpdate != null)
+                        {
+                            // Preserve node ID and other essential fields / 保留节点 ID 和其他必需字段
+                            nodeInfoToUpdate.NodeId = _nodeId;
+                            nodeInfoToUpdate.LastHeartbeat = DateTime.UtcNow;
+                            _nodeInfo = nodeInfoToUpdate;
+                        }
+                        else
+                        {
+                            // Fallback to current node info / 回退到当前节点信息
+                            _nodeInfo.LastHeartbeat = DateTime.UtcNow;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, $"Failed to get latest node info from provider, using cached info");
+                        _nodeInfo.LastHeartbeat = DateTime.UtcNow;
+                    }
+                }
+                else
+                {
+                    // No provider, just update heartbeat / 没有提供者，只更新心跳
+                    _nodeInfo.LastHeartbeat = DateTime.UtcNow;
+                }
+
                 var key = $"{_clusterPrefix}:nodes:{_nodeId}";
                 var value = JsonSerializer.Serialize(_nodeInfo);
                 
@@ -308,12 +343,23 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         /// <summary>
         /// Update node information / 更新节点信息
         /// </summary>
+        /// <param name="nodeInfo">Updated node information / 更新的节点信息</param>
         public async Task UpdateNodeInfoAsync(NodeInfo nodeInfo)
         {
+            if (nodeInfo == null)
+            {
+                throw new ArgumentNullException(nameof(nodeInfo));
+            }
+
             try
             {
+                // Update internal node info / 更新内部节点信息
+                _nodeInfo = nodeInfo;
+                _nodeInfo.NodeId = _nodeId; // Ensure node ID matches / 确保节点 ID 匹配
+                _nodeInfo.LastHeartbeat = DateTime.UtcNow;
+
                 var key = $"{_clusterPrefix}:nodes:{_nodeId}";
-                var value = JsonSerializer.Serialize(nodeInfo);
+                var value = JsonSerializer.Serialize(_nodeInfo);
                 
                 await _redisService.SetAsync(key, value, TimeSpan.FromSeconds(30));
 
@@ -326,10 +372,13 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     Timestamp = DateTime.UtcNow
                 };
                 await _redisService.PublishAsync($"{_clusterPrefix}:events", JsonSerializer.Serialize(nodeEvent));
+
+                _logger.LogDebug($"Node info updated for node {_nodeId}: ConnectionCount={nodeInfo.ConnectionCount}, CpuUsage={nodeInfo.CpuUsage}%, MemoryUsage={nodeInfo.MemoryUsage}%");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"Failed to update node info for node {_nodeId}");
+                throw;
             }
         }
 

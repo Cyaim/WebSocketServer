@@ -468,28 +468,168 @@ public class NodeInfo
 }
 ```
 
-## Updating Node Information / 更新节点信息
+## Node Information Management / 节点信息管理
 
-You can update node information (e.g., connection count) to enable better load balancing:
+### NodeInfo Class / NodeInfo 类
 
-您可以更新节点信息（例如连接数）以实现更好的负载均衡：
+The `NodeInfo` class contains information about each cluster node:
+
+`NodeInfo` 类包含每个集群节点的信息：
 
 ```csharp
-var discoveryService = new RedisNodeDiscoveryService(
-    logger,
-    redisService,
-    nodeId,
-    nodeInfo);
-
-await discoveryService.UpdateNodeInfoAsync(new NodeInfo
+public class NodeInfo
 {
-    NodeId = nodeId,
+    public string NodeId { get; set; }           // Node ID / 节点 ID
+    public string Address { get; set; }          // Node address / 节点地址
+    public int Port { get; set; }                // Node port / 节点端口
+    public string Endpoint { get; set; }         // WebSocket endpoint / WebSocket 端点
+    public int ConnectionCount { get; set; }     // Current connections / 当前连接数
+    public int MaxConnections { get; set; }      // Max connections / 最大连接数
+    public double CpuUsage { get; set; }         // CPU usage % / CPU 使用率 %
+    public double MemoryUsage { get; set; }      // Memory usage % / 内存使用率 %
+    public DateTime LastHeartbeat { get; set; }  // Last heartbeat / 最后心跳时间
+    public DateTime RegisteredAt { get; set; }   // Registration time / 注册时间
+    public NodeStatus Status { get; set; }       // Node status / 节点状态
+    public Dictionary<string, string> Metadata { get; set; }  // Metadata / 元数据
+}
+```
+
+### ✅ Auto-Update Node Information (Enabled by Default) / ✅ 自动更新节点信息（默认启用）
+
+**Good News / 好消息**: `HybridClusterTransport` **automatically updates** node information by default! During each heartbeat (every 5 seconds), the system automatically:
+
+**好消息**: `HybridClusterTransport` **默认会自动更新**节点信息！每次心跳时（每 5 秒），系统会自动：
+
+1. **Auto-detects connection count** - Gets from `MvcChannelHandler.Clients` or `ClusterManager` / **自动检测连接数** - 从 `MvcChannelHandler.Clients` 或 `ClusterManager` 获取
+2. **Auto-gets CPU usage** - Calculated from process information / **自动获取 CPU 使用率** - 从进程信息计算
+3. **Auto-gets memory usage** - Retrieved from process information / **自动获取内存使用率** - 从进程信息获取
+
+**No additional configuration needed** - node information stays up-to-date automatically!
+
+**无需任何额外配置**，节点信息会自动保持最新！
+
+If you need custom update logic, you can pass a `nodeInfoProvider` parameter.
+
+如果您需要自定义更新逻辑，可以传入 `nodeInfoProvider` 参数。
+
+### Auto-Update Mechanism / 自动更新机制
+
+#### Default Auto-Update (No Configuration Needed) / 默认自动更新（无需配置）
+
+`HybridClusterTransport` **automatically updates** node information by default, no additional configuration needed:
+
+`HybridClusterTransport` **默认会自动更新**节点信息，无需任何额外配置：
+
+```csharp
+// Standard configuration - auto-update is enabled / 标准配置 - 自动更新已启用
+builder.Services.AddSingleton<IClusterTransport>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<HybridClusterTransport>>();
+    var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+    var redisService = provider.GetRequiredService<IRedisService>();
+    var messageQueueService = provider.GetRequiredService<IMessageQueueService>();
+    
+    var nodeInfo = new NodeInfo
+    {
+        NodeId = "node1",
+        Address = "localhost",
+        Port = 5001,
+        Endpoint = "/ws",
+        MaxConnections = 10000,
+        Status = NodeStatus.Active
+    };
+    
+    // No additional configuration needed - auto-update is enabled! / 无需额外配置，自动更新已启用！
+    return new HybridClusterTransport(
+        logger,
+        loggerFactory,
+        redisService,
+        messageQueueService,
+        nodeId: "node1",
+        nodeInfo: nodeInfo,
+        loadBalancingStrategy: LoadBalancingStrategy.LeastConnections
+    );
+});
+```
+
+**Auto-update will / 自动更新会**：
+- ✅ Automatically update every 5 seconds (heartbeat interval) / 每 5 秒（心跳间隔）自动更新一次
+- ✅ Automatically get connection count from `MvcChannelHandler.Clients` / 自动从 `MvcChannelHandler.Clients` 获取连接数
+- ✅ Automatically get connection count from `ClusterManager` (if available) / 自动从 `ClusterManager` 获取连接数（如果可用）
+- ✅ Automatically calculate CPU usage / 自动计算 CPU 使用率
+- ✅ Automatically get memory usage / 自动获取内存使用率
+
+#### Custom Update Logic / 自定义更新逻辑
+
+If you need custom update logic, you can pass a `nodeInfoProvider` parameter:
+
+如果您需要自定义更新逻辑，可以传入 `nodeInfoProvider` 参数：
+
+```csharp
+builder.Services.AddSingleton<IClusterTransport>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<HybridClusterTransport>>();
+    var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+    var redisService = provider.GetRequiredService<IRedisService>();
+    var messageQueueService = provider.GetRequiredService<IMessageQueueService>();
+    
+    var nodeInfo = new NodeInfo
+    {
+        NodeId = "node1",
+        Address = "localhost",
+        Port = 5001,
+        Endpoint = "/ws",
+        MaxConnections = 10000,
+        Status = NodeStatus.Active
+    };
+    
+    // Custom node info provider / 自定义节点信息提供者
+    return new HybridClusterTransport(
+        logger,
+        loggerFactory,
+        redisService,
+        messageQueueService,
+        nodeId: "node1",
+        nodeInfo: nodeInfo,
+        loadBalancingStrategy: LoadBalancingStrategy.LeastConnections,
+        nodeInfoProvider: async () =>
+        {
+            // Custom logic: get information from your business system / 自定义逻辑：从您的业务系统获取信息
+            return new NodeInfo
+            {
+                NodeId = "node1",
+                Address = "localhost",
+                Port = 5001,
+                Endpoint = "/ws",
+                ConnectionCount = YourCustomService.GetConnectionCount(),
+                MaxConnections = 10000,
+                CpuUsage = YourCustomService.GetCpuUsage(),
+                MemoryUsage = YourCustomService.GetMemoryUsage(),
+                Status = NodeStatus.Active
+            };
+        }
+    );
+});
+```
+
+#### Manual Update (Optional) / 手动更新（可选）
+
+If you need to update node information immediately (without waiting for heartbeat), you can call `UpdateNodeInfoAsync`:
+
+如果您需要立即更新节点信息（不等待心跳），可以调用 `UpdateNodeInfoAsync`：
+
+```csharp
+var clusterTransport = app.Services.GetRequiredService<IClusterTransport>();
+await clusterTransport.UpdateNodeInfoAsync(new NodeInfo
+{
+    NodeId = "node1",
     Address = "localhost",
     Port = 5001,
-    ConnectionCount = currentConnectionCount,
+    Endpoint = "/ws",
+    ConnectionCount = 100,
     MaxConnections = 10000,
-    CpuUsage = GetCpuUsage(),
-    MemoryUsage = GetMemoryUsage(),
+    CpuUsage = 25.5,
+    MemoryUsage = 512.0,
     Status = NodeStatus.Active
 });
 ```
@@ -555,7 +695,7 @@ var discoveryService = new RedisNodeDiscoveryService(
 
 ## Best Practices / 最佳实践
 
-1. **Update Node Info Regularly** - Update connection count and resource usage for accurate load balancing / 定期更新节点信息 - 更新连接数和资源使用率以实现准确的负载均衡
+1. **Auto-Update is Enabled by Default** - Node information is automatically updated every 5 seconds / **默认启用自动更新** - 节点信息每 5 秒自动更新一次
 
 2. **Monitor Node Health** - Check `LastHeartbeat` to detect offline nodes / 监控节点健康 - 检查 `LastHeartbeat` 以检测离线节点
 
@@ -617,27 +757,10 @@ var app = builder.Build();
 var clusterTransport = app.Services.GetRequiredService<IClusterTransport>();
 await clusterTransport.StartAsync();
 
-// Update node info periodically / 定期更新节点信息
-var timer = new System.Timers.Timer(5000); // Every 5 seconds / 每 5 秒
-timer.Elapsed += async (sender, e) =>
-{
-    var nodeInfo = new NodeInfo
-    {
-        NodeId = "node1",
-        Address = "localhost",
-        Port = 5001,
-        ConnectionCount = GetCurrentConnectionCount(),
-        MaxConnections = 10000,
-        CpuUsage = GetCpuUsage(),
-        MemoryUsage = GetMemoryUsage(),
-        Status = NodeStatus.Active
-    };
-    
-    // Update via discovery service / 通过发现服务更新
-    // Note: You'll need to access the discovery service / 注意：您需要访问发现服务
-};
-
-timer.Start();
+// Note: Node information is automatically updated every 5 seconds (heartbeat interval)
+// No manual update timer needed - auto-update is enabled by default!
+// 注意：节点信息每 5 秒（心跳间隔）自动更新
+// 无需手动更新定时器 - 默认已启用自动更新！
 
 app.Run();
 ```
@@ -658,9 +781,10 @@ app.Run();
 
 ### Load Balancing Not Working / 负载均衡不工作
 
-- Ensure node info is updated regularly / 确保节点信息定期更新
+- Node info is automatically updated every 5 seconds (default) / 节点信息每 5 秒自动更新（默认）
 - Check connection count values / 检查连接数值
 - Verify node status is `Active` / 验证节点状态为 `Active`
+- If using custom `nodeInfoProvider`, ensure it returns valid data / 如果使用自定义 `nodeInfoProvider`，确保它返回有效数据
 
 ## License / 许可证
 
