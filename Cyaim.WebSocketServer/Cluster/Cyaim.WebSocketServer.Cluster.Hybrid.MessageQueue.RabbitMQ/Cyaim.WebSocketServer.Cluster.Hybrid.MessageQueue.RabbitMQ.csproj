@@ -1,54 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<TargetFrameworks>netstandard2.1;net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-		<PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
-		<Authors>Psyche</Authors>
-		<Company>Cyaim Studio</Company>
-		<PackageProjectUrl>https://github.com/Cyaim/WebSocketServer</PackageProjectUrl>
-		<PackageLicenseFile>LICENSE</PackageLicenseFile>
-		<RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
-		<Copyright>Copyright © Cyaim Studio</Copyright>
-		<Version>2.0.0</Version>
-		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
-		<PackageReleaseNotes>
-			Version 2.0.0 - Major Release
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.1;net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+        <Authors>Psyche</Authors>
+        <Company>Cyaim Studio</Company>
+        <PackageProjectUrl>https://github.com/Cyaim/WebSocketServer</PackageProjectUrl>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
+        <Copyright>Copyright © Cyaim Studio</Copyright>
+        <Version>2.0.0</Version>
+        <PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
+        <PackageReleaseNotes>            
+            Version 2.0.0 - Major Release
             
             - RabbitMQ.Client implementation for Hybrid cluster transport
             - Support for .NET 9.0 and .NET 10.0
             - Modular and pluggable design
         </PackageReleaseNotes>
-		<Description>
-			RabbitMQ.Client implementation for WebSocketServer Hybrid cluster transport (message routing)
-			WebSocketServer 混合集群传输的 RabbitMQ.Client 实现（消息路由）
-		</Description>
-	</PropertyGroup>
-
-	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0' Or '$(TargetFramework)' == 'net10.0'">
-		<FrameworkReference Include="Microsoft.AspNetCore.App" />
-	</ItemGroup>
-
-	<!-- .NET Standard 2.1 需要显式引用，使用最新稳定版本 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
-		<PackageReference Include="System.Text.Json" Version="9.0.0" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
-		<ProjectReference Include="..\Cyaim.WebSocketServer.Cluster.Hybrid\Cyaim.WebSocketServer.Cluster.Hybrid.csproj" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<None Include="..\..\..\LICENSE">
-		  <Pack>True</Pack>
-		  <PackagePath>\</PackagePath>
-		</None>
-		<None Include="..\..\Cyaim.WebSocketServer\WebSocketRepository_Logo.png">
-			<Pack>True</Pack>
-			<PackagePath></PackagePath>
-		</None>
-	</ItemGroup>
-
+        <Description>            
+            RabbitMQ.Client implementation for WebSocketServer Hybrid cluster transport (message routing)
+            WebSocketServer 混合集群传输�?RabbitMQ.Client 实现（消息路由）
+        </Description>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0' Or '$(TargetFramework)' == 'net10.0'">
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    </ItemGroup>
+    <!-- .NET Standard 2.1 需要显式引用，使用最新稳定版�? -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"
+                          Version="9.0.0" />
+        <PackageReference Include="System.Text.Json"
+                          Version="9.0.0" />
+    </ItemGroup>
+    <!-- RabbitMQ.Client 7.0+ 支持 .NET Standard 2.0+，统一使用 7.2.0 -->
+    <ItemGroup>
+        <PackageReference Include="RabbitMQ.Client"
+                          Version="7.2.0" />
+        <ProjectReference Include="..\Cyaim.WebSocketServer.Cluster.Hybrid\Cyaim.WebSocketServer.Cluster.Hybrid.csproj" />
+    </ItemGroup>
+    <ItemGroup>
+        <None Include="..\..\..\LICENSE">
+            <Pack>True</Pack>
+            <PackagePath>\</PackagePath>
+        </None>
+        <None Include="..\..\Cyaim.WebSocketServer\WebSocketRepository_Logo.png">
+            <Pack>True</Pack>
+            <PackagePath />
+        </None>
+    </ItemGroup>
 </Project>
-

@@ -11,6 +11,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
     /// <summary>
     /// RabbitMQ.Client implementation of IMessageQueueService
     /// RabbitMQ.Client 的 IMessageQueueService 实现
+    /// Supports RabbitMQ.Client 7.0+ (uses AsyncEventingBasicConsumer)
+    /// 支持 RabbitMQ.Client 7.0+（使用 AsyncEventingBasicConsumer）
     /// </summary>
     public class RabbitMQMessageQueueService : IMessageQueueService
     {
@@ -18,7 +20,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         private readonly string _connectionString;
         private IConnection _connection;
         private IModel _channel;
-        private readonly Dictionary<string, EventingBasicConsumer> _consumers;
+        private readonly Dictionary<string, AsyncEventingBasicConsumer> _consumers;
         private bool _disposed = false;
 
         /// <summary>
@@ -30,7 +32,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
-            _consumers = new Dictionary<string, EventingBasicConsumer>();
+            _consumers = new Dictionary<string, AsyncEventingBasicConsumer>();
         }
 
         /// <summary>
@@ -62,6 +64,9 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task DisconnectAsync()
         {
+            // Clear consumers / 清除消费者
+            _consumers.Clear();
+
             if (_channel != null)
             {
                 _channel.Close();
@@ -182,7 +187,9 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 return;
             }
 
-            var consumer = new EventingBasicConsumer(_channel);
+            // Use AsyncEventingBasicConsumer for RabbitMQ.Client 7.0+
+            // 使用 AsyncEventingBasicConsumer 支持 RabbitMQ.Client 7.0+
+            var consumer = new AsyncEventingBasicConsumer(_channel);
             _consumers[queueName] = consumer;
 
             consumer.Received += async (model, ea) =>
