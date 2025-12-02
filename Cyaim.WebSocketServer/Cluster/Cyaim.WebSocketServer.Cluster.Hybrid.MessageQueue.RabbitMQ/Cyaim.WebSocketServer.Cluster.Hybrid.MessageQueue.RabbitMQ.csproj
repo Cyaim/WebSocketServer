@@ -12,28 +12,15 @@
 		<Version>2.0.0</Version>
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
 		<PackageReleaseNotes>
-			Version 2.0.0 - Major Release (DEPRECATED)
+			Version 2.0.0 - Major Release
             
-            ⚠️ This package is DEPRECATED. Please use the new modular packages instead:
-            ⚠️ 此包已弃用。请使用新的模块化包：
-            
-            - Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange (for StackExchange.Redis)
-            - Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis (for FreeRedis)
-            - Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ (for RabbitMQ)
-            
-            The new packages provide better modularity and allow you to choose only the implementations you need.
-            新包提供更好的模块化，允许您只选择需要的实现。
+            - RabbitMQ.Client implementation for Hybrid cluster transport
+            - Support for .NET 9.0 and .NET 10.0
+            - Modular and pluggable design
         </PackageReleaseNotes>
 		<Description>
-			⚠️ DEPRECATED: This package is deprecated. Please use the new modular packages:
-			⚠️ 已弃用：此包已弃用。请使用新的模块化包：
-			
-			- Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange
-			- Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis
-			- Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
-			
-			WebSocketServer Hybrid cluster transport implementations (StackExchange.Redis, FreeRedis and RabbitMQ.Client)
-			WebSocketServer 混合集群传输实现（StackExchange.Redis、FreeRedis 和 RabbitMQ.Client）
+			RabbitMQ.Client implementation for WebSocketServer Hybrid cluster transport (message routing)
+			WebSocketServer 混合集群传输的 RabbitMQ.Client 实现（消息路由）
 		</Description>
 	</PropertyGroup>
 
@@ -47,11 +34,7 @@
 		<PackageReference Include="System.Text.Json" Version="9.0.0" />
 	</ItemGroup>
 
-	<!-- .NET 6.0+ 框架已内置这些包，无需显式引用，框架会自动使用内置版本 -->
-
 	<ItemGroup>
-		<PackageReference Include="StackExchange.Redis" Version="2.7.33" />
-		<PackageReference Include="FreeRedis" Version="1.2.0" />
 		<PackageReference Include="RabbitMQ.Client" Version="6.8.1" />
 		<ProjectReference Include="..\Cyaim.WebSocketServer.Cluster.Hybrid\Cyaim.WebSocketServer.Cluster.Hybrid.csproj" />
 	</ItemGroup>

@@ -45,56 +45,98 @@ This package provides a hybrid cluster transport implementation that uses **Redi
 dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid
 ```
 
-### Implementation Package / 实现包
+### Implementation Packages / 实现包（模块化设计）
 
-For StackExchange.Redis, FreeRedis and RabbitMQ.Client:
+The Hybrid cluster transport uses a modular design. You can choose the implementations you need:
 
+混合集群传输采用模块化设计。您可以选择需要的实现：
+
+#### Redis Implementations / Redis 实现（服务发现）
+
+Choose one Redis implementation for service discovery:
+
+选择一个 Redis 实现用于服务发现：
+
+**Option 1: StackExchange.Redis**
 ```bash
-dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange
 ```
 
-This package includes implementations for:
-- `StackExchangeRedisService` - StackExchange.Redis implementation / StackExchange.Redis 实现
-- `FreeRedisService` - FreeRedis implementation / FreeRedis 实现
-- `RabbitMQMessageQueueService` - RabbitMQ.Client implementation / RabbitMQ.Client 实现
+**Option 2: FreeRedis**
+```bash
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis
+```
 
-You can use either StackExchange.Redis or FreeRedis for service discovery, combined with RabbitMQ for message routing.
+#### Message Queue Implementations / 消息队列实现（消息路由）
 
-您可以使用 StackExchange.Redis 或 FreeRedis 进行服务发现，结合 RabbitMQ 进行消息路由。
+Choose one message queue implementation for message routing:
+
+选择一个消息队列实现用于消息路由：
+
+**RabbitMQ**
+```bash
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
+```
+
+**Future implementations / 未来实现**:
+- `Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.MQTT` - MQTT support / MQTT 支持
+
+### ⚠️ Deprecated Package / 已弃用的包
+
+The old `Cyaim.WebSocketServer.Cluster.Hybrid.Implementations` package is deprecated. Please use the new modular packages instead.
+
+旧的 `Cyaim.WebSocketServer.Cluster.Hybrid.Implementations` 包已弃用。请使用新的模块化包。
 
 ## Quick Start / 快速开始
 
 ### 1. Install Packages / 安装包
 
+**Example: StackExchange.Redis + RabbitMQ / 示例：StackExchange.Redis + RabbitMQ**
+
 ```bash
+# Core package / 核心包
 dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid
-dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
+
+# Redis implementation (choose one) / Redis 实现（选择一个）
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange
+
+# Message queue implementation / 消息队列实现
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
+```
+
+**Example: FreeRedis + RabbitMQ / 示例：FreeRedis + RabbitMQ**
+
+```bash
+# Core package / 核心包
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid
+
+# Redis implementation / Redis 实现
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis
+
+# Message queue implementation / 消息队列实现
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
 ```
 
 ### 2. Configure Services / 配置服务
 
+**Example: StackExchange.Redis + RabbitMQ / 示例：StackExchange.Redis + RabbitMQ**
+
 ```csharp
 using Cyaim.WebSocketServer.Cluster.Hybrid;
 using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
-using Cyaim.WebSocketServer.Cluster.Hybrid.Implementations;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange;
+using Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ;
 using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Option 1: Register StackExchange.Redis service / 选项 1：注册 StackExchange.Redis 服务
+// Register StackExchange.Redis service / 注册 StackExchange.Redis 服务
 builder.Services.AddSingleton<IRedisService>(provider =>
 {
     var logger = provider.GetRequiredService<ILogger<StackExchangeRedisService>>();
     return new StackExchangeRedisService(logger, "localhost:6379");
 });
-
-// Option 2: Register FreeRedis service / 选项 2：注册 FreeRedis 服务
-// builder.Services.AddSingleton<IRedisService>(provider =>
-// {
-//     var logger = provider.GetRequiredService<ILogger<FreeRedisService>>();
-//     return new FreeRedisService(logger, "localhost:6379");
-// });
 
 // Register RabbitMQ service / 注册 RabbitMQ 服务
 builder.Services.AddSingleton<IMessageQueueService>(provider =>
@@ -102,6 +144,34 @@ builder.Services.AddSingleton<IMessageQueueService>(provider =>
     var logger = provider.GetRequiredService<ILogger<RabbitMQMessageQueueService>>();
     return new RabbitMQMessageQueueService(logger, "amqp://guest:guest@localhost:5672/");
 });
+```
+
+**Example: FreeRedis + RabbitMQ / 示例：FreeRedis + RabbitMQ**
+
+```csharp
+using Cyaim.WebSocketServer.Cluster.Hybrid;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis;
+using Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
+using Microsoft.Extensions.DependencyInjection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Register FreeRedis service / 注册 FreeRedis 服务
+builder.Services.AddSingleton<IRedisService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<FreeRedisService>>();
+    return new FreeRedisService(logger, "localhost:6379");
+});
+
+// Register RabbitMQ service / 注册 RabbitMQ 服务
+builder.Services.AddSingleton<IMessageQueueService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<RabbitMQMessageQueueService>>();
+    return new RabbitMQMessageQueueService(logger, "amqp://guest:guest@localhost:5672/");
+});
+```
 
 // Register hybrid cluster transport / 注册混合集群传输
 builder.Services.AddSingleton<IClusterTransport>(provider =>
@@ -302,13 +372,14 @@ var discoveryService = new RedisNodeDiscoveryService(
 ```csharp
 using Cyaim.WebSocketServer.Cluster.Hybrid;
 using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
-using Cyaim.WebSocketServer.Cluster.Hybrid.Implementations;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis;
+using Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ;
 using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure FreeRedis (or use StackExchangeRedisService) / 配置 FreeRedis（或使用 StackExchangeRedisService）
+// Configure FreeRedis (or use StackExchangeRedisService from Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange) / 配置 FreeRedis（或使用 Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange 中的 StackExchangeRedisService）
 builder.Services.AddSingleton<IRedisService>(provider =>
 {
     var logger = provider.GetRequiredService<ILogger<FreeRedisService>>();

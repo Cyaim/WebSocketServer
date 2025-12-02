@@ -73,38 +73,52 @@ Compared to single transport methods, the Hybrid solution has the following adva
 
 ### 1. Install Packages
 
+**Example: StackExchange.Redis + RabbitMQ**
+
 ```bash
-# Install core package
+# Core package
 dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid
 
-# Install implementation package (includes StackExchange.Redis, FreeRedis, and RabbitMQ.Client implementations)
-dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
+# Redis implementation (choose one)
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange
+
+# Message queue implementation
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
+```
+
+**Example: FreeRedis + RabbitMQ**
+
+```bash
+# Core package
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid
+
+# Redis implementation
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis
+
+# Message queue implementation
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
 ```
 
 ### 2. Configure Services
 
+**Example: StackExchange.Redis + RabbitMQ**
+
 ```csharp
 using Cyaim.WebSocketServer.Cluster.Hybrid;
 using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
-using Cyaim.WebSocketServer.Cluster.Hybrid.Implementations;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange;
+using Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ;
 using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Option 1: Register StackExchange.Redis service
+// Register StackExchange.Redis service
 builder.Services.AddSingleton<IRedisService>(provider =>
 {
     var logger = provider.GetRequiredService<ILogger<StackExchangeRedisService>>();
     return new StackExchangeRedisService(logger, "localhost:6379");
 });
-
-// Option 2: Register FreeRedis service
-// builder.Services.AddSingleton<IRedisService>(provider =>
-// {
-//     var logger = provider.GetRequiredService<ILogger<FreeRedisService>>();
-//     return new FreeRedisService(logger, "localhost:6379");
-// });
 
 // Register RabbitMQ service
 builder.Services.AddSingleton<IMessageQueueService>(provider =>
@@ -112,6 +126,34 @@ builder.Services.AddSingleton<IMessageQueueService>(provider =>
     var logger = provider.GetRequiredService<ILogger<RabbitMQMessageQueueService>>();
     return new RabbitMQMessageQueueService(logger, "amqp://guest:guest@localhost:5672/");
 });
+```
+
+**Example: FreeRedis + RabbitMQ**
+
+```csharp
+using Cyaim.WebSocketServer.Cluster.Hybrid;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis;
+using Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
+using Microsoft.Extensions.DependencyInjection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Register FreeRedis service
+builder.Services.AddSingleton<IRedisService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<FreeRedisService>>();
+    return new FreeRedisService(logger, "localhost:6379");
+});
+
+// Register RabbitMQ service
+builder.Services.AddSingleton<IMessageQueueService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<RabbitMQMessageQueueService>>();
+    return new RabbitMQMessageQueueService(logger, "amqp://guest:guest@localhost:5672/");
+});
+```
 
 // Register hybrid cluster transport
 builder.Services.AddSingleton<IClusterTransport>(provider =>
@@ -163,17 +205,39 @@ app.Run();
 dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid
 ```
 
-### Implementation Package
+### Implementation Packages (Modular Design)
 
-The implementation package provides the following implementations:
+The Hybrid cluster transport uses a modular design. You can choose the implementations you need:
 
-- `StackExchangeRedisService` - StackExchange.Redis implementation
-- `FreeRedisService` - FreeRedis implementation
-- `RabbitMQMessageQueueService` - RabbitMQ.Client implementation
+#### Redis Implementations (Service Discovery)
 
+Choose one Redis implementation for service discovery:
+
+**Option 1: StackExchange.Redis**
 ```bash
-dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange
 ```
+
+**Option 2: FreeRedis**
+```bash
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis
+```
+
+#### Message Queue Implementations (Message Routing)
+
+Choose one message queue implementation for message routing:
+
+**RabbitMQ**
+```bash
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
+```
+
+**Future implementations**:
+- `Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.MQTT` - MQTT support
+
+### ⚠️ Deprecated Package
+
+The old `Cyaim.WebSocketServer.Cluster.Hybrid.Implementations` package is deprecated. Please use the new modular packages instead.
 
 ## Configuration
 
@@ -344,13 +408,14 @@ public class CustomMessageQueueService : IMessageQueueService
 ```csharp
 using Cyaim.WebSocketServer.Cluster.Hybrid;
 using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
-using Cyaim.WebSocketServer.Cluster.Hybrid.Implementations;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis;
+using Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ;
 using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure FreeRedis (or use StackExchangeRedisService)
+// Configure FreeRedis (or use StackExchangeRedisService from Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange)
 builder.Services.AddSingleton<IRedisService>(provider =>
 {
     var logger = provider.GetRequiredService<ILogger<FreeRedisService>>();

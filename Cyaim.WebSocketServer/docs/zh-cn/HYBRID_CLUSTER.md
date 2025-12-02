@@ -73,38 +73,52 @@ Hybrid 混合集群传输是一种结合了 Redis 和 RabbitMQ 优势的集群�
 
 ### 1. 安装包
 
+**示例：StackExchange.Redis + RabbitMQ**
+
 ```bash
-# 安装核心包
+# 核心包
 dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid
 
-# 安装实现包（包含 StackExchange.Redis、FreeRedis 和 RabbitMQ.Client 实现）
-dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
+# Redis 实现（选择一个）
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange
+
+# 消息队列实现
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
+```
+
+**示例：FreeRedis + RabbitMQ**
+
+```bash
+# 核心包
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid
+
+# Redis 实现
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis
+
+# 消息队列实现
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
 ```
 
 ### 2. 配置服务
 
+**示例：StackExchange.Redis + RabbitMQ**
+
 ```csharp
 using Cyaim.WebSocketServer.Cluster.Hybrid;
 using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
-using Cyaim.WebSocketServer.Cluster.Hybrid.Implementations;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange;
+using Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ;
 using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 选项 1：注册 StackExchange.Redis 服务
+// 注册 StackExchange.Redis 服务
 builder.Services.AddSingleton<IRedisService>(provider =>
 {
     var logger = provider.GetRequiredService<ILogger<StackExchangeRedisService>>();
     return new StackExchangeRedisService(logger, "localhost:6379");
 });
-
-// 选项 2：注册 FreeRedis 服务
-// builder.Services.AddSingleton<IRedisService>(provider =>
-// {
-//     var logger = provider.GetRequiredService<ILogger<FreeRedisService>>();
-//     return new FreeRedisService(logger, "localhost:6379");
-// });
 
 // 注册 RabbitMQ 服务
 builder.Services.AddSingleton<IMessageQueueService>(provider =>
@@ -112,6 +126,34 @@ builder.Services.AddSingleton<IMessageQueueService>(provider =>
     var logger = provider.GetRequiredService<ILogger<RabbitMQMessageQueueService>>();
     return new RabbitMQMessageQueueService(logger, "amqp://guest:guest@localhost:5672/");
 });
+```
+
+**示例：FreeRedis + RabbitMQ**
+
+```csharp
+using Cyaim.WebSocketServer.Cluster.Hybrid;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis;
+using Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
+using Microsoft.Extensions.DependencyInjection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 注册 FreeRedis 服务
+builder.Services.AddSingleton<IRedisService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<FreeRedisService>>();
+    return new FreeRedisService(logger, "localhost:6379");
+});
+
+// 注册 RabbitMQ 服务
+builder.Services.AddSingleton<IMessageQueueService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<RabbitMQMessageQueueService>>();
+    return new RabbitMQMessageQueueService(logger, "amqp://guest:guest@localhost:5672/");
+});
+```
 
 // 注册混合集群传输
 builder.Services.AddSingleton<IClusterTransport>(provider =>
@@ -163,17 +205,39 @@ app.Run();
 dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid
 ```
 
-### 实现包
+### 实现包（模块化设计）
 
-实现包提供了以下实现：
+Hybrid 集群传输采用模块化设计，您可以根据需要选择实现包：
 
-- `StackExchangeRedisService` - StackExchange.Redis 实现
-- `FreeRedisService` - FreeRedis 实现
-- `RabbitMQMessageQueueService` - RabbitMQ.Client 实现
+#### Redis 实现（服务发现）
 
+选择一个 Redis 实现用于服务发现：
+
+**选项 1: StackExchange.Redis**
 ```bash
-dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange
 ```
+
+**选项 2: FreeRedis**
+```bash
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis
+```
+
+#### 消息队列实现（消息路由）
+
+选择一个消息队列实现用于消息路由：
+
+**RabbitMQ**
+```bash
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
+```
+
+**未来实现**:
+- `Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.MQTT` - MQTT 支持
+
+### ⚠️ 已弃用的包
+
+旧的 `Cyaim.WebSocketServer.Cluster.Hybrid.Implementations` 包已弃用。请使用新的模块化包。
 
 ## 配置
 
@@ -344,13 +408,14 @@ public class CustomMessageQueueService : IMessageQueueService
 ```csharp
 using Cyaim.WebSocketServer.Cluster.Hybrid;
 using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
-using Cyaim.WebSocketServer.Cluster.Hybrid.Implementations;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis;
+using Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ;
 using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 配置 FreeRedis（或使用 StackExchangeRedisService）
+// 配置 FreeRedis（或使用 Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange 中的 StackExchangeRedisService）
 builder.Services.AddSingleton<IRedisService>(provider =>
 {
     var logger = provider.GetRequiredService<ILogger<FreeRedisService>>();
