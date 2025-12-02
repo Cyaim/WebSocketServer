@@ -15,6 +15,7 @@
 
 - **[集群模块](./CLUSTER.md)** - 多节点集群、Raft 协议、消息路由
 - **[集群传输扩展](./CLUSTER_TRANSPORTS.md)** - Redis、RabbitMQ 传输实现
+- **[Hybrid 混合集群传输](./HYBRID_CLUSTER.md)** - Redis + RabbitMQ 混合传输方案
 - **[指标统计](./METRICS.md)** - OpenTelemetry 集成、性能监控
 - **[Dashboard](./DASHBOARD.md)** - 监控面板、API 接口、前端界面
 - **[客户端 SDK](./CLIENTS.md)** - 多语言客户端 SDK，支持自动 endpoint 发现
@@ -30,8 +31,9 @@
 ### 我需要实现集群功能
 
 1. 阅读 [集群模块](./CLUSTER.md) 了解集群架构
-2. 选择传输方式：WebSocket、Redis 或 RabbitMQ
+2. 选择传输方式：WebSocket、Redis、RabbitMQ 或 Hybrid
 3. 查看 [集群传输扩展](./CLUSTER_TRANSPORTS.md) 了解扩展包
+4. 如需自动发现和负载均衡，查看 [Hybrid 混合集群传输](./HYBRID_CLUSTER.md)
 
 ### 我需要监控和统计
 

@@ -7,8 +7,8 @@
 
 ## 📚 Documentation Center / 文档中心
 
-- **[English Documentation](./docs/en/README.md)** - Complete English documentation
-- **[中文文档](./docs/zh-cn/README.md)** - 完整的中文文档
+- **[English Documentation](./Cyaim.WebSocketServer/docs/en/README.md)** - Complete English documentation
+- **[中文文档](./Cyaim.WebSocketServer/docs/zh-cn/README.md)** - 完整的中文文档
 
 ## ✨ Features / 特性
 
@@ -257,7 +257,7 @@ const client = await factory.createClient<IWeatherService>({
 const forecasts = await client.getForecasts();
 ```
 
-> **For more details, see**: [Clients Documentation](./docs/zh-cn/CLIENTS.md) | [客户端文档](./docs/zh-cn/CLIENTS.md)
+> **For more details, see**: [Clients Documentation](./Cyaim.WebSocketServer/docs/zh-cn/CLIENTS.md) | [客户端文档](./Cyaim.WebSocketServer/docs/zh-cn/CLIENTS.md)
 
 
 
@@ -349,16 +349,17 @@ var clusterOption = new ClusterOption
 };
 ```
 
-> **For more details, see**: [Cluster Documentation](./docs/zh-cn/CLUSTER.md) | [集群文档](./docs/zh-cn/CLUSTER.md)
+> **For more details, see**: [Cluster Documentation](./Cyaim.WebSocketServer/docs/zh-cn/CLUSTER.md) | [集群文档](./Cyaim.WebSocketServer/docs/zh-cn/CLUSTER.md)
 
 ## 📖 More Documentation / 更多文档
 
-- **[Quick Start Guide](./docs/zh-cn/QUICK_START.md)** - Get started in 5 minutes / 5 分钟快速上手
-- **[Core Library](./docs/zh-cn/CORE.md)** - Core features and routing / 核心功能和路由
-- **[Configuration Guide](./docs/zh-cn/CONFIGURATION.md)** - Configuration options / 配置选项
-- **[API Reference](./docs/zh-cn/API_REFERENCE.md)** - Complete API documentation / 完整 API 文档
-- **[Dashboard](./docs/zh-cn/DASHBOARD.md)** - Monitoring and statistics / 监控和统计
-- **[Metrics](./docs/zh-cn/METRICS.md)** - OpenTelemetry integration / OpenTelemetry 集成
+- **[Quick Start Guide](./Cyaim.WebSocketServer/docs/zh-cn/QUICK_START.md)** - Get started in 5 minutes / 5 分钟快速上手
+- **[Core Library](./Cyaim.WebSocketServer/docs/zh-cn/CORE.md)** - Core features and routing / 核心功能和路由
+- **[Configuration Guide](./Cyaim.WebSocketServer/docs/zh-cn/CONFIGURATION.md)** - Configuration options / 配置选项
+- **[API Reference](./Cyaim.WebSocketServer/docs/zh-cn/API_REFERENCE.md)** - Complete API documentation / 完整 API 文档
+- **[Dashboard](./Cyaim.WebSocketServer/docs/zh-cn/DASHBOARD.md)** - Monitoring and statistics / 监控和统计
+- **[Metrics](./Cyaim.WebSocketServer/docs/zh-cn/METRICS.md)** - OpenTelemetry integration / OpenTelemetry 集成
+- **[Hybrid Cluster Transport](./Cyaim.WebSocketServer/docs/zh-cn/HYBRID_CLUSTER.md)** - Redis + RabbitMQ hybrid transport / Redis + RabbitMQ 混合传输
 
 ## 🔗 Related Links / 相关链接
 

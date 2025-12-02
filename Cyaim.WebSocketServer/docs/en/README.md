@@ -15,6 +15,7 @@ Welcome to the Cyaim.WebSocketServer documentation center. This documentation pr
 
 - **[Cluster Module](./CLUSTER.md)** - Multi-node cluster, Raft protocol, message routing
 - **[Cluster Transports](./CLUSTER_TRANSPORTS.md)** - Redis, RabbitMQ transport implementations
+- **[Hybrid Cluster Transport](./HYBRID_CLUSTER.md)** - Redis + RabbitMQ hybrid transport solution
 - **[Metrics](./METRICS.md)** - OpenTelemetry integration, performance monitoring
 - **[Dashboard](./DASHBOARD.md)** - Monitoring panel, API interfaces, frontend UI
 
@@ -29,8 +30,9 @@ Welcome to the Cyaim.WebSocketServer documentation center. This documentation pr
 ### I need to implement cluster functionality
 
 1. Read [Cluster Module](./CLUSTER.md) to understand cluster architecture
-2. Choose transport: WebSocket, Redis, or RabbitMQ
+2. Choose transport: WebSocket, Redis, RabbitMQ, or Hybrid
 3. Check [Cluster Transports](./CLUSTER_TRANSPORTS.md) for extension packages
+4. For automatic discovery and load balancing, see [Hybrid Cluster Transport](./HYBRID_CLUSTER.md)
 
 ### I need monitoring and statistics
 

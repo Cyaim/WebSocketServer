@@ -8,16 +8,18 @@
 - [WebSocket 传输](#websocket-传输)
 - [Redis 传输](#redis-传输)
 - [RabbitMQ 传输](#rabbitmq-传输)
+- [Hybrid 混合传输](#hybrid-混合传输)
 - [传输方式对比](#传输方式对比)
 - [选择建议](#选择建议)
 
 ## 概述
 
-Cyaim.WebSocketServer 支持三种集群传输方式：
+Cyaim.WebSocketServer 支持四种集群传输方式：
 
 1. **WebSocket (ws/wss)** - 基础包提供，节点间直接通过 WebSocket 连接
 2. **Redis** - 使用 Redis Pub/Sub 进行节点间通信（扩展包）
 3. **RabbitMQ** - 使用 RabbitMQ 消息队列进行节点间通信（扩展包）
+4. **Hybrid** - 混合传输，使用 Redis 进行服务发现，使用 RabbitMQ 进行消息路由（扩展包）
 
 ## WebSocket 传输
 
@@ -173,17 +175,103 @@ amqp://guest:guest@localhost:5672/
 - 已有 RabbitMQ 基础设施
 - 复杂的消息路由需求
 
+## Hybrid 混合传输
+
+### 特点
+
+- ✅ Redis 服务发现 - 自动节点注册和发现
+- ✅ RabbitMQ 消息路由 - 可靠的消息传递保证
+- ✅ 智能负载均衡 - 多种负载均衡策略
+- ✅ 解耦设计 - 服务发现和消息路由分离
+- ✅ 高可用性 - Redis 和 RabbitMQ 都支持集群模式
+- ❌ 需要 Redis 和 RabbitMQ 服务器
+- ❌ 配置相对复杂
+
+### 安装
+
+```bash
+# 安装核心包
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid
+
+# 安装实现包
+dotnet add package Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
+```
+
+### 配置
+
+```csharp
+using Cyaim.WebSocketServer.Cluster.Hybrid;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
+using Cyaim.WebSocketServer.Cluster.Hybrid.Implementations;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
+
+// 注册 Redis 服务
+builder.Services.AddSingleton<IRedisService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<StackExchangeRedisService>>();
+    return new StackExchangeRedisService(logger, "localhost:6379");
+});
+
+// 注册 RabbitMQ 服务
+builder.Services.AddSingleton<IMessageQueueService>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<RabbitMQMessageQueueService>>();
+    return new RabbitMQMessageQueueService(logger, "amqp://guest:guest@localhost:5672/");
+});
+
+// 注册混合集群传输
+builder.Services.AddSingleton<IClusterTransport>(provider =>
+{
+    var logger = provider.GetRequiredService<ILogger<HybridClusterTransport>>();
+    var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+    var redisService = provider.GetRequiredService<IRedisService>();
+    var messageQueueService = provider.GetRequiredService<IMessageQueueService>();
+    
+    var nodeInfo = new NodeInfo
+    {
+        NodeId = "node1",
+        Address = "localhost",
+        Port = 5001,
+        Endpoint = "/ws",
+        MaxConnections = 10000,
+        Status = NodeStatus.Active
+    };
+    
+    return new HybridClusterTransport(
+        logger,
+        loggerFactory,
+        redisService,
+        messageQueueService,
+        nodeId: "node1",
+        nodeInfo: nodeInfo,
+        loadBalancingStrategy: LoadBalancingStrategy.LeastConnections
+    );
+});
+```
+
+### 适用场景
+
+- 需要自动节点发现
+- 需要智能负载均衡
+- 需要高可用性
+- 已有 Redis 和 RabbitMQ 基础设施
+- 大规模集群部署
+
+> **详细文档**: 查看 [Hybrid 混合集群传输文档](./HYBRID_CLUSTER.md) 了解更多信息。
+
 ## 传输方式对比
 
-| 特性 | WebSocket | Redis | RabbitMQ |
-|------|----------|-------|----------|
-| 安装复杂度 | ⭐ 低 | ⭐⭐ 中 | ⭐⭐ 中 |
-| 延迟 | ⭐⭐⭐ 低 | ⭐⭐ 中 | ⭐⭐ 中 |
-| 可扩展性 | ⭐ 低 | ⭐⭐⭐ 高 | ⭐⭐⭐ 高 |
-| 消息保证 | ⭐⭐ 中 | ⭐⭐⭐ 高 | ⭐⭐⭐ 高 |
-| 持久化 | ❌ | ✅ 可选 | ✅ 可选 |
-| 高可用 | ⭐⭐ 中 | ⭐⭐⭐ 高 | ⭐⭐⭐ 高 |
-| 额外依赖 | ❌ | Redis | RabbitMQ |
+| 特性 | WebSocket | Redis | RabbitMQ | Hybrid |
+|------|----------|-------|----------|--------|
+| 安装复杂度 | ⭐ 低 | ⭐⭐ 中 | ⭐⭐ 中 | ⭐⭐⭐ 高 |
+| 延迟 | ⭐⭐⭐ 低 | ⭐⭐ 中 | ⭐⭐ 中 | ⭐⭐ 中 |
+| 可扩展性 | ⭐ 低 | ⭐⭐⭐ 高 | ⭐⭐⭐ 高 | ⭐⭐⭐ 高 |
+| 消息保证 | ⭐⭐ 中 | ⭐⭐⭐ 高 | ⭐⭐⭐ 高 | ⭐⭐⭐ 高 |
+| 持久化 | ❌ | ✅ 可选 | ✅ 可选 | ✅ 可选 |
+| 高可用 | ⭐⭐ 中 | ⭐⭐⭐ 高 | ⭐⭐⭐ 高 | ⭐⭐⭐ 高 |
+| 自动发现 | ❌ | ❌ | ❌ | ✅ |
+| 负载均衡 | ⭐⭐ 中 | ⭐⭐ 中 | ⭐⭐ 中 | ⭐⭐⭐ 高 |
+| 额外依赖 | ❌ | Redis | RabbitMQ | Redis + RabbitMQ |
 
 ## 选择建议
 
@@ -207,6 +295,14 @@ amqp://guest:guest@localhost:5672/
 - 需要消息持久化
 - 已有 RabbitMQ 基础设施
 - 复杂的消息路由需求
+
+### 选择 Hybrid 混合传输
+
+- 需要自动节点发现
+- 需要智能负载均衡
+- 需要高可用性
+- 已有 Redis 和 RabbitMQ 基础设施
+- 大规模集群部署（> 20 个节点）
 
 ## 配置示例
 
@@ -237,6 +333,10 @@ switch (transportType.ToLower())
     case "rabbitmq":
         transport = RabbitMQClusterTransportFactory.CreateTransport(
             loggerFactory, nodeId, clusterOption);
+        break;
+    case "hybrid":
+        // Hybrid 传输需要单独配置，参考 Hybrid 文档
+        // transport = HybridClusterTransportFactory.Create(...);
         break;
     default:
         transport = ClusterTransportFactory.CreateTransport(
@@ -278,6 +378,6 @@ switch (transportType.ToLower())
 ## 相关文档
 
 - [集群模块文档](./CLUSTER.md)
+- [Hybrid 混合集群传输文档](./HYBRID_CLUSTER.md)
 - [配置指南](./CONFIGURATION.md)
-- [最佳实践](./BEST_PRACTICES.md)
 
