@@ -130,7 +130,7 @@
             <Pack>True</Pack>
             <PackagePath />
         </None>
-        <None Include="..\..EADME.md">
+        <None Include="..\..\README.md">
             <Pack>True</Pack>
             <PackagePath>\</PackagePath>
         </None>
