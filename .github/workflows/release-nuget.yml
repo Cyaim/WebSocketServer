@@ -53,17 +53,21 @@ jobs:
         YEAR=$(date -u +%y)           # 年后两位，例如 25
         MONTH=$(date -u +%m)          # 月份，例如 12
         DAY=$(date -u +%d)            # 日期，例如 25
-        HOUR=$(date -u +%H)           # 小时，例如 14
-        MINUTE=$(date -u +%M)         # 分钟，例如 30
+        HOUR=$(date -u +%H)           # 小时，例如 07（两位数）
+        MINUTE=$(date -u +%M)         # 分钟，例如 16（两位数）
+        
+        # 确保小时和分钟都是两位数（补零）
+        HOUR=$(printf "%02d" $HOUR)
+        MINUTE=$(printf "%02d" $MINUTE)
         
         # 组合版本号：主版本号.年后两位.月日.时分
-        # 格式：2.YY.MMDD.HHmm
+        # 格式：2.YY.MMDD.HHmm（时分部分始终是4位数字，例如 0716）
         VERSION="${MAJOR_VERSION}.${YEAR}.${MONTH}${DAY}.${HOUR}${MINUTE}"
         
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Generated version: $VERSION"
         echo "Version format: ${MAJOR_VERSION}.${YEAR}.${MONTH}${DAY}.${HOUR}${MINUTE}"
-        echo "Example: 2.25.1225.1430 = Version 2, Year 2025, Dec 25, 14:30 UTC"
+        echo "Example: 2.25.1202.0716 = Version 2, Year 2025, Dec 2, 07:16 UTC (时分部分始终是4位数字)"
     
     - name: Setup .NET
       if: steps.check_commit.outputs.trigger_release == 'true'
@@ -289,9 +293,9 @@ jobs:
           
           ### Version Format
           
-          Version format: `主版本号.年后两位.月日.时分`
+          Version format: `主版本号.年后两位.月日.时分`（时分部分始终是4位数字，例如 0716）
           
-          Example: `2.25.1225.1430` = Version 2, Year 2025, Dec 25, 14:30 UTC
+          Example: `2.25.1202.0716` = Version 2, Year 2025, Dec 2, 07:16 UTC
         files: |
           Cyaim.WebSocketServer/artifacts/*.nupkg
         draft: false
