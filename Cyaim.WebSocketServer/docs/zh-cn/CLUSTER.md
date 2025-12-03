@@ -228,6 +228,61 @@ connectionId -> nodeId
   - 并行处理：所有消息并行发送，提高效率
   - 结果追踪：可以查看每个连接是否成功接收消息
 
+### 流转发（支持大文件、网络流等）
+
+集群支持流转发功能，可以高效地传输大文件、网络流等数据：
+
+- **`RouteStreamAsync`**: 向单个连接发送流，自动分块传输
+- **`RouteStreamsAsync`**: 向多个连接批量发送流，支持跨节点
+- **分块传输**: 自动将大流分块（默认 64KB），避免内存溢出
+- **自动重组**: 接收端自动重组分块数据，确保数据完整性
+- **支持所有流类型**: 文件流、网络流、内存流等
+
+#### 流转发示例
+
+```csharp
+// 发送文件流
+using var fileStream = File.OpenRead("largefile.bin");
+var success = await clusterManager.RouteStreamAsync(
+    connectionId: "connection-123",
+    stream: fileStream,
+    messageType: WebSocketMessageType.Binary,
+    chunkSize: 64 * 1024  // 可选：自定义块大小
+);
+
+// 批量发送流到多个连接（支持跨节点）
+var connectionIds = new[] { "connection-1", "connection-2", "connection-3" };
+var results = await clusterManager.RouteStreamsAsync(
+    connectionIds: connectionIds,
+    stream: fileStream,
+    messageType: WebSocketMessageType.Binary
+);
+
+// 发送网络流
+using var networkStream = new NetworkStream(socket);
+await clusterManager.RouteStreamAsync("connection-123", networkStream);
+
+// 发送内存流
+using var memoryStream = new MemoryStream(data);
+await clusterManager.RouteStreamAsync("connection-123", memoryStream);
+```
+
+#### 流转发工作原理
+
+1. **分块读取**: 从流中按块大小（默认 64KB）读取数据
+2. **生成流ID**: 为每个流生成唯一的 StreamId
+3. **分块发送**: 将每个块封装为 `ForwardWebSocketStream` 消息发送
+4. **接收重组**: 目标节点接收所有块后自动重组
+5. **发送到客户端**: 重组完成后发送到目标 WebSocket 连接
+
+#### 流转发特性
+
+- ✅ **内存高效**: 分块传输，不会一次性加载整个流到内存
+- ✅ **自动重试**: 支持网络错误重试
+- ✅ **顺序保证**: 确保数据块按顺序重组
+- ✅ **进度跟踪**: 可选的总大小参数用于进度跟踪
+- ✅ **跨节点支持**: 自动路由到正确的节点
+
 ### 路由示例
 
 ```csharp

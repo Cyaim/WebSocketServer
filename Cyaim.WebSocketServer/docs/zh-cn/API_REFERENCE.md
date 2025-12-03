@@ -52,6 +52,131 @@ public interface IWebSocketHandler
 }
 ```
 
+### WebSocketManager
+
+WebSocketManager 提供了统一的发送方法，自动适配单机和集群模式。
+
+#### 统一发送方法（单机和集群）
+
+```csharp
+public static class WebSocketManager
+{
+    // 发送字节数组到单个连接
+    public static async Task<bool> SendAsync(
+        string connectionId,
+        byte[] data,
+        WebSocketMessageType messageType = WebSocketMessageType.Text);
+    
+    // 发送字节数组到多个连接
+    public static async Task<Dictionary<string, bool>> SendAsync(
+        IEnumerable<string> connectionIds,
+        byte[] data,
+        WebSocketMessageType messageType = WebSocketMessageType.Text);
+    
+    // 发送文本到单个连接
+    public static async Task<bool> SendAsync(
+        string connectionId,
+        string text,
+        Encoding encoding = null);
+    
+    // 发送文本到多个连接
+    public static async Task<Dictionary<string, bool>> SendAsync(
+        IEnumerable<string> connectionIds,
+        string text,
+        Encoding encoding = null);
+    
+    // 发送 JSON 对象到单个连接
+    public static async Task<bool> SendAsync<T>(
+        string connectionId,
+        T data,
+        JsonSerializerOptions options = null,
+        Encoding encoding = null);
+    
+    // 发送 JSON 对象到多个连接
+    public static async Task<Dictionary<string, bool>> SendAsync<T>(
+        IEnumerable<string> connectionIds,
+        T data,
+        JsonSerializerOptions options = null,
+        Encoding encoding = null);
+}
+```
+
+#### 扩展方法（便于使用）
+
+```csharp
+// 字节数组扩展方法
+public static async Task<bool> SendAsync(
+    this byte[] data,
+    string connectionId,
+    WebSocketMessageType messageType = WebSocketMessageType.Text);
+
+public static async Task<Dictionary<string, bool>> SendAsync(
+    this byte[] data,
+    IEnumerable<string> connectionIds,
+    WebSocketMessageType messageType = WebSocketMessageType.Text);
+
+// 文本扩展方法
+public static async Task<bool> SendTextAsync(
+    this string text,
+    string connectionId,
+    Encoding encoding = null);
+
+public static async Task<Dictionary<string, bool>> SendTextAsync(
+    this string text,
+    IEnumerable<string> connectionIds,
+    Encoding encoding = null);
+
+// JSON 对象扩展方法
+public static async Task<bool> SendJsonAsync<T>(
+    this T data,
+    string connectionId,
+    JsonSerializerOptions options = null,
+    Encoding encoding = null)
+    where T : class;
+
+public static async Task<Dictionary<string, bool>> SendJsonAsync<T>(
+    this T data,
+    IEnumerable<string> connectionIds,
+    JsonSerializerOptions options = null,
+    Encoding encoding = null)
+    where T : class;
+
+// 流扩展方法（支持大文件、网络流等）
+public static async Task<bool> SendAsync(
+    this Stream stream,
+    string connectionId,
+    WebSocketMessageType messageType = WebSocketMessageType.Binary,
+    int chunkSize = 64 * 1024,
+    CancellationToken cancellationToken = default);
+
+public static async Task<Dictionary<string, bool>> SendAsync(
+    this Stream stream,
+    IEnumerable<string> connectionIds,
+    WebSocketMessageType messageType = WebSocketMessageType.Binary,
+    int chunkSize = 64 * 1024,
+    CancellationToken cancellationToken = default);
+```
+
+#### 使用示例
+
+```csharp
+// 使用扩展方法发送文本
+await "Hello World".SendTextAsync("connectionId");
+
+// 使用扩展方法发送 JSON 对象
+var user = new { Id = 1, Name = "Alice" };
+await user.SendJsonAsync("connectionId");
+
+// 使用扩展方法发送流
+using var fileStream = File.OpenRead("largefile.bin");
+await fileStream.SendAsync("connectionId");
+
+// 批量发送
+var connectionIds = new[] { "conn1", "conn2", "conn3" };
+await "Hello".SendTextAsync(connectionIds);
+await fileStream.SendAsync(connectionIds);
+```
+
 ## 集群 API
 
 ### ClusterManager
@@ -83,6 +208,27 @@ public class ClusterManager
         IEnumerable<string> connectionIds, 
         byte[] data, 
         int messageType);
+    
+    // 流转发方法 - 支持大文件、网络流等
+    // Stream routing methods - supports large files, network streams, etc.
+    
+    // 向单个连接路由流（支持分块传输）
+    // Route stream to single connection (supports chunked transmission)
+    public Task<bool> RouteStreamAsync(
+        string connectionId,
+        Stream stream,
+        WebSocketMessageType messageType = WebSocketMessageType.Binary,
+        int chunkSize = 64 * 1024,
+        CancellationToken cancellationToken = default);
+    
+    // 向多个连接路由流（支持跨节点、分块传输）
+    // Route stream to multiple connections (supports cross-node, chunked transmission)
+    public Task<Dictionary<string, bool>> RouteStreamsAsync(
+        IEnumerable<string> connectionIds,
+        Stream stream,
+        WebSocketMessageType messageType = WebSocketMessageType.Binary,
+        int chunkSize = 64 * 1024,
+        CancellationToken cancellationToken = default);
     
     public void SetConnectionProvider(IWebSocketConnectionProvider provider);
     public void SetMetricsCollector(WebSocketMetricsCollector metricsCollector);
@@ -413,6 +559,23 @@ public class MvcResponseScheme
     public long RequestTime { get; set; }
     public long CompleteTime { get; set; }
     public object Body { get; set; }
+}
+```
+
+### ForwardWebSocketStream
+
+```csharp
+public class ForwardWebSocketStream
+{
+    public string ConnectionId { get; set; }
+    public string TargetNodeId { get; set; }
+    public string StreamId { get; set; }  // 流ID，用于块关联
+    public int ChunkIndex { get; set; }    // 块索引（从0开始）
+    public bool IsLastChunk { get; set; }  // 是否是最后一块
+    public byte[] Data { get; set; }       // 块数据
+    public int MessageType { get; set; }   // WebSocket消息类型
+    public long? TotalSize { get; set; }    // 流总大小（可选，用于进度跟踪）
+    public string Endpoint { get; set; }    // 端点
 }
 ```
 

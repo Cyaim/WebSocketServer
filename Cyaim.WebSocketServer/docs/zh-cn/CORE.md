@@ -11,6 +11,7 @@
 - [中间件](#中间件)
 - [配置选项](#配置选项)
 - [请求和响应](#请求和响应)
+- [向客户端发送数据](#向客户端发送数据)
 - [高级功能](#高级功能)
 
 ## 概述
@@ -300,6 +301,351 @@ var webSocketOptions = new WebSocketOptions()
 
 - **Text**: 文本消息（JSON 格式）
 - **Binary**: 二进制消息
+
+## 向客户端发送数据
+
+`WebSocketManager` 提供了统一的发送方法，自动适配单机和集群模式，支持多种数据类型和发送方式。
+
+### 概述
+
+`WebSocketManager` 的核心特性：
+
+- ✅ **自动适配** - 自动检测单机或集群模式，无需手动判断
+- ✅ **统一接口** - 提供一致的 API，无论单机还是集群
+- ✅ **多种数据类型** - 支持文本、JSON 对象、字节数组、流等
+- ✅ **批量发送** - 支持同时向多个连接发送数据
+- ✅ **扩展方法** - 提供便捷的扩展方法，代码更简洁
+- ✅ **流支持** - 支持大文件、网络流等，自动分块传输
+
+### 获取连接 ID
+
+在发送数据前，需要获取客户端的连接 ID。连接 ID 通常从 `HttpContext` 中获取：
+
+```csharp
+// 在控制器或处理器中
+public class MyController : ControllerBase
+{
+    [WebSocket]
+    [HttpGet]
+    public string GetMessage()
+    {
+        // 获取当前连接的 ID
+        var connectionId = HttpContext.Connection.Id;
+        
+        // 发送消息
+        await WebSocketManager.SendAsync(connectionId, "Hello from server!");
+        
+        return "Message sent";
+    }
+}
+```
+
+### 发送文本消息
+
+#### 单个连接
+
+```csharp
+using Cyaim.WebSocketServer.Infrastructure;
+
+// 方式1：使用静态方法
+await WebSocketManager.SendAsync("connectionId", "Hello World!");
+
+// 方式2：使用扩展方法（推荐，更简洁）
+await "Hello World!".SendTextAsync("connectionId");
+
+// 指定编码
+await "你好世界".SendTextAsync("connectionId", Encoding.UTF8);
+```
+
+#### 批量发送
+
+```csharp
+var connectionIds = new[] { "conn1", "conn2", "conn3" };
+
+// 方式1：使用静态方法
+var results = await WebSocketManager.SendAsync(connectionIds, "Hello from server!");
+
+// 方式2：使用扩展方法
+var results = await "Hello from server!".SendTextAsync(connectionIds);
+
+// 检查发送结果
+foreach (var result in results)
+{
+    if (result.Value)
+    {
+        Console.WriteLine($"成功发送到 {result.Key}");
+    }
+    else
+    {
+        Console.WriteLine($"发送到 {result.Key} 失败");
+    }
+}
+```
+
+### 发送 JSON 对象
+
+#### 单个连接
+
+```csharp
+// 定义数据模型
+var user = new
+{
+    Id = 1,
+    Name = "Alice",
+    Email = "alice@example.com"
+};
+
+// 方式1：使用静态方法
+await WebSocketManager.SendAsync("connectionId", user);
+
+// 方式2：使用扩展方法（推荐）
+await user.SendJsonAsync("connectionId");
+
+// 自定义 JSON 序列化选项
+var options = new JsonSerializerOptions
+{
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+};
+await user.SendJsonAsync("connectionId", options);
+```
+
+#### 批量发送
+
+```csharp
+var notification = new
+{
+    Type = "SystemNotification",
+    Message = "系统维护将在 10 分钟后开始",
+    Timestamp = DateTime.UtcNow
+};
+
+var connectionIds = new[] { "conn1", "conn2", "conn3" };
+var results = await notification.SendJsonAsync(connectionIds);
+```
+
+### 发送字节数组
+
+#### 单个连接
+
+```csharp
+// 准备数据
+var data = Encoding.UTF8.GetBytes("Binary data");
+var imageData = File.ReadAllBytes("image.png");
+
+// 方式1：使用静态方法
+await WebSocketManager.SendAsync("connectionId", data, WebSocketMessageType.Binary);
+
+// 方式2：使用扩展方法
+await data.SendAsync("connectionId", WebSocketMessageType.Binary);
+await imageData.SendAsync("connectionId", WebSocketMessageType.Binary);
+```
+
+#### 批量发送
+
+```csharp
+var binaryData = Encoding.UTF8.GetBytes("Binary message");
+var connectionIds = new[] { "conn1", "conn2", "conn3" };
+
+var results = await binaryData.SendAsync(connectionIds, WebSocketMessageType.Binary);
+```
+
+### 发送流数据（大文件、网络流等）
+
+流发送功能特别适合传输大文件、网络流等大数据量场景，系统会自动分块传输，避免内存溢出。
+
+#### 单个连接
+
+```csharp
+// 发送文件流
+using var fileStream = File.OpenRead("largefile.zip");
+await fileStream.SendAsync("connectionId");
+
+// 发送网络流
+using var networkStream = new NetworkStream(socket);
+await networkStream.SendAsync("connectionId", WebSocketMessageType.Binary);
+
+// 发送内存流
+using var memoryStream = new MemoryStream(data);
+await memoryStream.SendAsync("connectionId");
+
+// 自定义块大小（默认 64KB）
+await fileStream.SendAsync("connectionId", chunkSize: 128 * 1024);
+```
+
+#### 批量发送
+
+```csharp
+using var fileStream = File.OpenRead("document.pdf");
+var connectionIds = new[] { "conn1", "conn2", "conn3" };
+
+// 批量发送流（系统会自动缓冲并发送到所有连接）
+var results = await fileStream.SendAsync(connectionIds);
+```
+
+#### 流发送特性
+
+- **自动分块**: 大流自动分块传输（默认 64KB），避免内存溢出
+- **自动重组**: 接收端自动重组分块数据，确保数据完整性
+- **进度跟踪**: 可选的总大小参数用于进度跟踪
+- **内存高效**: 不会一次性加载整个流到内存
+
+### 单机模式 vs 集群模式
+
+`WebSocketManager` 会自动检测运行模式：
+
+#### 单机模式
+
+当未启用集群时，消息直接发送到本地 WebSocket 连接：
+
+```csharp
+// 自动使用本地 WebSocket 发送
+await "Hello".SendTextAsync("connectionId");
+```
+
+#### 集群模式
+
+当启用集群时，消息会自动路由到正确的节点：
+
+```csharp
+// 自动路由到正确的节点（本地或远程）
+await "Hello".SendTextAsync("connectionId");
+
+// 支持跨节点批量发送
+var connectionIds = new[] { "node1-conn1", "node2-conn1", "node3-conn1" };
+await "Hello from cluster".SendTextAsync(connectionIds);
+```
+
+**注意**: 无需手动判断是单机还是集群模式，`WebSocketManager` 会自动处理。
+
+### 实际使用场景
+
+#### 场景1：实时通知
+
+```csharp
+public class NotificationService
+{
+    public async Task NotifyUserAsync(string userId, string message)
+    {
+        // 假设 userId 对应 connectionId
+        var notification = new
+        {
+            Type = "Notification",
+            Message = message,
+            Timestamp = DateTime.UtcNow
+        };
+        
+        await notification.SendJsonAsync(userId);
+    }
+    
+    public async Task BroadcastAsync(string message)
+    {
+        // 获取所有连接 ID
+        var connectionIds = MvcChannelHandler.Clients.Keys;
+        
+        var notification = new
+        {
+            Type = "Broadcast",
+            Message = message,
+            Timestamp = DateTime.UtcNow
+        };
+        
+        await notification.SendJsonAsync(connectionIds);
+    }
+}
+```
+
+#### 场景2：文件传输
+
+```csharp
+public class FileService
+{
+    public async Task SendFileAsync(string connectionId, string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException();
+        }
+        
+        using var fileStream = File.OpenRead(filePath);
+        var success = await fileStream.SendAsync(connectionId);
+        
+        if (success)
+        {
+            Console.WriteLine($"文件 {filePath} 发送成功");
+        }
+    }
+    
+    public async Task SendFileToMultipleAsync(IEnumerable<string> connectionIds, string filePath)
+    {
+        using var fileStream = File.OpenRead(filePath);
+        var results = await fileStream.SendAsync(connectionIds);
+        
+        var successCount = results.Count(r => r.Value);
+        Console.WriteLine($"成功发送到 {successCount}/{results.Count} 个连接");
+    }
+}
+```
+
+#### 场景3：实时数据推送
+
+```csharp
+public class DataPushService
+{
+    public async Task PushDataAsync(string connectionId, object data)
+    {
+        // 使用扩展方法发送 JSON
+        await data.SendJsonAsync(connectionId);
+    }
+    
+    public async Task PushToGroupAsync(IEnumerable<string> connectionIds, object data)
+    {
+        // 批量发送到组内所有连接
+        await data.SendJsonAsync(connectionIds);
+    }
+}
+```
+
+### 错误处理
+
+发送方法返回 `bool` 或 `Dictionary<string, bool>`，可以检查发送是否成功：
+
+```csharp
+// 单个连接
+var success = await "Hello".SendTextAsync("connectionId");
+if (!success)
+{
+    Console.WriteLine("发送失败，连接可能已断开");
+}
+
+// 批量发送
+var results = await "Hello".SendTextAsync(connectionIds);
+var failedConnections = results.Where(r => !r.Value).Select(r => r.Key);
+if (failedConnections.Any())
+{
+    Console.WriteLine($"以下连接发送失败: {string.Join(", ", failedConnections)}");
+}
+```
+
+### 性能建议
+
+1. **批量发送**: 需要向多个连接发送相同数据时，使用批量方法更高效
+2. **流传输**: 大文件使用流发送，避免加载到内存
+3. **合理分块**: 流传输时根据网络情况调整块大小
+4. **异步处理**: 所有发送方法都是异步的，避免阻塞
+
+### 方法对比
+
+| 方法 | 适用场景 | 返回值 |
+|------|---------|--------|
+| `SendAsync(string, ...)` | 单个连接 | `Task<bool>` |
+| `SendAsync(IEnumerable<string>, ...)` | 多个连接 | `Task<Dictionary<string, bool>>` |
+| 扩展方法 | 代码更简洁 | 同上 |
+
+### 相关 API
+
+详细 API 参考请查看 [API 参考文档](./API_REFERENCE.md#websocketmanager)。
+
+集群模式下的路由功能请查看 [集群模块文档](./CLUSTER.md#消息路由)。
 
 ## 高级功能
 
