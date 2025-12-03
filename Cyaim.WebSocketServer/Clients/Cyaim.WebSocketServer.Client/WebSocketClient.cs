@@ -111,7 +111,7 @@ namespace Cyaim.WebSocketServer.Client
 
             // Wait for response / 等待响应
             var response = await ReceiveResponseAsync(requestId, cancellationToken);
-            
+
             if (response.Status != 0)
             {
                 throw new Exception($"Request failed: {response.Msg ?? "Unknown error"}");
@@ -168,13 +168,13 @@ namespace Cyaim.WebSocketServer.Client
             if (_options.Protocol == SerializationProtocol.MessagePack)
             {
                 // 使用 MessagePack 反序列化
-                var messagePackResponse = await ReceiveMessagePackResponseAsync(requestId, result, buffer, cancellationToken);
-                
+                MessagePackResponseScheme messagePackResponse = await ReceiveMessagePackResponseAsync(requestId, result, buffer, cancellationToken);
+
                 // 转换为 MvcResponseScheme 格式
                 response = new MvcResponseScheme
                 {
                     Id = messagePackResponse.Id,
-                    Target = messagePackResponse.Target,
+                    Target = messagePackResponse.Target ?? string.Empty,
                     Status = messagePackResponse.Status,
                     Msg = messagePackResponse.Msg,
                     Body = messagePackResponse.Body
@@ -208,13 +208,13 @@ namespace Cyaim.WebSocketServer.Client
         /// Receive MessagePack response / 接收 MessagePack 响应
         /// </summary>
         private async Task<MessagePackResponseScheme> ReceiveMessagePackResponseAsync(
-            string requestId, 
-            WebSocketReceiveResult initialResult, 
-            byte[] buffer, 
+            string requestId,
+            WebSocketReceiveResult initialResult,
+            byte[] buffer,
             CancellationToken cancellationToken)
         {
             using var ms = new MemoryStream();
-            
+
             // 接收完整消息（可能分片）
             do
             {

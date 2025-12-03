@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Text;
@@ -63,6 +64,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// </summary>
         private readonly ConcurrentDictionary<string, TaskCompletionSource<byte[]>> _pendingForwards;
 
+        // Stream chunks: streamId -> list of chunks / 流块：流ID -> 块列表
+        /// <summary>
+        /// Stream chunks for reassembly / 用于重组的流块
+        /// </summary>
+        private readonly ConcurrentDictionary<string, StreamChunkBuffer> _streamChunks;
+
         /// <summary>
         /// Constructor / 构造函数
         /// </summary>
@@ -83,6 +90,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             _connectionMetadata = new ConcurrentDictionary<string, ConnectionMetadata>();
             _nodeConnectionCounts = new ConcurrentDictionary<string, int>();
             _pendingForwards = new ConcurrentDictionary<string, TaskCompletionSource<byte[]>>();
+            _streamChunks = new ConcurrentDictionary<string, StreamChunkBuffer>();
 
             _transport.MessageReceived += OnTransportMessageReceived;
             _transport.NodeDisconnected += OnNodeDisconnected;
@@ -322,6 +330,183 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         }
 
         /// <summary>
+        /// Route stream to connection (local or remote) - supports chunked transmission
+        /// 将流转发到连接（本地或远程）- 支持分块传输
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="stream">Stream to send / 要发送的流</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <param name="chunkSize">Chunk size in bytes / 块大小（字节）</param>
+        /// <param name="cancellationToken">Cancellation token / 取消令牌</param>
+        /// <returns>True if routed successfully / 路由成功返回 true</returns>
+        public async Task<bool> RouteStreamAsync(
+            string connectionId,
+            Stream stream,
+            int messageType,
+            int chunkSize = 64 * 1024,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(connectionId) || stream == null || !stream.CanRead)
+            {
+                return false;
+            }
+
+            // Check if connection is local or remote / 检查连接是本地还是远程
+            if (_connectionRoutes.TryGetValue(connectionId, out var targetNodeId))
+            {
+                if (targetNodeId == _nodeId)
+                {
+                    // Local connection - send stream directly / 本地连接 - 直接发送流
+                    _logger.LogDebug($"Routing stream to local connection {connectionId}");
+
+                    if (_connectionProvider != null)
+                    {
+                        var webSocket = _connectionProvider.GetConnection(connectionId);
+                        if (webSocket != null && webSocket.State == WebSocketState.Open)
+                        {
+                            try
+                            {
+                                // Use WebSocketManager to send stream / 使用 WebSocketManager 发送流
+                                await Infrastructure.WebSocketManager.SendLocalAsync(
+                                    stream,
+                                    (WebSocketMessageType)messageType,
+                                    cancellationToken,
+                                    timeout: null,
+                                    sendAtOnce: false,
+                                    sendBufferSize: (uint)chunkSize,
+                                    webSocket);
+                                return true;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, $"Failed to send stream to local connection {connectionId}");
+                                return false;
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning($"Local connection {connectionId} is not available or closed");
+                            _connectionRoutes.TryRemove(connectionId, out _);
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"Connection provider not set, cannot route stream to local connection {connectionId}");
+                        return false;
+                    }
+                }
+                else
+                {
+                    // Remote connection - forward stream chunks via transport / 远程连接 - 通过传输转发流块
+                    return await ForwardStreamToNodeAsync(targetNodeId, connectionId, stream, messageType, chunkSize, cancellationToken);
+                }
+            }
+            else
+            {
+                // Connection not found - query cluster if leader / 未找到连接 - 如果是领导者则查询集群
+                if (_raftNode.IsLeader())
+                {
+                    var found = await QueryConnectionAsync(connectionId);
+                    if (found != null)
+                    {
+                        return await ForwardStreamToNodeAsync(found, connectionId, stream, messageType, chunkSize, cancellationToken);
+                    }
+                }
+
+                _logger.LogWarning($"Connection {connectionId} not found in routing table for stream routing");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Forward stream to specific node in chunks / 将流分块转发到指定节点
+        /// </summary>
+        /// <param name="targetNodeId">Target node ID / 目标节点 ID</param>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="stream">Stream to send / 要发送的流</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <param name="chunkSize">Chunk size in bytes / 块大小（字节）</param>
+        /// <param name="cancellationToken">Cancellation token / 取消令牌</param>
+        /// <returns>True if forwarded successfully / 转发成功返回 true</returns>
+        private async Task<bool> ForwardStreamToNodeAsync(
+            string targetNodeId,
+            string connectionId,
+            Stream stream,
+            int messageType,
+            int chunkSize,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var streamId = Guid.NewGuid().ToString("N");
+                var buffer = new byte[chunkSize];
+                int chunkIndex = 0;
+                long totalSize = stream.CanSeek ? stream.Length : 0;
+                bool isLastChunk = false;
+
+                _logger.LogDebug($"Starting stream forwarding for connection {connectionId} to node {targetNodeId}, streamId: {streamId}");
+
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    int bytesRead = await stream.ReadAsync(buffer, 0, chunkSize, cancellationToken);
+                    
+                    if (bytesRead == 0)
+                    {
+                        // End of stream / 流结束
+                        break;
+                    }
+
+                    // Check if this is the last chunk / 检查是否是最后一块
+                    isLastChunk = bytesRead < chunkSize;
+
+                    // Create chunk data / 创建块数据
+                    var chunkData = new byte[bytesRead];
+                    Array.Copy(buffer, chunkData, bytesRead);
+
+                    var forwardStream = new ForwardWebSocketStream
+                    {
+                        ConnectionId = connectionId,
+                        TargetNodeId = targetNodeId,
+                        StreamId = streamId,
+                        ChunkIndex = chunkIndex,
+                        IsLastChunk = isLastChunk,
+                        Data = chunkData,
+                        MessageType = messageType,
+                        TotalSize = totalSize > 0 ? totalSize : (long?)null
+                    };
+
+                    var message = new ClusterMessage
+                    {
+                        Type = ClusterMessageType.ForwardWebSocketStream,
+                        Payload = JsonSerializer.Serialize(forwardStream)
+                    };
+
+                    await _transport.SendAsync(targetNodeId, message);
+                    
+                    // 记录集群消息转发指标
+                    _metricsCollector?.RecordClusterMessageForwarded(_nodeId, targetNodeId);
+
+                    chunkIndex++;
+
+                    if (isLastChunk)
+                    {
+                        break;
+                    }
+                }
+
+                _logger.LogDebug($"Completed stream forwarding for connection {connectionId} to node {targetNodeId}, streamId: {streamId}, chunks: {chunkIndex + 1}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to forward stream for connection {connectionId} to node {targetNodeId}");
+                _metricsCollector?.RecordError("cluster_stream_forward_failed", _nodeId);
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Query connection location from cluster / 从集群查询连接位置
         /// </summary>
         /// <param name="connectionId">Connection ID to query / 要查询的连接 ID</param>
@@ -403,6 +588,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                             await HandleForwardMessage(e.Message);
                             break;
 
+                        case ClusterMessageType.ForwardWebSocketStream:
+                            await HandleForwardStream(e.Message);
+                            break;
+
                         case ClusterMessageType.RegisterWebSocketConnection:
                             HandleRegisterConnection(e.Message);
                             break;
@@ -421,6 +610,133 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     _logger.LogError(ex, $"Error handling cluster message {e.Message.Type}");
                 }
             });
+        }
+
+        /// <summary>
+        /// Handle forward WebSocket stream / 处理转发 WebSocket 流
+        /// </summary>
+        /// <param name="message">Forward stream message / 转发流消息</param>
+        private async Task HandleForwardStream(ClusterMessage message)
+        {
+            try
+            {
+                var forwardStream = JsonSerializer.Deserialize<ForwardWebSocketStream>(message.Payload);
+
+                // If this is the target node, find local WebSocket and send
+                // 如果这是目标节点，查找本地 WebSocket 并发送
+                if (forwardStream.TargetNodeId == _nodeId)
+                {
+                    // 记录集群消息接收指标
+                    _metricsCollector?.RecordClusterMessageReceived(forwardStream.TargetNodeId);
+
+                    _logger.LogDebug($"Received stream chunk {forwardStream.ChunkIndex} for local connection {forwardStream.ConnectionId}, streamId: {forwardStream.StreamId}");
+
+                    if (_connectionProvider != null)
+                    {
+                        var webSocket = _connectionProvider.GetConnection(forwardStream.ConnectionId);
+                        if (webSocket != null && webSocket.State == WebSocketState.Open)
+                        {
+                            // Get or create stream buffer / 获取或创建流缓冲区
+                            var buffer = _streamChunks.GetOrAdd(forwardStream.StreamId, _ => new StreamChunkBuffer
+                            {
+                                ConnectionId = forwardStream.ConnectionId,
+                                MessageType = forwardStream.MessageType
+                            });
+
+                            // Add chunk to buffer / 将块添加到缓冲区
+                            lock (buffer)
+                            {
+                                buffer.Chunks[forwardStream.ChunkIndex] = forwardStream.Data;
+                                buffer.ReceivedChunks++;
+
+                                // If this is the last chunk, mark as complete / 如果是最后一块，标记为完成
+                                if (forwardStream.IsLastChunk)
+                                {
+                                    buffer.IsComplete = true;
+                                }
+                            }
+
+                            // If stream is complete, send to WebSocket / 如果流完成，发送到 WebSocket
+                            if (forwardStream.IsLastChunk)
+                            {
+                                // Wait a bit to ensure all chunks are received (in case of out-of-order delivery)
+                                // 等待一下以确保收到所有块（以防乱序传递）
+                                await Task.Delay(50);
+
+                                lock (buffer)
+                                {
+                                    if (buffer.IsComplete)
+                                    {
+                                        // Reassemble stream and send / 重组流并发送
+                                        var totalSize = buffer.Chunks.Values.Sum(chunk => chunk.Length);
+                                        var streamData = new byte[totalSize];
+                                        int offset = 0;
+
+                                        // Sort chunks by index and copy to streamData / 按索引排序块并复制到 streamData
+                                        foreach (var kvp in buffer.Chunks.OrderBy(c => c.Key))
+                                        {
+                                            Array.Copy(kvp.Value, 0, streamData, offset, kvp.Value.Length);
+                                            offset += kvp.Value.Length;
+                                        }
+
+                                        // Send to WebSocket / 发送到 WebSocket
+                                        _ = Task.Run(async () =>
+                                        {
+                                            try
+                                            {
+                                                var wsMessageType = (WebSocketMessageType)buffer.MessageType;
+                                                await webSocket.SendAsync(
+                                                    new ArraySegment<byte>(streamData),
+                                                    wsMessageType,
+                                                    true,
+                                                    CancellationToken.None);
+
+                                                _logger.LogDebug($"Successfully forwarded stream to local connection {buffer.ConnectionId}, streamId: {forwardStream.StreamId}");
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                _logger.LogError(ex, $"Failed to send stream to local connection {buffer.ConnectionId}");
+                                            }
+                                            finally
+                                            {
+                                                // Clean up buffer / 清理缓冲区
+                                                _streamChunks.TryRemove(forwardStream.StreamId, out _);
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning($"Local connection {forwardStream.ConnectionId} not found or closed");
+                            _connectionRoutes.TryRemove(forwardStream.ConnectionId, out _);
+                            // Clean up buffer / 清理缓冲区
+                            _streamChunks.TryRemove(forwardStream.StreamId, out _);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"Connection provider not set, cannot handle forward stream for {forwardStream.ConnectionId}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error handling forward stream message");
+            }
+        }
+
+        /// <summary>
+        /// Stream chunk buffer for reassembly / 用于重组的流块缓冲区
+        /// </summary>
+        private class StreamChunkBuffer
+        {
+            public string ConnectionId { get; set; }
+            public int MessageType { get; set; }
+            public Dictionary<int, byte[]> Chunks { get; } = new Dictionary<int, byte[]>();
+            public int ReceivedChunks { get; set; }
+            public bool IsComplete { get; set; }
         }
 
         /// <summary>

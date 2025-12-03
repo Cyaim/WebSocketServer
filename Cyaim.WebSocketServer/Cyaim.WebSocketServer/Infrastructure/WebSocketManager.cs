@@ -275,7 +275,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 {
                     totalBytesRead += bytesRead;
                 }
-
+                
                 if (totalBytesRead > 0)
                 {
                     await webSocket.SendAsync(new ArraySegment<byte>(buffer, 0, totalBytesRead), messageType, endOfMessage: true, cancellationToken);
@@ -889,6 +889,153 @@ namespace Cyaim.WebSocketServer.Infrastructure
             where T : class
         {
             return await SendAsync(connectionIds, data, options, encoding);
+        }
+
+        /// <summary>
+        /// Send stream to connection(s) - extension method for convenient usage
+        /// 向连接发送流 - 扩展方法（便于使用）
+        /// </summary>
+        /// <param name="stream">Stream to send / 要发送的流</param>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <param name="chunkSize">Chunk size in bytes (default: 64KB) / 块大小（字节，默认：64KB）</param>
+        /// <param name="cancellationToken">Cancellation token / 取消令牌</param>
+        /// <returns>True if sent successfully / 发送成功返回 true</returns>
+        public static async Task<bool> SendAsync(
+            this Stream stream,
+            string connectionId,
+            WebSocketMessageType messageType = WebSocketMessageType.Binary,
+            int chunkSize = 64 * 1024,
+            CancellationToken cancellationToken = default)
+        {
+            if (stream == null || !stream.CanRead)
+            {
+                return false;
+            }
+
+            // Check if cluster is enabled / 检查是否启用集群
+            var clusterManager = GlobalClusterCenter.ClusterManager;
+            if (clusterManager != null)
+            {
+                // Use cluster routing / 使用集群路由
+                return await clusterManager.RouteStreamAsync(connectionId, stream, messageType, chunkSize, cancellationToken);
+            }
+            else
+            {
+                // Use local WebSocket / 使用本地 WebSocket
+                var webSocket = GetLocalWebSocket(connectionId);
+                if (webSocket != null && webSocket.State == WebSocketState.Open)
+                {
+                    try
+                    {
+                        await SendLocalAsync(stream, messageType, cancellationToken, timeout: null, sendAtOnce: false, sendBufferSize: (uint)chunkSize, sockets: webSocket);
+                        return true;
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Send stream to multiple connections - extension method for convenient usage
+        /// 向多个连接发送流 - 扩展方法（便于使用）
+        /// </summary>
+        /// <param name="stream">Stream to send / 要发送的流</param>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <param name="chunkSize">Chunk size in bytes (default: 64KB) / 块大小（字节，默认：64KB）</param>
+        /// <param name="cancellationToken">Cancellation token / 取消令牌</param>
+        /// <returns>Dictionary of connection ID to send result / 连接ID到发送结果的字典</returns>
+        public static async Task<Dictionary<string, bool>> SendAsync(
+            this Stream stream,
+            IEnumerable<string> connectionIds,
+            WebSocketMessageType messageType = WebSocketMessageType.Binary,
+            int chunkSize = 64 * 1024,
+            CancellationToken cancellationToken = default)
+        {
+            if (stream == null || !stream.CanRead)
+            {
+                return new Dictionary<string, bool>();
+            }
+
+            // Check if cluster is enabled / 检查是否启用集群
+            var clusterManager = GlobalClusterCenter.ClusterManager;
+            if (clusterManager != null)
+            {
+                // Use cluster routing / 使用集群路由
+                return await clusterManager.RouteStreamsAsync(connectionIds, stream, messageType, chunkSize, cancellationToken);
+            }
+            else
+            {
+                // Use local WebSocket / 使用本地 WebSocket
+                var results = new Dictionary<string, bool>();
+                var connectionIdList = connectionIds.Where(id => !string.IsNullOrEmpty(id)).ToList();
+                
+                if (connectionIdList.Count == 0)
+                {
+                    return results;
+                }
+
+                // For multiple connections, buffer the stream / 对于多个连接，缓冲流
+                if (connectionIdList.Count > 1)
+                {
+                    using var memoryStream = new MemoryStream();
+                    await stream.CopyToAsync(memoryStream, cancellationToken);
+                    memoryStream.Position = 0;
+
+                    var tasks = connectionIdList.Select(async connectionId =>
+                    {
+                        memoryStream.Position = 0;
+                        var webSocket = GetLocalWebSocket(connectionId);
+                        if (webSocket != null && webSocket.State == WebSocketState.Open)
+                        {
+                            try
+                            {
+                                await SendLocalAsync(memoryStream, messageType, cancellationToken, timeout: null, sendAtOnce: false, sendBufferSize: (uint)chunkSize, sockets: webSocket);
+                                results[connectionId] = true;
+                            }
+                            catch
+                            {
+                                results[connectionId] = false;
+                            }
+                        }
+                        else
+                        {
+                            results[connectionId] = false;
+                        }
+                    });
+
+                    await Task.WhenAll(tasks);
+                }
+                else
+                {
+                    // Single connection - stream directly / 单个连接 - 直接流式传输
+                    var connectionId = connectionIdList[0];
+                    var webSocket = GetLocalWebSocket(connectionId);
+                    if (webSocket != null && webSocket.State == WebSocketState.Open)
+                    {
+                        try
+                        {
+                            await SendLocalAsync(stream, messageType, cancellationToken, timeout: null, sendAtOnce: false, sendBufferSize: (uint)chunkSize, sockets: webSocket);
+                            results[connectionId] = true;
+                        }
+                        catch
+                        {
+                            results[connectionId] = false;
+                        }
+                    }
+                    else
+                    {
+                        results[connectionId] = false;
+                    }
+                }
+
+                return results;
+            }
         }
 
         #endregion

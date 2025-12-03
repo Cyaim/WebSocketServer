@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Infrastructure.Metrics;
@@ -449,6 +451,108 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 }
                 return results;
             }
+        }
+
+        #endregion
+
+        #region Stream Routing Methods / 流路由方法
+
+        /// <summary>
+        /// Route stream to connection(s) - automatically handles single machine or cluster mode (supports chunked transmission)
+        /// 将流转发到连接 - 自动处理单机或集群模式（支持分块传输）
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="stream">Stream to send / 要发送的流</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <param name="chunkSize">Chunk size in bytes (default: 64KB) / 块大小（字节，默认：64KB）</param>
+        /// <param name="cancellationToken">Cancellation token / 取消令牌</param>
+        /// <returns>True if routed successfully / 路由成功返回 true</returns>
+        /// <remarks>
+        /// This method reads the stream in chunks and sends them sequentially.
+        /// For cluster mode, it automatically forwards chunks to the correct node.
+        /// 此方法以块为单位读取流并顺序发送。
+        /// 对于集群模式，它会自动将块转发到正确的节点。
+        /// </remarks>
+        public async Task<bool> RouteStreamAsync(
+            string connectionId,
+            Stream stream,
+            WebSocketMessageType messageType = WebSocketMessageType.Binary,
+            int chunkSize = 64 * 1024,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(connectionId) || stream == null || !stream.CanRead)
+            {
+                return false;
+            }
+
+            return await _router.RouteStreamAsync(connectionId, stream, (int)messageType, chunkSize, cancellationToken);
+        }
+
+        /// <summary>
+        /// Route stream to multiple connections - automatically handles single machine or cluster mode (supports chunked transmission)
+        /// 将流转发到多个连接 - 自动处理单机或集群模式（支持分块传输）
+        /// </summary>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表</param>
+        /// <param name="stream">Stream to send / 要发送的流</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <param name="chunkSize">Chunk size in bytes (default: 64KB) / 块大小（字节，默认：64KB）</param>
+        /// <param name="cancellationToken">Cancellation token / 取消令牌</param>
+        /// <returns>Dictionary of connection ID to routing result / 连接ID到路由结果的字典</returns>
+        /// <remarks>
+        /// This method reads the stream once and sends chunks to all connections in parallel.
+        /// For cluster mode, it automatically forwards chunks to the correct nodes.
+        /// 此方法读取流一次，并并行向所有连接发送块。
+        /// 对于集群模式，它会自动将块转发到正确的节点。
+        /// </remarks>
+        public async Task<Dictionary<string, bool>> RouteStreamsAsync(
+            IEnumerable<string> connectionIds,
+            Stream stream,
+            WebSocketMessageType messageType = WebSocketMessageType.Binary,
+            int chunkSize = 64 * 1024,
+            CancellationToken cancellationToken = default)
+        {
+            if (connectionIds == null || stream == null || !stream.CanRead)
+            {
+                return new Dictionary<string, bool>();
+            }
+
+            var results = new Dictionary<string, bool>();
+            var connectionIdList = connectionIds.Where(id => !string.IsNullOrEmpty(id)).ToList();
+            
+            if (connectionIdList.Count == 0)
+            {
+                return results;
+            }
+
+            // Read stream once and send to all connections / 读取流一次并发送到所有连接
+            // For multiple connections, we need to read the stream multiple times or buffer it
+            // 对于多个连接，我们需要多次读取流或缓冲它
+            // For simplicity, we'll buffer the stream for multiple connections
+            // 为简单起见，我们将为多个连接缓冲流
+            if (connectionIdList.Count > 1)
+            {
+                // Buffer the stream / 缓冲流
+                using var memoryStream = new MemoryStream();
+                await stream.CopyToAsync(memoryStream, cancellationToken);
+                memoryStream.Position = 0;
+
+                var tasks = connectionIdList.Select(async connectionId =>
+                {
+                    memoryStream.Position = 0;
+                    var success = await _router.RouteStreamAsync(connectionId, memoryStream, (int)messageType, chunkSize, cancellationToken);
+                    results[connectionId] = success;
+                });
+
+                await Task.WhenAll(tasks);
+            }
+            else
+            {
+                // Single connection - stream directly / 单个连接 - 直接流式传输
+                var connectionId = connectionIdList[0];
+                results[connectionId] = await _router.RouteStreamAsync(connectionId, stream, (int)messageType, chunkSize, cancellationToken);
+            }
+
+            return results;
         }
 
         #endregion

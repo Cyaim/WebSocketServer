@@ -37,6 +37,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// </summary>
         ForwardWebSocketMessage,
         /// <summary>
+        /// Forward WebSocket stream / 转发 WebSocket 流
+        /// </summary>
+        ForwardWebSocketStream,
+        /// <summary>
         /// Forward WebSocket response / 转发 WebSocket 响应
         /// </summary>
         ForwardWebSocketResponse,
@@ -279,6 +283,58 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// Message type (WebSocketMessageType as int) / 消息类型（WebSocketMessageType 的整数值）
         /// </summary>
         public int MessageType { get; set; }
+
+        /// <summary>
+        /// Endpoint / 端点
+        /// </summary>
+        public string Endpoint { get; set; }
+    }
+
+    /// <summary>
+    /// WebSocket stream forward message (supports chunked transmission)
+    /// WebSocket 流转发消息（支持分块传输）
+    /// </summary>
+    public class ForwardWebSocketStream
+    {
+        /// <summary>
+        /// Connection ID / 连接 ID
+        /// </summary>
+        public string ConnectionId { get; set; }
+
+        /// <summary>
+        /// Target node ID / 目标节点 ID
+        /// </summary>
+        public string TargetNodeId { get; set; }
+
+        /// <summary>
+        /// Stream ID for chunk correlation / 用于块关联的流 ID
+        /// </summary>
+        public string StreamId { get; set; }
+
+        /// <summary>
+        /// Chunk index (0-based) / 块索引（从 0 开始）
+        /// </summary>
+        public int ChunkIndex { get; set; }
+
+        /// <summary>
+        /// Whether this is the last chunk / 是否是最后一块
+        /// </summary>
+        public bool IsLastChunk { get; set; }
+
+        /// <summary>
+        /// Chunk data / 块数据
+        /// </summary>
+        public byte[] Data { get; set; }
+
+        /// <summary>
+        /// Message type (WebSocketMessageType as int) / 消息类型（WebSocketMessageType 的整数值）
+        /// </summary>
+        public int MessageType { get; set; }
+
+        /// <summary>
+        /// Total stream size in bytes (optional, for progress tracking) / 流总大小（字节，可选，用于进度跟踪）
+        /// </summary>
+        public long? TotalSize { get; set; }
 
         /// <summary>
         /// Endpoint / 端点
