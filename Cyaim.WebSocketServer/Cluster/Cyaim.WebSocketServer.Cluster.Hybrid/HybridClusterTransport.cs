@@ -26,6 +26,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         private readonly NodeInfo _nodeInfo;
         private readonly ConcurrentDictionary<string, NodeInfo> _knownNodes;
         private readonly CancellationTokenSource _cancellationTokenSource;
+        private readonly ConcurrentDictionary<string, DateTime> _processedMessageIds; // 已处理的消息ID，用于去重
+        private readonly Timer _messageIdCleanupTimer; // 定期清理过期的消息ID
         private bool _disposed = false;
         private bool _started = false;
 
@@ -78,6 +80,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             
             _knownNodes = new ConcurrentDictionary<string, NodeInfo>();
             _cancellationTokenSource = new CancellationTokenSource();
+            _processedMessageIds = new ConcurrentDictionary<string, DateTime>();
 
             // Create specific loggers using logger factory / 使用 logger factory 创建特定类型的 logger
             var discoveryLogger = loggerFactory.CreateLogger<RedisNodeDiscoveryService>();
@@ -104,6 +107,9 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             // Subscribe to discovery events / 订阅发现事件
             _discoveryService.NodeDiscovered += OnNodeDiscovered;
             _discoveryService.NodeRemoved += OnNodeRemoved;
+
+            // Start message ID cleanup timer (clean up every 5 minutes) / 启动消息ID清理定时器（每5分钟清理一次）
+            _messageIdCleanupTimer = new Timer(CleanupProcessedMessageIds, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
         }
 
         /// <summary>
@@ -175,6 +181,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
             try
             {
+                _messageIdCleanupTimer?.Dispose();
                 await _discoveryService.StopAsync();
                 await _messageQueueService.DisconnectAsync();
                 await _redisService.DisconnectAsync();
@@ -358,6 +365,33 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     return true;
                 }
 
+                // Check if message is for this node / 检查消息是否发送给当前节点
+                // If ToNodeId is null, it's a broadcast message - all nodes should process it
+                // If ToNodeId is set, only the target node should process it
+                // 如果 ToNodeId 为 null，这是广播消息 - 所有节点都应该处理
+                // 如果 ToNodeId 已设置，只有目标节点应该处理
+                if (!string.IsNullOrEmpty(message.ToNodeId) && message.ToNodeId != _nodeId)
+                {
+                    // This message is for another node, ignore it / 此消息是发送给其他节点的，忽略它
+                    _logger.LogDebug($"Ignoring message {message.MessageId} - target node is {message.ToNodeId}, current node is {_nodeId}");
+                    return true; // Ack to remove from queue / 确认以从队列中移除
+                }
+
+                // Check for duplicate messages using message ID / 使用消息ID检查重复消息
+                if (!string.IsNullOrEmpty(message.MessageId))
+                {
+                    // Check if we've already processed this message / 检查是否已处理过此消息
+                    if (_processedMessageIds.TryGetValue(message.MessageId, out var processedTime))
+                    {
+                        // Message already processed, ignore it / 消息已处理，忽略它
+                        _logger.LogDebug($"Ignoring duplicate message {message.MessageId} (processed at {processedTime:yyyy-MM-dd HH:mm:ss})");
+                        return true; // Ack to remove from queue / 确认以从队列中移除
+                    }
+
+                    // Mark message as processed / 标记消息为已处理
+                    _processedMessageIds.TryAdd(message.MessageId, DateTime.UtcNow);
+                }
+
                 // Trigger message received event / 触发消息接收事件
                 MessageReceived?.Invoke(this, new ClusterMessageEventArgs
                 {
@@ -377,6 +411,43 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             {
                 _logger.LogError(ex, "Error handling message");
                 return false; // Don't ack, message will be requeued / 不确认，消息将重新入队
+            }
+        }
+
+        /// <summary>
+        /// Cleanup processed message IDs older than 10 minutes / 清理超过10分钟的已处理消息ID
+        /// </summary>
+        private void CleanupProcessedMessageIds(object state)
+        {
+            if (_disposed || _cancellationTokenSource.Token.IsCancellationRequested)
+                return;
+
+            try
+            {
+                var cutoffTime = DateTime.UtcNow.AddMinutes(-10);
+                var keysToRemove = new List<string>();
+
+                foreach (var kvp in _processedMessageIds)
+                {
+                    if (kvp.Value < cutoffTime)
+                    {
+                        keysToRemove.Add(kvp.Key);
+                    }
+                }
+
+                foreach (var key in keysToRemove)
+                {
+                    _processedMessageIds.TryRemove(key, out _);
+                }
+
+                if (keysToRemove.Count > 0)
+                {
+                    _logger.LogDebug($"Cleaned up {keysToRemove.Count} old message IDs from deduplication cache");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error cleaning up processed message IDs");
             }
         }
 
@@ -555,6 +626,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             }
 
             _discoveryService?.Dispose();
+            _messageIdCleanupTimer?.Dispose();
             _cancellationTokenSource?.Dispose();
         }
     }
