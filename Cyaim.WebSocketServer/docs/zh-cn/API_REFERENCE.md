@@ -77,6 +77,13 @@ public class ClusterManager
     
     public Task<bool> RouteMessageAsync(string connectionId, byte[] data, int messageType);
     
+    // 向多个连接路由消息（支持跨节点）
+    // Route WebSocket message to multiple connections (supports cross-node)
+    public Task<Dictionary<string, bool>> RouteMessagesAsync(
+        IEnumerable<string> connectionIds, 
+        byte[] data, 
+        int messageType);
+    
     public void SetConnectionProvider(IWebSocketConnectionProvider provider);
     public void SetMetricsCollector(WebSocketMetricsCollector metricsCollector);
     

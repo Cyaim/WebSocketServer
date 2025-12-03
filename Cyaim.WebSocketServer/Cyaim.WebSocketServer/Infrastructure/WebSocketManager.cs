@@ -12,6 +12,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
 
 namespace Cyaim.WebSocketServer.Infrastructure
 {
@@ -273,7 +275,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 {
                     totalBytesRead += bytesRead;
                 }
-                
+
                 if (totalBytesRead > 0)
                 {
                     await webSocket.SendAsync(new ArraySegment<byte>(buffer, 0, totalBytesRead), messageType, endOfMessage: true, cancellationToken);
@@ -356,15 +358,18 @@ namespace Cyaim.WebSocketServer.Infrastructure
         #endregion
 
         /// <summary>
-        /// Send data without buffer
+        /// Send data to local WebSocket connections (single machine mode only)
+        /// 向本地 WebSocket 连接发送数据（仅单机模式）
         /// </summary>
-        /// <param name="sendStream"></param>
-        /// <param name="messageType"></param>
-        /// <param name="cancellationToken"></param>
-        /// <param name="sendBufferSize"></param>
-        /// <param name="sockets"></param>
+        /// <param name="sendStream">Stream to send / 要发送的流</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <param name="cancellationToken">Cancellation token / 取消令牌</param>
+        /// <param name="timeout">Timeout / 超时时间</param>
+        /// <param name="sendAtOnce">Send at once / 是否一次性发送</param>
+        /// <param name="sendBufferSize">Send buffer size / 发送缓冲区大小</param>
+        /// <param name="sockets">Local WebSocket connections / 本地 WebSocket 连接</param>
         /// <returns></returns>
-        public static async Task SendAsync(Stream sendStream, WebSocketMessageType messageType, CancellationToken cancellationToken, TimeSpan? timeout = null, bool sendAtOnce = false, uint sendBufferSize = 4 * 1024, params WebSocket[] sockets)
+        public static async Task SendLocalAsync(Stream sendStream, WebSocketMessageType messageType, CancellationToken cancellationToken, TimeSpan? timeout = null, bool sendAtOnce = false, uint sendBufferSize = 4 * 1024, params WebSocket[] sockets)
         {
             if (sockets == null || sockets.LongLength < 1 || sendBufferSize < 1)
             {
@@ -384,16 +389,18 @@ namespace Cyaim.WebSocketServer.Infrastructure
         }
 
         /// <summary>
-        /// Send data without buffer
+        /// Send data to local WebSocket connections (single machine mode only)
+        /// 向本地 WebSocket 连接发送数据（仅单机模式）
         /// </summary>
-        /// <param name="buffer"></param>
-        /// <param name="messageType"></param>
-        /// <param name="sendAtOnce"></param>
-        /// <param name="cancellationToken"></param>
-        /// <param name="sendBufferSize"></param>
-        /// <param name="sockets"></param>
+        /// <param name="buffer">Data buffer / 数据缓冲区</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <param name="sendAtOnce">Send at once / 是否一次性发送</param>
+        /// <param name="cancellationToken">Cancellation token / 取消令牌</param>
+        /// <param name="timeout">Timeout / 超时时间</param>
+        /// <param name="sendBufferSize">Send buffer size / 发送缓冲区大小</param>
+        /// <param name="sockets">Local WebSocket connections / 本地 WebSocket 连接</param>
         /// <returns></returns>
-        public static async Task SendAsync(ReadOnlyMemory<byte> buffer, WebSocketMessageType messageType, bool sendAtOnce, CancellationToken cancellationToken, TimeSpan? timeout = null, uint sendBufferSize = 4 * 1024, params WebSocket[] sockets)
+        public static async Task SendLocalAsync(ReadOnlyMemory<byte> buffer, WebSocketMessageType messageType, bool sendAtOnce, CancellationToken cancellationToken, TimeSpan? timeout = null, uint sendBufferSize = 4 * 1024, params WebSocket[] sockets)
         {
             if (sockets == null || sockets.LongLength < 1)
             {
@@ -442,17 +449,18 @@ namespace Cyaim.WebSocketServer.Infrastructure
         }
 
         /// <summary>
-        /// Send data without buffer
+        /// Send text data to local WebSocket connections (single machine mode only)
+        /// 向本地 WebSocket 连接发送文本数据（仅单机模式）
         /// </summary>
-        /// <param name="data"></param>
-        /// <param name="messageType"></param>
-        /// <param name="cancellationToken"></param>
-        /// <param name="timeout"></param>
-        /// <param name="encoding"></param>
-        /// <param name="sendBufferSize"></param>
-        /// <param name="socket"></param>
+        /// <param name="data">Text data / 文本数据</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <param name="cancellationToken">Cancellation token / 取消令牌</param>
+        /// <param name="timeout">Timeout / 超时时间</param>
+        /// <param name="encoding">Text encoding / 文本编码</param>
+        /// <param name="sendBufferSize">Send buffer size / 发送缓冲区大小</param>
+        /// <param name="socket">Local WebSocket connections / 本地 WebSocket 连接</param>
         /// <returns></returns>
-        public static async Task SendAsync(
+        public static async Task SendLocalAsync(
             string data,
             WebSocketMessageType messageType,
             CancellationToken cancellationToken,
@@ -467,22 +475,24 @@ namespace Cyaim.WebSocketServer.Infrastructure
             }
             encoding ??= DefaultEncoding;
             var sendData = encoding.GetBytes(data);
-            await SendAsync(sendData, messageType, sendData.Length <= 4 * 1024, cancellationToken: cancellationToken, timeout, sendBufferSize: (uint)sendBufferSize, sockets: socket);
+            await SendLocalAsync(sendData, messageType, sendData.Length <= 4 * 1024, cancellationToken: cancellationToken, timeout, sendBufferSize: (uint)sendBufferSize, sockets: socket);
         }
 
         /// <summary>
-        /// Sending serialized model text data without using a buffer
+        /// Send serialized JSON object to local WebSocket connections (single machine mode only)
+        /// 向本地 WebSocket 连接发送序列化的 JSON 对象（仅单机模式）
         /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="data"></param>
-        /// <param name="options"></param>
-        /// <param name="messageType"></param>
-        /// <param name="cancellationToken"></param>
-        /// <param name="timeout"></param>
-        /// <param name="sendBufferSize"></param>
-        /// <param name="socket"></param>
+        /// <typeparam name="T">Object type / 对象类型</typeparam>
+        /// <param name="data">Object to serialize / 要序列化的对象</param>
+        /// <param name="options">JSON serializer options / JSON 序列化选项</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <param name="cancellationToken">Cancellation token / 取消令牌</param>
+        /// <param name="timeout">Timeout / 超时时间</param>
+        /// <param name="encoding">Text encoding / 文本编码</param>
+        /// <param name="sendBufferSize">Send buffer size / 发送缓冲区大小</param>
+        /// <param name="socket">Local WebSocket connections / 本地 WebSocket 连接</param>
         /// <returns></returns>
-        public static async Task SendAsync<T>(
+        public static async Task SendLocalAsync<T>(
             this T data,
             JsonSerializerOptions options = null,
             WebSocketMessageType messageType = WebSocketMessageType.Text,
@@ -496,23 +506,24 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 return;
             }
-            await SendAsync(JsonSerializer.Serialize(data, options), messageType, cancellationToken ?? CancellationToken.None, timeout, encoding, sendBufferSize, socket);
+            await SendLocalAsync(JsonSerializer.Serialize(data, options), messageType, cancellationToken ?? CancellationToken.None, timeout, encoding, sendBufferSize, socket);
         }
 
         /// <summary>
-        /// Sending serialized model text data without using a buffer
+        /// Send serialized JSON object to local WebSocket connection (single machine mode only)
+        /// 向本地 WebSocket 连接发送序列化的 JSON 对象（仅单机模式）
         /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="socket"></param>
-        /// <param name="data"></param>
-        /// <param name="options"></param>
-        /// <param name="messageType"></param>
-        /// <param name="cancellationToken"></param>
-        /// <param name="timeout"></param>
-        /// <param name="encoding"></param>
-        /// <param name="sendBufferSize"></param>
+        /// <typeparam name="T">Object type / 对象类型</typeparam>
+        /// <param name="socket">Local WebSocket connection / 本地 WebSocket 连接</param>
+        /// <param name="data">Object to serialize / 要序列化的对象</param>
+        /// <param name="options">JSON serializer options / JSON 序列化选项</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <param name="cancellationToken">Cancellation token / 取消令牌</param>
+        /// <param name="timeout">Timeout / 超时时间</param>
+        /// <param name="encoding">Text encoding / 文本编码</param>
+        /// <param name="sendBufferSize">Send buffer size / 发送缓冲区大小</param>
         /// <returns></returns>
-        public static async Task SendAsync<T>(
+        public static async Task SendLocalAsync<T>(
             this WebSocket socket,
             T data,
             JsonSerializerOptions options = null,
@@ -526,8 +537,361 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 return;
             }
-            await SendAsync(JsonSerializer.Serialize(data, options), messageType, cancellationToken ?? CancellationToken.None, timeout, encoding, sendBufferSize, socket);
+            await SendLocalAsync(JsonSerializer.Serialize(data, options), messageType, cancellationToken ?? CancellationToken.None, timeout, encoding, sendBufferSize, socket);
         }
+
+        #region Unified Send Methods (Single Machine & Cluster) / 统一发送方法（单机和集群）
+
+        /// <summary>
+        /// Send message to connection(s) - automatically handles single machine or cluster mode
+        /// 向连接发送消息 - 自动处理单机或集群模式
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="data">Message data as byte array / 消息数据（字节数组）</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <returns>True if sent successfully / 发送成功返回 true</returns>
+        /// <remarks>
+        /// This method automatically detects if cluster is enabled:
+        /// - If cluster is enabled: uses ClusterManager to route message (supports cross-node)
+        /// - If cluster is disabled: sends directly to local WebSocket connection
+        /// 此方法自动检测是否启用集群：
+        /// - 如果启用集群：使用 ClusterManager 路由消息（支持跨节点）
+        /// - 如果未启用集群：直接发送到本地 WebSocket 连接
+        /// </remarks>
+        public static async Task<bool> SendAsync(
+            string connectionId,
+            byte[] data,
+            WebSocketMessageType messageType = WebSocketMessageType.Text)
+        {
+            if (string.IsNullOrEmpty(connectionId) || data == null || data.Length == 0)
+            {
+                return false;
+            }
+
+            // Call batch method for single connection / 调用批量方法处理单个连接
+            var results = await SendAsync(new[] { connectionId }, data, messageType);
+            return results.TryGetValue(connectionId, out var success) && success;
+        }
+
+        /// <summary>
+        /// Send text message to connection(s) - automatically handles single machine or cluster mode
+        /// 向连接发送文本消息 - 自动处理单机或集群模式
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="text">Text message / 文本消息</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>True if sent successfully / 发送成功返回 true</returns>
+        public static async Task<bool> SendAsync(
+            string connectionId,
+            string text,
+            Encoding encoding = null)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            encoding ??= DefaultEncoding;
+            var data = encoding.GetBytes(text);
+            // Call batch method for single connection / 调用批量方法处理单个连接
+            var results = await SendAsync(new[] { connectionId }, data, WebSocketMessageType.Text);
+            return results.TryGetValue(connectionId, out var success) && success;
+        }
+
+        /// <summary>
+        /// Send JSON object to connection(s) - automatically handles single machine or cluster mode
+        /// 向连接发送 JSON 对象 - 自动处理单机或集群模式
+        /// </summary>
+        /// <typeparam name="T">Object type / 对象类型</typeparam>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="data">Object to serialize / 要序列化的对象</param>
+        /// <param name="options">JSON serializer options / JSON 序列化选项</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>True if sent successfully / 发送成功返回 true</returns>
+        public static async Task<bool> SendAsync<T>(
+            string connectionId,
+            T data,
+            JsonSerializerOptions options = null,
+            Encoding encoding = null)
+        {
+            if (data == null)
+            {
+                return false;
+            }
+
+            encoding ??= DefaultEncoding;
+            var json = JsonSerializer.Serialize(data, options);
+            var bytes = encoding.GetBytes(json);
+            // Call batch method for single connection / 调用批量方法处理单个连接
+            var results = await SendAsync(new[] { connectionId }, bytes, WebSocketMessageType.Text);
+            return results.TryGetValue(connectionId, out var success) && success;
+        }
+
+        /// <summary>
+        /// Send message to connection(s) - automatically handles single machine or cluster mode (supports batch)
+        /// 向连接发送消息 - 自动处理单机或集群模式（支持批量）
+        /// </summary>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表（支持单个或多个）</param>
+        /// <param name="data">Message data as byte array / 消息数据（字节数组）</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <returns>Dictionary of connection ID to send result / 连接ID到发送结果的字典</returns>
+        /// <remarks>
+        /// This method automatically detects if cluster is enabled:
+        /// - If cluster is enabled: uses ClusterManager to route message (supports cross-node)
+        /// - If cluster is disabled: sends directly to local WebSocket connection
+        /// 此方法自动检测是否启用集群：
+        /// - 如果启用集群：使用 ClusterManager 路由消息（支持跨节点）
+        /// - 如果未启用集群：直接发送到本地 WebSocket 连接
+        /// </remarks>
+        public static async Task<Dictionary<string, bool>> SendAsync(
+            IEnumerable<string> connectionIds,
+            byte[] data,
+            WebSocketMessageType messageType = WebSocketMessageType.Text)
+        {
+            if (connectionIds == null)
+            {
+                return new Dictionary<string, bool>();
+            }
+
+            var results = new Dictionary<string, bool>();
+
+            // Check if cluster is enabled / 检查是否启用集群
+            var clusterManager = GlobalClusterCenter.ClusterManager;
+            if (clusterManager != null)
+            {
+                // Use cluster routing / 使用集群路由
+                return await clusterManager.RouteMessagesAsync(connectionIds, data, (int)messageType);
+            }
+            else
+            {
+                // Use local WebSocket / 使用本地 WebSocket
+                var tasks = new List<Task>();
+                foreach (var connectionId in connectionIds)
+                {
+                    if (string.IsNullOrEmpty(connectionId))
+                    {
+                        continue;
+                    }
+
+                    var task = Task.Run(async () =>
+                    {
+                        var webSocket = GetLocalWebSocket(connectionId);
+                        if (webSocket != null && webSocket.State == WebSocketState.Open)
+                        {
+                            try
+                            {
+                                await webSocket.SendAsync(
+                                    new ArraySegment<byte>(data),
+                                    messageType,
+                                    true,
+                                    CancellationToken.None);
+                                results[connectionId] = true;
+                            }
+                            catch
+                            {
+                                results[connectionId] = false;
+                            }
+                        }
+                        else
+                        {
+                            results[connectionId] = false;
+                        }
+                    });
+                    tasks.Add(task);
+                }
+
+                await Task.WhenAll(tasks);
+                return results;
+            }
+        }
+
+        /// <summary>
+        /// Send text message to connection(s) - automatically handles single machine or cluster mode (supports batch)
+        /// 向连接发送文本消息 - 自动处理单机或集群模式（支持批量）
+        /// </summary>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表（支持单个或多个）</param>
+        /// <param name="text">Text message / 文本消息</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>Dictionary of connection ID to send result / 连接ID到发送结果的字典</returns>
+        public static async Task<Dictionary<string, bool>> SendAsync(
+            IEnumerable<string> connectionIds,
+            string text,
+            Encoding encoding = null)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return new Dictionary<string, bool>();
+            }
+
+            encoding ??= DefaultEncoding;
+            var data = encoding.GetBytes(text);
+            return await SendAsync(connectionIds, data, WebSocketMessageType.Text);
+        }
+
+        /// <summary>
+        /// Send JSON object to connection(s) - automatically handles single machine or cluster mode (supports batch)
+        /// 向连接发送 JSON 对象 - 自动处理单机或集群模式（支持批量）
+        /// </summary>
+        /// <typeparam name="T">Object type / 对象类型</typeparam>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表（支持单个或多个）</param>
+        /// <param name="data">Object to serialize / 要序列化的对象</param>
+        /// <param name="options">JSON serializer options / JSON 序列化选项</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>Dictionary of connection ID to send result / 连接ID到发送结果的字典</returns>
+        public static async Task<Dictionary<string, bool>> SendAsync<T>(
+            IEnumerable<string> connectionIds,
+            T data,
+            JsonSerializerOptions options = null,
+            Encoding encoding = null)
+        {
+            if (data == null)
+            {
+                return new Dictionary<string, bool>();
+            }
+
+            encoding ??= DefaultEncoding;
+            var json = JsonSerializer.Serialize(data, options);
+            var bytes = encoding.GetBytes(json);
+            return await SendAsync(connectionIds, bytes, WebSocketMessageType.Text);
+        }
+
+        /// <summary>
+        /// Get local WebSocket connection by connection ID / 根据连接 ID 获取本地 WebSocket 连接
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <returns>WebSocket instance or null / WebSocket 实例或 null</returns>
+        private static WebSocket GetLocalWebSocket(string connectionId)
+        {
+            if (string.IsNullOrEmpty(connectionId))
+            {
+                return null;
+            }
+
+            // Try to get from MvcChannelHandler / 尝试从 MvcChannelHandler 获取
+            if (MvcChannelHandler.Clients != null && MvcChannelHandler.Clients.TryGetValue(connectionId, out var webSocket))
+            {
+                return webSocket;
+            }
+
+            // Try to get from GlobalClusterCenter connection provider / 尝试从 GlobalClusterCenter 连接提供者获取
+            var connectionProvider = GlobalClusterCenter.ConnectionProvider;
+            if (connectionProvider != null)
+            {
+                return connectionProvider.GetConnection(connectionId);
+            }
+
+            return null;
+        }
+
+        #endregion
+
+        #region Extension Methods for Convenient Usage / 扩展方法（便于使用）
+
+        /// <summary>
+        /// Send byte array to connection(s) - extension method for convenient usage
+        /// 向连接发送字节数组 - 扩展方法（便于使用）
+        /// </summary>
+        /// <param name="data">Message data as byte array / 消息数据（字节数组）</param>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <returns>True if sent successfully / 发送成功返回 true</returns>
+        public static async Task<bool> SendAsync(
+            this byte[] data,
+            string connectionId,
+            WebSocketMessageType messageType = WebSocketMessageType.Text)
+        {
+            return await SendAsync(connectionId, data, messageType);
+        }
+
+        /// <summary>
+        /// Send byte array to multiple connections - extension method for convenient usage
+        /// 向多个连接发送字节数组 - 扩展方法（便于使用）
+        /// </summary>
+        /// <param name="data">Message data as byte array / 消息数据（字节数组）</param>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <returns>Dictionary of connection ID to send result / 连接ID到发送结果的字典</returns>
+        public static async Task<Dictionary<string, bool>> SendAsync(
+            this byte[] data,
+            IEnumerable<string> connectionIds,
+            WebSocketMessageType messageType = WebSocketMessageType.Text)
+        {
+            return await SendAsync(connectionIds, data, messageType);
+        }
+
+        /// <summary>
+        /// Send text message to connection(s) - extension method for convenient usage
+        /// 向连接发送文本消息 - 扩展方法（便于使用）
+        /// </summary>
+        /// <param name="text">Text message / 文本消息</param>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>True if sent successfully / 发送成功返回 true</returns>
+        public static async Task<bool> SendTextAsync(
+            this string text,
+            string connectionId,
+            Encoding encoding = null)
+        {
+            return await SendAsync(connectionId, text, encoding);
+        }
+
+        /// <summary>
+        /// Send text message to multiple connections - extension method for convenient usage
+        /// 向多个连接发送文本消息 - 扩展方法（便于使用）
+        /// </summary>
+        /// <param name="text">Text message / 文本消息</param>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>Dictionary of connection ID to send result / 连接ID到发送结果的字典</returns>
+        public static async Task<Dictionary<string, bool>> SendTextAsync(
+            this string text,
+            IEnumerable<string> connectionIds,
+            Encoding encoding = null)
+        {
+            return await SendAsync(connectionIds, text, encoding);
+        }
+
+        /// <summary>
+        /// Send JSON object to connection(s) - extension method for convenient usage (excludes string type)
+        /// 向连接发送 JSON 对象 - 扩展方法（便于使用，排除 string 类型）
+        /// </summary>
+        /// <typeparam name="T">Object type (must not be string) / 对象类型（不能是 string）</typeparam>
+        /// <param name="data">Object to serialize / 要序列化的对象</param>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="options">JSON serializer options / JSON 序列化选项</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>True if sent successfully / 发送成功返回 true</returns>
+        public static async Task<bool> SendJsonAsync<T>(
+            this T data,
+            string connectionId,
+            JsonSerializerOptions options = null,
+            Encoding encoding = null)
+            where T : class
+        {
+            return await SendAsync(connectionId, data, options, encoding);
+        }
+
+        /// <summary>
+        /// Send JSON object to multiple connections - extension method for convenient usage (excludes string type)
+        /// 向多个连接发送 JSON 对象 - 扩展方法（便于使用，排除 string 类型）
+        /// </summary>
+        /// <typeparam name="T">Object type (must not be string) / 对象类型（不能是 string）</typeparam>
+        /// <param name="data">Object to serialize / 要序列化的对象</param>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表</param>
+        /// <param name="options">JSON serializer options / JSON 序列化选项</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>Dictionary of connection ID to send result / 连接ID到发送结果的字典</returns>
+        public static async Task<Dictionary<string, bool>> SendJsonAsync<T>(
+            this T data,
+            IEnumerable<string> connectionIds,
+            JsonSerializerOptions options = null,
+            Encoding encoding = null)
+            where T : class
+        {
+            return await SendAsync(connectionIds, data, options, encoding);
+        }
+
+        #endregion
     }
 
 

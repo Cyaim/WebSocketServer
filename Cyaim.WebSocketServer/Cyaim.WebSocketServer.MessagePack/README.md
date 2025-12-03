@@ -149,11 +149,64 @@ public class MessagePackResponseScheme
 }
 ```
 
+## 集群支持
+
+### 使用 MessagePack 发送消息到集群
+
+MessagePack 扩展提供了便捷的方法，可以直接通过集群管理器发送 MessagePack 序列化的对象：
+
+```csharp
+using Cyaim.WebSocketServer.MessagePack;
+using Cyaim.WebSocketServer.Infrastructure.Cluster;
+
+// 获取集群管理器
+var clusterManager = GlobalClusterCenter.ClusterManager;
+
+// 定义要发送的对象
+var user = new { Id = 1, Name = "Alice", Age = 30 };
+
+// 向单个连接发送 MessagePack 序列化的对象（支持跨节点）
+await clusterManager.RouteMessagePackAsync("connection-1", user);
+
+// 向多个连接批量发送 MessagePack 序列化的对象（支持跨节点）
+var connectionIds = new[] { "connection-1", "connection-2", "connection-3" };
+var results = await clusterManager.RouteMessagePacksAsync(connectionIds, user);
+
+// 检查发送结果
+foreach (var result in results)
+{
+    if (result.Value)
+    {
+        Console.WriteLine($"成功发送到连接 {result.Key}");
+    }
+    else
+    {
+        Console.WriteLine($"发送到连接 {result.Key} 失败");
+    }
+}
+
+// 使用自定义 MessagePack 选项
+var options = MessagePackSerializerOptions.Standard.WithCompression(MessagePackCompression.Lz4Block);
+await clusterManager.RouteMessagePackAsync("connection-1", user, options);
+```
+
+### 扩展方法说明
+
+- **`RouteMessagePackAsync<T>`**: 向单个连接发送 MessagePack 序列化的对象
+- **`RouteMessagePacksAsync<T>`**: 向多个连接批量发送 MessagePack 序列化的对象
+
+这些方法会自动：
+
+- 将对象序列化为 MessagePack 二进制格式
+- 通过集群路由系统发送到目标连接（支持跨节点）
+- 使用 `WebSocketMessageType.Binary` 消息类型
+
 ## 注意事项
 
 1. **消息类型** - MessagePackChannelHandler 只处理二进制消息 (`WebSocketMessageType.Binary`)
 2. **兼容性** - 内部仍使用 JSON 进行参数绑定，以保持与现有端点的兼容性
 3. **客户端** - 需要支持 MessagePack 的客户端库
+4. **集群扩展** - 使用集群扩展方法需要引用 `Cyaim.WebSocketServer.Infrastructure.Cluster` 命名空间
 
 ## 许可证
 

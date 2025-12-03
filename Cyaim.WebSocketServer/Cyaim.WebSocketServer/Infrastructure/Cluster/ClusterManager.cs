@@ -2,10 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Infrastructure.Metrics;
 using Microsoft.Extensions.Logging;
+using System.Net.WebSockets;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 {
@@ -202,6 +205,253 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         {
             return await _router.RouteMessageAsync(connectionId, data, messageType, localHandler);
         }
+
+        /// <summary>
+        /// Route WebSocket message to multiple connections (supports cross-node)
+        /// 向多个连接路由 WebSocket 消息（支持跨节点）
+        /// </summary>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表</param>
+        /// <param name="data">Message data / 消息数据</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <returns>Dictionary of connection ID to routing result / 连接ID到路由结果的字典</returns>
+        /// <remarks>
+        /// This method can send messages to clients on different nodes.
+        /// It automatically routes messages to the correct node for each connection.
+        /// 此方法可以向不同节点上的客户端发送消息。
+        /// 它会自动将消息路由到每个连接的正确节点。
+        /// </remarks>
+        public async Task<Dictionary<string, bool>> RouteMessagesAsync(
+            IEnumerable<string> connectionIds, 
+            byte[] data, 
+            int messageType)
+        {
+            if (connectionIds == null)
+            {
+                throw new ArgumentNullException(nameof(connectionIds));
+            }
+
+            var results = new Dictionary<string, bool>();
+            var tasks = new List<Task>();
+
+            foreach (var connectionId in connectionIds)
+            {
+                if (string.IsNullOrEmpty(connectionId))
+                {
+                    continue;
+                }
+
+                var task = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var success = await RouteMessageAsync(connectionId, data, messageType);
+                        results[connectionId] = success;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"Failed to route message to connection {connectionId}");
+                        results[connectionId] = false;
+                    }
+                });
+
+                tasks.Add(task);
+            }
+
+            await Task.WhenAll(tasks);
+            return results;
+        }
+
+        #region Text Message Methods / 文本消息方法
+
+        /// <summary>
+        /// Route text message to a connection (supports cross-node)
+        /// 向连接路由文本消息（支持跨节点）
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="text">Text message / 文本消息</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>True if routed successfully / 路由成功返回 true</returns>
+        public async Task<bool> RouteTextAsync(string connectionId, string text, Encoding encoding = null)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            encoding ??= Encoding.UTF8;
+            var data = encoding.GetBytes(text);
+            return await RouteMessageAsync(connectionId, data, (int)WebSocketMessageType.Text);
+        }
+
+        /// <summary>
+        /// Route text message to multiple connections (supports cross-node)
+        /// 向多个连接路由文本消息（支持跨节点）
+        /// </summary>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表</param>
+        /// <param name="text">Text message / 文本消息</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>Dictionary of connection ID to routing result / 连接ID到路由结果的字典</returns>
+        public async Task<Dictionary<string, bool>> RouteTextsAsync(
+            IEnumerable<string> connectionIds, 
+            string text, 
+            Encoding encoding = null)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return new Dictionary<string, bool>();
+            }
+
+            encoding ??= Encoding.UTF8;
+            var data = encoding.GetBytes(text);
+            return await RouteMessagesAsync(connectionIds, data, (int)WebSocketMessageType.Text);
+        }
+
+        #endregion
+
+        #region Generic Serialization Methods / 泛型序列化方法
+
+        /// <summary>
+        /// Route object as JSON text message to a connection (supports cross-node)
+        /// 将对象序列化为 JSON 文本消息路由到连接（支持跨节点）
+        /// </summary>
+        /// <typeparam name="T">Object type / 对象类型</typeparam>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="data">Object to serialize / 要序列化的对象</param>
+        /// <param name="options">JSON serializer options / JSON 序列化选项</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>True if routed successfully / 路由成功返回 true</returns>
+        public async Task<bool> RouteJsonAsync<T>(
+            string connectionId, 
+            T data, 
+            JsonSerializerOptions options = null, 
+            Encoding encoding = null)
+        {
+            if (data == null)
+            {
+                return false;
+            }
+
+            encoding ??= Encoding.UTF8;
+            var json = JsonSerializer.Serialize(data, options);
+            var bytes = encoding.GetBytes(json);
+            return await RouteMessageAsync(connectionId, bytes, (int)WebSocketMessageType.Text);
+        }
+
+        /// <summary>
+        /// Route object as JSON text message to multiple connections (supports cross-node)
+        /// 将对象序列化为 JSON 文本消息路由到多个连接（支持跨节点）
+        /// </summary>
+        /// <typeparam name="T">Object type / 对象类型</typeparam>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表</param>
+        /// <param name="data">Object to serialize / 要序列化的对象</param>
+        /// <param name="options">JSON serializer options / JSON 序列化选项</param>
+        /// <param name="encoding">Text encoding, defaults to UTF-8 / 文本编码，默认为 UTF-8</param>
+        /// <returns>Dictionary of connection ID to routing result / 连接ID到路由结果的字典</returns>
+        public async Task<Dictionary<string, bool>> RouteJsonsAsync<T>(
+            IEnumerable<string> connectionIds, 
+            T data, 
+            JsonSerializerOptions options = null, 
+            Encoding encoding = null)
+        {
+            if (data == null)
+            {
+                return new Dictionary<string, bool>();
+            }
+
+            encoding ??= Encoding.UTF8;
+            var json = JsonSerializer.Serialize(data, options);
+            var bytes = encoding.GetBytes(json);
+            return await RouteMessagesAsync(connectionIds, bytes, (int)WebSocketMessageType.Text);
+        }
+
+        /// <summary>
+        /// Route object using custom serializer to a connection (supports cross-node)
+        /// 使用自定义序列化器将对象路由到连接（支持跨节点）
+        /// </summary>
+        /// <typeparam name="T">Object type / 对象类型</typeparam>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="data">Object to serialize / 要序列化的对象</param>
+        /// <param name="serializer">Custom serializer function / 自定义序列化函数</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <returns>True if routed successfully / 路由成功返回 true</returns>
+        /// <remarks>
+        /// The serializer function should convert the object to byte array.
+        /// You can use JSON, MessagePack, Protobuf, or any other serialization format.
+        /// 序列化器函数应将对象转换为字节数组。
+        /// 您可以使用 JSON、MessagePack、Protobuf 或任何其他序列化格式。
+        /// </remarks>
+        public async Task<bool> RouteObjectAsync<T>(
+            string connectionId, 
+            T data, 
+            Func<T, byte[]> serializer, 
+            WebSocketMessageType messageType = WebSocketMessageType.Text)
+        {
+            if (data == null || serializer == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var bytes = serializer(data);
+                return await RouteMessageAsync(connectionId, bytes, (int)messageType);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Failed to serialize and route object to connection {connectionId}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Route object using custom serializer to multiple connections (supports cross-node)
+        /// 使用自定义序列化器将对象路由到多个连接（支持跨节点）
+        /// </summary>
+        /// <typeparam name="T">Object type / 对象类型</typeparam>
+        /// <param name="connectionIds">Connection IDs / 连接 ID 列表</param>
+        /// <param name="data">Object to serialize / 要序列化的对象</param>
+        /// <param name="serializer">Custom serializer function / 自定义序列化函数</param>
+        /// <param name="messageType">WebSocket message type / WebSocket 消息类型</param>
+        /// <returns>Dictionary of connection ID to routing result / 连接ID到路由结果的字典</returns>
+        /// <remarks>
+        /// The serializer function should convert the object to byte array.
+        /// You can use JSON, MessagePack, Protobuf, or any other serialization format.
+        /// 序列化器函数应将对象转换为字节数组。
+        /// 您可以使用 JSON、MessagePack、Protobuf 或任何其他序列化格式。
+        /// </remarks>
+        public async Task<Dictionary<string, bool>> RouteObjectsAsync<T>(
+            IEnumerable<string> connectionIds, 
+            T data, 
+            Func<T, byte[]> serializer, 
+            WebSocketMessageType messageType = WebSocketMessageType.Text)
+        {
+            if (data == null || serializer == null)
+            {
+                return new Dictionary<string, bool>();
+            }
+
+            try
+            {
+                var bytes = serializer(data);
+                return await RouteMessagesAsync(connectionIds, bytes, (int)messageType);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to serialize object for routing");
+                // Return failed results for all connections / 为所有连接返回失败结果
+                var results = new Dictionary<string, bool>();
+                foreach (var connectionId in connectionIds ?? Enumerable.Empty<string>())
+                {
+                    if (!string.IsNullOrEmpty(connectionId))
+                    {
+                        results[connectionId] = false;
+                    }
+                }
+                return results;
+            }
+        }
+
+        #endregion
 
         /// <summary>
         /// Get connection count for this node

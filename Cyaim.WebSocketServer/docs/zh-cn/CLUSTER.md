@@ -220,15 +220,44 @@ connectionId -> nodeId
 2. **远程连接**: 消息通过传输层转发到目标节点
 3. **未知连接**: 返回错误或查询集群
 
+### 单连接路由 vs 批量路由
+
+- **`RouteMessageAsync`**: 向单个连接发送消息，返回 `bool` 表示是否成功
+- **`RouteMessagesAsync`**: 向多个连接批量发送消息，返回 `Dictionary<string, bool>` 包含每个连接的路由结果
+  - 支持跨节点：可以同时向不同节点上的客户端发送消息
+  - 并行处理：所有消息并行发送，提高效率
+  - 结果追踪：可以查看每个连接是否成功接收消息
+
 ### 路由示例
 
 ```csharp
-// 自动路由（推荐）
+// 自动路由单个连接（推荐）
 var success = await clusterManager.RouteMessageAsync(
     connectionId: "connection-123",
     data: Encoding.UTF8.GetBytes("Hello"),
     messageType: (int)WebSocketMessageType.Text
 );
+
+// 批量路由多个连接（支持跨节点）
+var connectionIds = new[] { "connection-1", "connection-2", "connection-3" };
+var results = await clusterManager.RouteMessagesAsync(
+    connectionIds: connectionIds,
+    data: Encoding.UTF8.GetBytes("Hello from cluster!"),
+    messageType: (int)WebSocketMessageType.Text
+);
+
+// 检查每个连接的路由结果
+foreach (var result in results)
+{
+    if (result.Value)
+    {
+        Console.WriteLine($"成功发送到连接 {result.Key}");
+    }
+    else
+    {
+        Console.WriteLine($"发送到连接 {result.Key} 失败");
+    }
+}
 
 // 手动查询路由
 var nodeId = router.GetConnectionNodeId("connection-123");

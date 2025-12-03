@@ -26,7 +26,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         private readonly NodeInfo _nodeInfo;
         private readonly ConcurrentDictionary<string, NodeInfo> _knownNodes;
         private readonly CancellationTokenSource _cancellationTokenSource;
-        private readonly ConcurrentDictionary<string, DateTime> _processedMessageIds; // 已处理的消息ID，用于去重
+        // 已处理的消息ID，用于去重
+        // Key format: "MessageId:FromNodeId" for broadcast messages, "MessageId:FromNodeId:ToNodeId" for targeted messages
+        // 键格式：广播消息为 "MessageId:FromNodeId"，定向消息为 "MessageId:FromNodeId:ToNodeId"
+        private readonly ConcurrentDictionary<string, DateTime> _processedMessageIds;
         private readonly Timer _messageIdCleanupTimer; // 定期清理过期的消息ID
         private bool _disposed = false;
         private bool _started = false;
@@ -217,6 +220,20 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 message.FromNodeId = _nodeId;
                 message.ToNodeId = nodeId;
 
+                // Ensure MessageId is set for deduplication / 确保设置 MessageId 以便去重
+                // If MessageId is empty, generate a unique one based on node and timestamp
+                // 如果 MessageId 为空，基于节点和时间戳生成唯一ID
+                if (string.IsNullOrEmpty(message.MessageId))
+                {
+                    message.MessageId = $"{_nodeId}:{nodeId}:{DateTime.UtcNow.Ticks}:{Guid.NewGuid():N}";
+                }
+
+                // Ensure Timestamp is set / 确保设置时间戳
+                if (message.Timestamp == default)
+                {
+                    message.Timestamp = DateTime.UtcNow;
+                }
+
                 var routingKey = $"node.{nodeId}";
                 var messageBytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message));
 
@@ -254,6 +271,20 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 message.FromNodeId = _nodeId;
                 message.ToNodeId = null; // Broadcast / 广播
 
+                // Ensure MessageId is set for deduplication / 确保设置 MessageId 以便去重
+                // If MessageId is empty, generate a unique one
+                // 如果 MessageId 为空，生成唯一ID
+                if (string.IsNullOrEmpty(message.MessageId))
+                {
+                    message.MessageId = $"{_nodeId}:broadcast:{DateTime.UtcNow.Ticks}:{Guid.NewGuid():N}";
+                }
+
+                // Ensure Timestamp is set / 确保设置时间戳
+                if (message.Timestamp == default)
+                {
+                    message.Timestamp = DateTime.UtcNow;
+                }
+
                 var messageBytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message));
 
                 var properties = new MessageProperties
@@ -272,6 +303,73 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 _logger.LogError(ex, "Failed to broadcast message");
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Send message to multiple nodes / 向多个节点发送消息
+        /// </summary>
+        /// <param name="nodeIds">Target node IDs / 目标节点 ID 列表</param>
+        /// <param name="message">Message to send / 要发送的消息</param>
+        /// <returns>Dictionary of node ID and send result / 节点ID和发送结果的字典</returns>
+        /// <remarks>
+        /// This method sends the same message to multiple nodes. Each node will receive a copy of the message.
+        /// If you want to send different messages to different nodes, call SendAsync multiple times.
+        /// 此方法向多个节点发送相同的消息。每个节点都会收到消息的副本。
+        /// 如果要向不同节点发送不同的消息，请多次调用 SendAsync。
+        /// </remarks>
+        public async Task<Dictionary<string, bool>> SendToMultipleNodesAsync(IEnumerable<string> nodeIds, ClusterMessage message)
+        {
+            if (nodeIds == null)
+            {
+                throw new ArgumentNullException(nameof(nodeIds));
+            }
+
+            if (message == null)
+            {
+                throw new ArgumentNullException(nameof(message));
+            }
+
+            var results = new Dictionary<string, bool>();
+            var tasks = new List<Task>();
+
+            foreach (var nodeId in nodeIds)
+            {
+                if (string.IsNullOrEmpty(nodeId))
+                {
+                    continue;
+                }
+
+                var task = Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Create a copy of the message for each node to ensure unique MessageId per node
+                        // 为每个节点创建消息副本，确保每个节点都有唯一的 MessageId
+                        var nodeMessage = new ClusterMessage
+                        {
+                            Type = message.Type,
+                            FromNodeId = message.FromNodeId,
+                            ToNodeId = nodeId,
+                            Payload = message.Payload,
+                            MessageId = message.MessageId, // Will be auto-generated if empty / 如果为空将自动生成
+                            Timestamp = message.Timestamp
+                        };
+
+                        await SendAsync(nodeId, nodeMessage);
+                        results[nodeId] = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"Failed to send message to node {nodeId}");
+                        results[nodeId] = false;
+                    }
+                });
+
+                tasks.Add(task);
+            }
+
+            await Task.WhenAll(tasks);
+            return results;
         }
 
         /// <summary>
@@ -373,23 +471,44 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 if (!string.IsNullOrEmpty(message.ToNodeId) && message.ToNodeId != _nodeId)
                 {
                     // This message is for another node, ignore it / 此消息是发送给其他节点的，忽略它
-                    _logger.LogDebug($"Ignoring message {message.MessageId} - target node is {message.ToNodeId}, current node is {_nodeId}");
+                    // Note: This is expected behavior for targeted messages. Use BroadcastAsync to send to all nodes.
+                    // 注意：这是定向消息的预期行为。使用 BroadcastAsync 可以向所有节点发送消息。
+                    _logger.LogTrace($"Ignoring message {message.MessageId} (type: {message.Type}) - target node is {message.ToNodeId}, current node is {_nodeId}. This is normal for targeted messages.");
                     return true; // Ack to remove from queue / 确认以从队列中移除
                 }
 
                 // Check for duplicate messages using message ID / 使用消息ID检查重复消息
+                // For broadcast messages, use "MessageId:FromNodeId" as key to allow same message from same sender to be processed once per node
+                // For targeted messages, use "MessageId:FromNodeId:ToNodeId" to allow same message to different targets
+                // 对于广播消息，使用 "MessageId:FromNodeId" 作为键，允许来自同一发送者的相同消息在每个节点上处理一次
+                // 对于定向消息，使用 "MessageId:FromNodeId:ToNodeId" 允许相同消息发送到不同目标
                 if (!string.IsNullOrEmpty(message.MessageId))
                 {
+                    // Create unique key based on message type / 根据消息类型创建唯一键
+                    string deduplicationKey;
+                    if (string.IsNullOrEmpty(message.ToNodeId))
+                    {
+                        // Broadcast message: same message from same sender should be processed once per node
+                        // 广播消息：来自同一发送者的相同消息应在每个节点上处理一次
+                        deduplicationKey = $"{message.MessageId}:{message.FromNodeId}";
+                    }
+                    else
+                    {
+                        // Targeted message: same message can be sent to different nodes
+                        // 定向消息：相同消息可以发送到不同节点
+                        deduplicationKey = $"{message.MessageId}:{message.FromNodeId}:{message.ToNodeId}";
+                    }
+
                     // Check if we've already processed this message / 检查是否已处理过此消息
-                    if (_processedMessageIds.TryGetValue(message.MessageId, out var processedTime))
+                    if (_processedMessageIds.TryGetValue(deduplicationKey, out var processedTime))
                     {
                         // Message already processed, ignore it / 消息已处理，忽略它
-                        _logger.LogDebug($"Ignoring duplicate message {message.MessageId} (processed at {processedTime:yyyy-MM-dd HH:mm:ss})");
+                        _logger.LogDebug($"Ignoring duplicate message {message.MessageId} (key: {deduplicationKey}, processed at {processedTime:yyyy-MM-dd HH:mm:ss})");
                         return true; // Ack to remove from queue / 确认以从队列中移除
                     }
 
                     // Mark message as processed / 标记消息为已处理
-                    _processedMessageIds.TryAdd(message.MessageId, DateTime.UtcNow);
+                    _processedMessageIds.TryAdd(deduplicationKey, DateTime.UtcNow);
                 }
 
                 // Trigger message received event / 触发消息接收事件
