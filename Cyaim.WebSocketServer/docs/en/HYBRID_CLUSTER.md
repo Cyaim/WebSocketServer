@@ -932,6 +932,82 @@ timer.Start();
 app.Run();
 ```
 
+## Message Deduplication Mechanism
+
+### Automatic Duplicate Prevention
+
+`HybridClusterTransport` has built-in message deduplication to ensure messages are not processed multiple times:
+
+1. **Target Node Check** - Only the target node processes messages intended for it
+2. **Message ID Deduplication** - Uses message ID to prevent processing the same message twice
+3. **Automatic Cleanup** - Periodically cleans up expired message ID records (every 5 minutes, keeps records from last 10 minutes)
+
+### How It Works
+
+```text
+Message Arrives → Check if from self → Check target node → Check if processed → Process message
+```
+
+#### Target Node Check
+
+- If message's `ToNodeId` is not empty and not equal to current node ID, message is ignored
+- If `ToNodeId` is `null` (broadcast message), all nodes process it (but deduplicated by message ID)
+- If `ToNodeId` equals current node ID, message is processed
+
+#### Message ID Deduplication
+
+- Each message has a unique `MessageId`
+- Before processing, checks if this `MessageId` has been processed
+- If already processed, message is ignored to prevent duplicate processing
+
+### Example Scenarios
+
+**Scenario 1: Unicast Message (Specific Target Node)**
+
+```csharp
+// Node 1 sends message to Node 2
+await clusterTransport.SendAsync("node2", new ClusterMessage { ... });
+
+// Result:
+// - Node 2: Processes message ✅
+// - Node 1, Node 3: Ignore message (because ToNodeId != own node ID) ✅
+```
+
+**Scenario 2: Broadcast Message**
+
+```csharp
+// Node 1 broadcasts message
+await clusterTransport.BroadcastAsync(new ClusterMessage { ... });
+
+// Result:
+// - All nodes: Receive message
+// - But deduplicated by message ID, ensuring each node processes only once ✅
+```
+
+**Scenario 3: Duplicate Message Arrival (Network Retransmission, etc.)**
+
+```csharp
+// If same message arrives multiple times due to network issues
+// Result:
+// - First time: Processed normally ✅
+// - Subsequent duplicates: Automatically ignored via message ID check ✅
+```
+
+### Configuration
+
+The message deduplication mechanism is **automatically enabled**, no configuration needed. The system will:
+
+- Automatically check target node
+- Automatically use message ID for deduplication
+- Automatically clean up expired message ID records (every 5 minutes)
+
+### Performance Considerations
+
+- Message ID cache uses in-memory storage, periodically cleaned to prevent memory leaks
+- Cleanup interval: Every 5 minutes
+- Retention time: Message IDs from last 10 minutes
+- For high-concurrency scenarios, memory usage is minimal (each message ID uses about tens of bytes)
+
 ## Troubleshooting
 
 ### Nodes Not Discovering Each Other
@@ -951,6 +1027,14 @@ app.Run();
 - Ensure node info is updated regularly
 - Check connection count values
 - Verify node status is `Active`
+
+### Messages Being Processed Multiple Times
+
+- ✅ **Fixed**: `HybridClusterTransport` has built-in message deduplication
+- If still experiencing duplicate processing, check:
+  - Whether message's `MessageId` is unique
+  - Whether message's `ToNodeId` is correctly set
+  - Logs for "Ignoring duplicate message" or "Ignoring message - target node is" messages
 
 ## Related Documentation
 

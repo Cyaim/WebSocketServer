@@ -765,6 +765,24 @@ await clusterTransport.StartAsync();
 app.Run();
 ```
 
+## Message Deduplication / 消息去重机制
+
+### Automatic Duplicate Prevention / 自动防止重复处理
+
+`HybridClusterTransport` has built-in message deduplication to ensure messages are not processed multiple times:
+
+`HybridClusterTransport` 内置了消息去重机制，确保消息不会被重复处理：
+
+1. **Target Node Check** - Only the target node processes messages intended for it / **目标节点检查** - 只有目标节点会处理指定目标的消息
+2. **Message ID Deduplication** - Uses message ID to prevent processing the same message twice / **消息ID去重** - 使用消息ID防止重复处理同一消息
+3. **Automatic Cleanup** - Periodically cleans up expired message ID records / **自动清理** - 定期清理过期的消息ID记录
+
+### How It Works / 工作原理
+
+- **Target Node Check / 目标节点检查**: If `ToNodeId` is set and not equal to current node, message is ignored / 如果 `ToNodeId` 已设置且不等于当前节点，消息会被忽略
+- **Message ID Deduplication / 消息ID去重**: Each message has unique `MessageId`, duplicate messages are automatically ignored / 每个消息都有唯一的 `MessageId`，重复消息会被自动忽略
+- **Automatic Cleanup / 自动清理**: Message ID cache is cleaned every 5 minutes (retains last 10 minutes) / 消息ID缓存每5分钟清理一次（保留最近10分钟）
+
 ## Troubleshooting / 故障排除
 
 ### Nodes Not Discovering Each Other / 节点无法相互发现
@@ -785,6 +803,14 @@ app.Run();
 - Check connection count values / 检查连接数值
 - Verify node status is `Active` / 验证节点状态为 `Active`
 - If using custom `nodeInfoProvider`, ensure it returns valid data / 如果使用自定义 `nodeInfoProvider`，确保它返回有效数据
+
+### Messages Being Processed Multiple Times / 消息被重复处理
+
+- ✅ **Fixed / 已修复**: `HybridClusterTransport` has built-in message deduplication / `HybridClusterTransport` 内置消息去重机制
+- If still experiencing duplicates, check / 如果仍然出现重复，请检查:
+  - Message `MessageId` is unique / 消息的 `MessageId` 是否唯一
+  - Message `ToNodeId` is correctly set / 消息的 `ToNodeId` 是否正确设置
+  - Logs for deduplication messages / 日志中的去重消息提示
 
 ## License / 许可证
 
