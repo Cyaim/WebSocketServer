@@ -89,6 +89,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     try
                     {
                         var message = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
+                        if (message == null)
+                        {
+                            logger.LogWarning("Received null or invalid cluster message");
+                            continue;
+                        }
 
                         // Identify the node from the message
                         // 从消息中识别节点

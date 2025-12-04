@@ -123,6 +123,13 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
                         var messageJson = Encoding.UTF8.GetString(body);
                         var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
                         
+                        if (clusterMessage == null)
+                        {
+                            _logger.LogWarning("Received null or invalid message from RabbitMQ");
+                            await _channel.BasicAckAsync(ea.DeliveryTag, false);
+                            return;
+                        }
+                        
                         // Skip messages from self / 跳过来自自己的消息
                         if (clusterMessage.FromNodeId == _nodeId)
                         {

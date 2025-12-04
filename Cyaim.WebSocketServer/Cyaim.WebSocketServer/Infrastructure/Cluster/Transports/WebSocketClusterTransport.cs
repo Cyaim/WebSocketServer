@@ -271,6 +271,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
                         try
                         {
                             var message = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
+                            if (message == null)
+                            {
+                                _logger.LogWarning($"Received null or invalid message from node {nodeId}");
+                                continue;
+                            }
                             message.FromNodeId = nodeId;
                             
                             MessageReceived?.Invoke(this, new ClusterMessageEventArgs

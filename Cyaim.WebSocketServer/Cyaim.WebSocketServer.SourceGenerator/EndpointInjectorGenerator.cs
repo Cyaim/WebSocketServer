@@ -69,14 +69,14 @@ namespace Cyaim.WebSocketServer.SourceGenerator
             }
         }
 
-        private IPropertySymbol FindProperty(INamedTypeSymbol classSymbol, string propertyName)
+        private IPropertySymbol? FindProperty(INamedTypeSymbol classSymbol, string propertyName)
         {
             return classSymbol.GetMembers(propertyName)
                 .OfType<IPropertySymbol>()
                 .FirstOrDefault(p => p.SetMethod != null && !p.SetMethod.IsStatic);
         }
 
-        private string GenerateInjectorCode(string namespaceName, string className, string classFullName, IPropertySymbol httpContextProperty, IPropertySymbol webSocketProperty)
+        private string GenerateInjectorCode(string namespaceName, string className, string classFullName, IPropertySymbol? httpContextProperty, IPropertySymbol? webSocketProperty)
         {
             var sb = new StringBuilder();
             sb.AppendLine("using Cyaim.WebSocketServer.Infrastructure.Injectors;");
