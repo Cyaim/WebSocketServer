@@ -53,21 +53,27 @@ jobs:
         YEAR=$(date -u +%y)           # 年后两位，例如 25
         MONTH=$(date -u +%m)          # 月份，例如 12
         DAY=$(date -u +%d)            # 日期，例如 25
-        HOUR=$(date -u +%H)           # 小时，例如 07（两位数）
-        MINUTE=$(date -u +%M)         # 分钟，例如 16（两位数）
         
-        # 确保小时和分钟都是两位数（补零）
-        HOUR=$(printf "%02d" $HOUR)
-        MINUTE=$(printf "%02d" $MINUTE)
+        # 使用 date 命令直接获取时分（date 命令默认返回两位数，但可能被 bash 解释为八进制）
+        HOUR_RAW=$(date -u +%H)       # 小时原始值，例如 07
+        MINUTE_RAW=$(date -u +%M)     # 分钟原始值，例如 16
+        
+        # 使用 10# 前缀确保数字被解释为十进制（防止前导零被当作八进制）
+        # 然后使用 printf 格式化为两位数，确保前导零保留
+        HOUR=$(printf "%02d" $((10#$HOUR_RAW)))
+        MINUTE=$(printf "%02d" $((10#$MINUTE_RAW)))
         
         # 组合版本号：主版本号.年后两位.月日.时分
         # 格式：2.YY.MMDD.HHmm（时分部分始终是4位数字，例如 0716）
-        VERSION="${MAJOR_VERSION}.${YEAR}.${MONTH}${DAY}.${HOUR}${MINUTE}"
+        # 直接组合格式化后的 HOUR 和 MINUTE，确保前导零保留
+        TIME_PART="${HOUR}${MINUTE}"
+        VERSION="${MAJOR_VERSION}.${YEAR}.${MONTH}${DAY}.${TIME_PART}"
         
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Generated version: $VERSION"
-        echo "Version format: ${MAJOR_VERSION}.${YEAR}.${MONTH}${DAY}.${HOUR}${MINUTE}"
-        echo "Example: 2.25.1202.0716 = Version 2, Year 2025, Dec 2, 07:16 UTC (时分部分始终是4位数字)"
+        echo "Version format: ${MAJOR_VERSION}.${YEAR}.${MONTH}${DAY}.${TIME_PART}"
+        echo "Time part (HHmm): ${TIME_PART} (Hour: ${HOUR}, Minute: ${MINUTE})"
+        echo "Example: 2.25.1202.0716 = Version 2, Year 2025, Dec 2, 07:16 UTC (时分部分始终是4位数字，前导零保留)"
     
     - name: Setup .NET
       if: steps.check_commit.outputs.trigger_release == 'true'
