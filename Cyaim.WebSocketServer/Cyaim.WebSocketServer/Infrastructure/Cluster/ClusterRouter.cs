@@ -307,9 +307,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     MessageType = messageType
                 };
 
+                // 为每个连接生成唯一的 MessageId，确保即使消息内容相同，也不会被去重
+                // 格式：{nodeId}:{targetNodeId}:{connectionId}:{timestamp}:{guid}
+                // 这样可以确保每个连接、每个时间点的消息都有唯一的 MessageId
+                var uniqueMessageId = $"{_nodeId}:{targetNodeId}:{connectionId}:{DateTime.UtcNow.Ticks}:{Guid.NewGuid():N}";
+                
                 var message = new ClusterMessage
                 {
                     Type = ClusterMessageType.ForwardWebSocketMessage,
+                    MessageId = uniqueMessageId, // 设置唯一的 MessageId，避免基于消息内容去重
                     Payload = JsonSerializer.Serialize(forwardMessage)
                 };
 

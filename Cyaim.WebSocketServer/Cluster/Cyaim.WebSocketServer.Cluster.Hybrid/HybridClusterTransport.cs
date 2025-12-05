@@ -477,7 +477,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     return true; // Ack to remove from queue / 确认以从队列中移除
                 }
 
-                // Check for duplicate messages using message ID / 使用消息ID检查重复消息
+                // Check for duplicate messages using message ID ONLY / 仅使用消息ID检查重复消息
+                // IMPORTANT: Deduplication is based on MessageId, NOT message content / 重要：去重基于 MessageId，而不是消息内容
+                // This ensures that developers can send the same message content to different clients without being deduplicated / 
+                // 这确保了开发者可以向不同的客户端发送相同的消息内容而不会被去重
                 // For broadcast messages, use "MessageId:FromNodeId" as key to allow same message from same sender to be processed once per node
                 // For targeted messages, use "MessageId:FromNodeId:ToNodeId" to allow same message to different targets
                 // 对于广播消息，使用 "MessageId:FromNodeId" 作为键，允许来自同一发送者的相同消息在每个节点上处理一次
