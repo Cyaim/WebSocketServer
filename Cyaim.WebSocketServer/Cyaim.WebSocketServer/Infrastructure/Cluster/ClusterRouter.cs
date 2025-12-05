@@ -221,11 +221,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// <returns>True if routed successfully, false otherwise / 路由成功返回 true，否则返回 false</returns>
         public async Task<bool> RouteMessageAsync(string connectionId, byte[] data, int messageType, Func<string, WebSocket, Task> localHandler)
         {
-            _logger.LogInformation($"[ClusterRouter] 开始路由消息 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, MessageSize: {data.Length} bytes, MessageType: {messageType}, RoutingTableSize: {_connectionRoutes.Count}");
+            _logger.LogWarning($"[ClusterRouter] 开始路由消息 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, MessageSize: {data.Length} bytes, MessageType: {messageType}, RoutingTableSize: {_connectionRoutes.Count}");
             
             if (_connectionRoutes.TryGetValue(connectionId, out var targetNodeId))
             {
-                _logger.LogInformation($"[ClusterRouter] 连接在路由表中找到 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, CurrentNodeId: {_nodeId}");
+                _logger.LogWarning($"[ClusterRouter] 连接在路由表中找到 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, CurrentNodeId: {_nodeId}");
                 
                 if (targetNodeId == _nodeId)
                 {
@@ -269,11 +269,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 else
                 {
                     // Remote connection - forward via transport / 远程连接 - 通过传输转发
-                    _logger.LogInformation($"Routing message to remote connection {connectionId} on node {targetNodeId} (current node: {_nodeId}), message size: {data.Length} bytes");
+                    _logger.LogWarning($"[ClusterRouter] 远程连接转发 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, CurrentNodeId: {_nodeId}, MessageSize: {data.Length} bytes");
                     var result = await ForwardToNodeAsync(targetNodeId, connectionId, data, messageType);
                     if (!result)
                     {
-                        _logger.LogWarning($"Failed to forward message to remote connection {connectionId} on node {targetNodeId}");
+                        _logger.LogError($"[ClusterRouter] 远程连接转发失败 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, CurrentNodeId: {_nodeId}");
                     }
                     return result;
                 }
@@ -283,20 +283,20 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 // Connection not found - query cluster to find the node / 未找到连接 - 查询集群以找到节点
                 // 无论是否为 leader，都尝试查询连接位置（因为连接可能在其他节点）
                 // Whether leader or not, try to query connection location (connection might be on another node)
-                _logger.LogWarning($"Connection {connectionId} not found in local routing table (current node: {_nodeId}), querying cluster... Available connections in routing table: {_connectionRoutes.Count}");
+                _logger.LogError($"[ClusterRouter] 连接不在本地路由表中 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, RoutingTableSize: {_connectionRoutes.Count}, 开始查询集群...");
                 var found = await QueryConnectionAsync(connectionId);
                 if (found != null)
                 {
-                    _logger.LogInformation($"Found connection {connectionId} on node {found} after query, forwarding message");
+                    _logger.LogWarning($"[ClusterRouter] 查询成功找到连接 - ConnectionId: {connectionId}, FoundNodeId: {found}, 开始转发消息");
                     var result = await ForwardToNodeAsync(found, connectionId, data, messageType);
                     if (!result)
                     {
-                        _logger.LogWarning($"Failed to forward message to connection {connectionId} on node {found} after query");
+                        _logger.LogError($"[ClusterRouter] 查询后转发失败 - ConnectionId: {connectionId}, FoundNodeId: {found}");
                     }
                     return result;
                 }
 
-                _logger.LogError($"Connection {connectionId} not found in routing table and query returned no result. Available connections in routing table: {_connectionRoutes.Count}. This connection may not be registered in the cluster.");
+                _logger.LogError($"[ClusterRouter] 连接未找到且查询无结果 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, RoutingTableSize: {_connectionRoutes.Count}. 此连接可能未在集群中注册。");
                 return false;
             }
         }
@@ -313,23 +313,23 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         {
             try
             {
-                _logger.LogInformation($"开始转发消息 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, CurrentNodeId: {_nodeId}, MessageSize: {data.Length} bytes");
+                _logger.LogWarning($"[ClusterRouter] 开始转发消息 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, CurrentNodeId: {_nodeId}, MessageSize: {data.Length} bytes");
                 
                 // 检查目标节点是否可用（如果传输层支持）
                 // Check if target node is available (if transport supports it)
                 if (_transport is Transports.WebSocketClusterTransport wsTransport)
                 {
                     var isConnected = wsTransport.IsNodeConnected(targetNodeId);
-                    _logger.LogInformation($"节点连接状态检查 - TargetNodeId: {targetNodeId}, IsConnected: {isConnected}");
+                    _logger.LogWarning($"[ClusterRouter] 节点连接状态检查 - TargetNodeId: {targetNodeId}, IsConnected: {isConnected}, ConnectionId: {connectionId}");
                     if (!isConnected)
                     {
-                        _logger.LogError($"无法转发消息到节点 {targetNodeId}，连接 {connectionId}: 节点未连接");
+                        _logger.LogError($"[ClusterRouter] 无法转发消息 - TargetNodeId: {targetNodeId}, ConnectionId: {connectionId}, 原因: 节点未连接");
                         return false;
                     }
                 }
                 else
                 {
-                    _logger.LogDebug($"传输层类型: {_transport.GetType().Name}，跳过节点连接状态检查");
+                    _logger.LogWarning($"[ClusterRouter] 传输层类型: {_transport.GetType().Name}，跳过节点连接状态检查 - TargetNodeId: {targetNodeId}, ConnectionId: {connectionId}");
                 }
 
                 var forwardMessage = new ForwardWebSocketMessage
@@ -352,25 +352,25 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     Payload = JsonSerializer.Serialize(forwardMessage)
                 };
 
-                _logger.LogInformation($"准备通过传输层发送消息 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, MessageId: {uniqueMessageId}");
+                _logger.LogWarning($"[ClusterRouter] 准备通过传输层发送消息 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, MessageId: {uniqueMessageId}, CurrentNodeId: {_nodeId}");
                 
                 await _transport.SendAsync(targetNodeId, message);
                 
                 // 记录集群消息转发指标
                 _metricsCollector?.RecordClusterMessageForwarded(_nodeId, targetNodeId);
                 
-                _logger.LogInformation($"成功转发消息 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}");
+                _logger.LogWarning($"[ClusterRouter] 成功转发消息 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, CurrentNodeId: {_nodeId}");
                 return true;
             }
             catch (InvalidOperationException ex)
             {
-                _logger.LogError(ex, $"转发消息失败（操作无效）- ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, Error: {ex.Message}");
+                _logger.LogError(ex, $"[ClusterRouter] 转发消息失败（操作无效）- ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                 _metricsCollector?.RecordError("cluster_forward_failed", _nodeId);
                 return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"转发消息失败（异常）- ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                _logger.LogError(ex, $"[ClusterRouter] 转发消息失败（异常）- ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                 _metricsCollector?.RecordError("cluster_forward_failed", _nodeId);
                 return false;
             }
@@ -560,7 +560,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// <returns>Node ID where connection is located, or null if not found / 连接所在的节点 ID，如果未找到则返回 null</returns>
         private async Task<string> QueryConnectionAsync(string connectionId)
         {
-            _logger.LogInformation($"查询连接位置 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, 当前路由表连接数: {_connectionRoutes.Count}");
+            _logger.LogWarning($"[ClusterRouter] 查询连接位置 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, 当前路由表连接数: {_connectionRoutes.Count}");
             
             var message = new ClusterMessage
             {
@@ -569,7 +569,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             };
 
             // Broadcast query / 广播查询
-            _logger.LogDebug($"广播查询消息 - ConnectionId: {connectionId}");
+            _logger.LogWarning($"[ClusterRouter] 广播查询消息 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}");
             await _transport.BroadcastAsync(message);
 
             // Wait for response with retries / 等待响应，带重试
@@ -581,12 +581,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 
                 if (_connectionRoutes.TryGetValue(connectionId, out var nodeId))
                 {
-                    _logger.LogInformation($"查询成功 - ConnectionId: {connectionId}, NodeId: {nodeId}, 查询次数: {i + 1}");
+                    _logger.LogWarning($"[ClusterRouter] 查询成功 - ConnectionId: {connectionId}, NodeId: {nodeId}, 查询次数: {i + 1}, CurrentNodeId: {_nodeId}");
                     return nodeId;
                 }
             }
 
-            _logger.LogWarning($"查询失败 - ConnectionId: {connectionId} 在集群中未找到，当前路由表连接数: {_connectionRoutes.Count}");
+            _logger.LogError($"[ClusterRouter] 查询失败 - ConnectionId: {connectionId} 在集群中未找到，当前路由表连接数: {_connectionRoutes.Count}, CurrentNodeId: {_nodeId}");
             return null;
         }
 
@@ -803,16 +803,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         {
             try
             {
-                _logger.LogInformation($"[ClusterRouter] 收到转发消息 - MessageId: {message.MessageId}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, CurrentNodeId: {_nodeId}");
+                _logger.LogWarning($"[ClusterRouter] 收到转发消息 - MessageId: {message.MessageId}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, CurrentNodeId: {_nodeId}");
                 
                 var forward = JsonSerializer.Deserialize<ForwardWebSocketMessage>(message.Payload);
-                _logger.LogInformation($"[ClusterRouter] 解析转发消息 - ConnectionId: {forward.ConnectionId}, TargetNodeId: {forward.TargetNodeId}, DataSize: {forward.Data?.Length ?? 0} bytes, MessageType: {forward.MessageType}");
+                _logger.LogWarning($"[ClusterRouter] 解析转发消息 - ConnectionId: {forward.ConnectionId}, TargetNodeId: {forward.TargetNodeId}, DataSize: {forward.Data?.Length ?? 0} bytes, MessageType: {forward.MessageType}, CurrentNodeId: {_nodeId}");
 
                 // If this is the target node, find local WebSocket and send
                 // 如果这是目标节点，查找本地 WebSocket 并发送
                 if (forward.TargetNodeId == _nodeId)
                 {
-                    _logger.LogInformation($"[ClusterRouter] 这是目标节点，处理本地连接 - ConnectionId: {forward.ConnectionId}, TargetNodeId: {forward.TargetNodeId}, CurrentNodeId: {_nodeId}");
+                    _logger.LogWarning($"[ClusterRouter] 这是目标节点，处理本地连接 - ConnectionId: {forward.ConnectionId}, TargetNodeId: {forward.TargetNodeId}, CurrentNodeId: {_nodeId}");
                     
                     // 记录集群消息接收指标
                     _metricsCollector?.RecordClusterMessageReceived(forward.TargetNodeId);
@@ -822,7 +822,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                         var webSocket = _connectionProvider.GetConnection(forward.ConnectionId);
                         if (webSocket != null && webSocket.State == WebSocketState.Open)
                         {
-                            _logger.LogInformation($"[ClusterRouter] 本地连接可用，发送消息 - ConnectionId: {forward.ConnectionId}, WebSocketState: {webSocket.State}");
+                            _logger.LogWarning($"[ClusterRouter] 本地连接可用，发送消息 - ConnectionId: {forward.ConnectionId}, WebSocketState: {webSocket.State}, CurrentNodeId: {_nodeId}");
                             var wsMessageType = (WebSocketMessageType)forward.MessageType;
                             var success = await _connectionProvider.SendAsync(
                                 forward.ConnectionId,
@@ -831,30 +831,30 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
                             if (success)
                             {
-                                _logger.LogInformation($"[ClusterRouter] 成功转发消息到本地连接 - ConnectionId: {forward.ConnectionId}");
+                                _logger.LogWarning($"[ClusterRouter] 成功转发消息到本地连接 - ConnectionId: {forward.ConnectionId}, CurrentNodeId: {_nodeId}");
                             }
                             else
                             {
-                                _logger.LogError($"[ClusterRouter] 发送消息到本地连接失败 - ConnectionId: {forward.ConnectionId}");
+                                _logger.LogError($"[ClusterRouter] 发送消息到本地连接失败 - ConnectionId: {forward.ConnectionId}, CurrentNodeId: {_nodeId}");
                             }
                         }
                         else
                         {
                             var state = webSocket?.State.ToString() ?? "null";
-                            _logger.LogError($"[ClusterRouter] 本地连接不可用 - ConnectionId: {forward.ConnectionId}, WebSocketState: {state}");
+                            _logger.LogError($"[ClusterRouter] 本地连接不可用 - ConnectionId: {forward.ConnectionId}, WebSocketState: {state}, CurrentNodeId: {_nodeId}");
                             // Remove stale connection / 删除过时的连接
                             _connectionRoutes.TryRemove(forward.ConnectionId, out _);
                         }
                     }
                     else
                     {
-                        _logger.LogError($"[ClusterRouter] 连接提供者未设置 - ConnectionId: {forward.ConnectionId}");
+                        _logger.LogError($"[ClusterRouter] 连接提供者未设置 - ConnectionId: {forward.ConnectionId}, CurrentNodeId: {_nodeId}");
                     }
                 }
                 else if (forward.TargetNodeId != _nodeId)
                 {
                     // Not for us - forward again / 不是给我们的 - 再次转发
-                    _logger.LogWarning($"[ClusterRouter] 这不是目标节点，再次转发 - ConnectionId: {forward.ConnectionId}, TargetNodeId: {forward.TargetNodeId}, CurrentNodeId: {_nodeId}");
+                    _logger.LogError($"[ClusterRouter] 这不是目标节点，再次转发 - ConnectionId: {forward.ConnectionId}, TargetNodeId: {forward.TargetNodeId}, CurrentNodeId: {_nodeId}");
                     await ForwardToNodeAsync(forward.TargetNodeId, forward.ConnectionId, forward.Data, forward.MessageType);
                 }
             }
