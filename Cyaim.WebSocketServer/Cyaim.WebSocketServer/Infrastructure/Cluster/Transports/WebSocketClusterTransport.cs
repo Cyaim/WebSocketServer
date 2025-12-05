@@ -321,7 +321,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
             if (!_nodes.TryGetValue(nodeId, out var node))
             {
                 _logger.LogWarning($"Node {nodeId} not found in registered nodes. Available nodes: {string.Join(", ", _nodes.Keys)}");
-                return;
+                throw new InvalidOperationException($"Node {nodeId} not found in registered nodes. Available nodes: {string.Join(", ", _nodes.Keys)}");
             }
 
             ClientWebSocket connection = null;
@@ -333,13 +333,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, $"Failed to get or create connection to node {nodeId}, message will be dropped. Error: {ex.Message}");
-                return;
+                throw new InvalidOperationException($"Failed to get or create connection to node {nodeId}", ex);
             }
             
             if (connection == null || connection.State != WebSocketState.Open)
             {
                 _logger.LogWarning($"Cannot send message to node {nodeId}, connection not available (state: {connection?.State}). Active connections: {_connections.Count}");
-                return;
+                throw new InvalidOperationException($"Cannot send message to node {nodeId}, connection not available (state: {connection?.State})");
             }
             
             _logger.LogDebug($"Sending {message.Type} message to node {nodeId}");
