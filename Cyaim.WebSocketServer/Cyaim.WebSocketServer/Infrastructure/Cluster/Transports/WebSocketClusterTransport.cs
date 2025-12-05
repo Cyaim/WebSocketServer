@@ -255,12 +255,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
             
             try
             {
+                _logger.LogWarning($"[WebSocketClusterTransport] 开始接收消息 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                
                 while (webSocket.State == WebSocketState.Open && !_cancellationTokenSource.Token.IsCancellationRequested)
                 {
                     var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), _cancellationTokenSource.Token);
                     
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
+                        _logger.LogWarning($"[WebSocketClusterTransport] 收到关闭消息 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
                         await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Connection closed", CancellationToken.None);
                         break;
                     }
@@ -273,20 +276,24 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
                             var message = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
                             if (message == null)
                             {
-                                _logger.LogWarning($"Received null or invalid message from node {nodeId}");
+                                _logger.LogError($"[WebSocketClusterTransport] 收到空或无效消息 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}, MessageSize: {result.Count} bytes");
                                 continue;
                             }
                             message.FromNodeId = nodeId;
+                            
+                            _logger.LogWarning($"[WebSocketClusterTransport] 收到集群消息 - NodeId: {nodeId}, MessageType: {message.Type}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}, MessageSize: {result.Count} bytes");
                             
                             MessageReceived?.Invoke(this, new ClusterMessageEventArgs
                             {
                                 FromNodeId = nodeId,
                                 Message = message
                             });
+                            
+                            _logger.LogWarning($"[WebSocketClusterTransport] 集群消息已触发事件 - NodeId: {nodeId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}");
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogError(ex, $"Failed to deserialize message from node {nodeId}");
+                            _logger.LogError(ex, $"[WebSocketClusterTransport] 反序列化消息失败 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}, MessageJson: {messageJson.Substring(0, Math.Min(200, messageJson.Length))}");
                         }
                     }
                 }
@@ -380,14 +387,32 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
         public async Task BroadcastAsync(ClusterMessage message)
         {
             message.FromNodeId = _nodeId;
+            _logger.LogWarning($"[WebSocketClusterTransport] 开始广播消息 - MessageType: {message.Type}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}, 目标节点数: {_nodes.Count}");
+            
             var tasks = new List<Task>();
+            var nodeIds = new List<string>();
 
             foreach (var node in _nodes.Values)
             {
-                tasks.Add(SendAsync(node.NodeId, message));
+                if (node.NodeId != _nodeId) // 不向自己发送
+                {
+                    nodeIds.Add(node.NodeId);
+                    tasks.Add(SendAsync(node.NodeId, message));
+                }
             }
 
-            await Task.WhenAll(tasks);
+            _logger.LogWarning($"[WebSocketClusterTransport] 广播消息到节点 - TargetNodeIds: [{string.Join(", ", nodeIds)}], CurrentNodeId: {_nodeId}, 任务数: {tasks.Count}");
+            
+            try
+            {
+                await Task.WhenAll(tasks);
+                _logger.LogWarning($"[WebSocketClusterTransport] 广播消息完成 - MessageType: {message.Type}, CurrentNodeId: {_nodeId}, 成功节点数: {tasks.Count}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[WebSocketClusterTransport] 广播消息时发生异常 - MessageType: {message.Type}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                // 不抛出异常，允许部分节点失败
+            }
         }
 
         /// <summary>
