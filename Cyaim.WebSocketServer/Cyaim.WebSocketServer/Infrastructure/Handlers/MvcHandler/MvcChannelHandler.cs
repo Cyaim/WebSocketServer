@@ -601,15 +601,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, requestBody, logger, appLifetime);
 
                 // 发送结果给客户端
-                // 使用统一的SendAsync方法，自动适配单机和集群模式
-                // Use unified SendAsync method, automatically adapts to single machine or cluster mode
-                var connectionId = context.Connection.Id;
-                
-                // 序列化响应以获取大小（用于统计）
+                //string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
+                //await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
+
+                // 序列化响应以获取大小
                 string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
                 var responseBytes = Encoding.UTF8.GetBytes(serialJson);
-                
-                await WebSocketManager.SendAsync(connectionId, invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions, Encoding.UTF8).ConfigureAwait(false);
+
+                await invokeResult.SendLocalAsync(webSocketOption.DefaultResponseJsonSerializerOptions, result.MessageType, timeout: ResponseSendTimeout, encoding: Encoding.UTF8, sendBufferSize: SendTextBufferSize, socket: webSocket).ConfigureAwait(false);
 
                 // 记录消息发送指标
                 var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
@@ -669,22 +668,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, requestBody, logger, appLifetime);
 
                 // 发送结果给客户端
-                // 使用统一的SendAsync方法，自动适配单机和集群模式
-                // Use unified SendAsync method, automatically adapts to single machine or cluster mode
-                var connectionId = context.Connection.Id;
-                
-                // 序列化响应以获取大小（用于统计）
-                string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
-                var responseBytes = Encoding.UTF8.GetBytes(serialJson);
-                
-                await WebSocketManager.SendAsync(connectionId, invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions, Encoding.UTF8).ConfigureAwait(false);
+                //string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
+                //await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
 
-                // 记录消息发送指标
-                var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
-                _metricsCollector?.RecordMessageSent(responseBytes.Length, currentNodeId, context.Request.Path);
-
-                // 记录统计信息（如果统计记录器可用）
-                Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesSent(context.Connection.Id, responseBytes.Length);
+                await invokeResult.SendLocalAsync(webSocketOption.DefaultResponseJsonSerializerOptions, result.MessageType, timeout: ResponseSendTimeout, encoding: Encoding.UTF8, sendBufferSize: SendTextBufferSize, socket: webSocket).ConfigureAwait(false);
             }
             catch (JsonException ex)
             {
