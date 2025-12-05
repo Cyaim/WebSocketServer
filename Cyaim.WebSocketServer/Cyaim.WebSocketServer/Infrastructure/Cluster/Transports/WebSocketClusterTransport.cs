@@ -315,47 +315,60 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
         /// <param name="message">Message to send / 要发送的消息</param>
         public async Task SendAsync(string nodeId, ClusterMessage message)
         {
+            _logger.LogInformation($"[WebSocketClusterTransport] 开始发送消息 - TargetNodeId: {nodeId}, CurrentNodeId: {_nodeId}, MessageType: {message.Type}, MessageId: {message.MessageId}");
+            
             if (string.IsNullOrEmpty(nodeId))
+            {
+                _logger.LogError($"[WebSocketClusterTransport] 节点ID为空");
                 throw new ArgumentNullException(nameof(nodeId));
+            }
 
             if (!_nodes.TryGetValue(nodeId, out var node))
             {
-                _logger.LogWarning($"Node {nodeId} not found in registered nodes. Available nodes: {string.Join(", ", _nodes.Keys)}");
+                _logger.LogError($"[WebSocketClusterTransport] 节点未注册 - TargetNodeId: {nodeId}, 已注册节点: {string.Join(", ", _nodes.Keys)}, 当前节点: {_nodeId}");
                 throw new InvalidOperationException($"Node {nodeId} not found in registered nodes. Available nodes: {string.Join(", ", _nodes.Keys)}");
             }
+
+            _logger.LogDebug($"[WebSocketClusterTransport] 节点已注册 - TargetNodeId: {nodeId}, Address: {node.Address}, Port: {node.Port}");
 
             ClientWebSocket connection = null;
             try
             {
-                _logger.LogDebug($"Getting connection to node {nodeId} for message type {message.Type}");
+                _logger.LogInformation($"[WebSocketClusterTransport] 获取或创建连接到节点 - TargetNodeId: {nodeId}, MessageType: {message.Type}");
                 connection = await GetOrCreateConnection(nodeId, node);
+                _logger.LogDebug($"[WebSocketClusterTransport] 连接获取成功 - TargetNodeId: {nodeId}, ConnectionState: {connection?.State}");
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, $"Failed to get or create connection to node {nodeId}, message will be dropped. Error: {ex.Message}");
+                _logger.LogError(ex, $"[WebSocketClusterTransport] 获取或创建连接失败 - TargetNodeId: {nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                 throw new InvalidOperationException($"Failed to get or create connection to node {nodeId}", ex);
             }
             
             if (connection == null || connection.State != WebSocketState.Open)
             {
-                _logger.LogWarning($"Cannot send message to node {nodeId}, connection not available (state: {connection?.State}). Active connections: {_connections.Count}");
-                throw new InvalidOperationException($"Cannot send message to node {nodeId}, connection not available (state: {connection?.State})");
+                var state = connection?.State.ToString() ?? "null";
+                var activeConnections = _connections.Count;
+                _logger.LogError($"[WebSocketClusterTransport] 连接不可用 - TargetNodeId: {nodeId}, ConnectionState: {state}, ActiveConnections: {activeConnections}");
+                throw new InvalidOperationException($"Cannot send message to node {nodeId}, connection not available (state: {state})");
             }
             
-            _logger.LogDebug($"Sending {message.Type} message to node {nodeId}");
+            _logger.LogInformation($"[WebSocketClusterTransport] 准备发送消息 - TargetNodeId: {nodeId}, MessageType: {message.Type}, MessageId: {message.MessageId}");
 
             message.FromNodeId = _nodeId;
             message.ToNodeId = nodeId;
             var messageJson = JsonSerializer.Serialize(message);
             var messageBytes = Encoding.UTF8.GetBytes(messageJson);
 
+            _logger.LogDebug($"[WebSocketClusterTransport] 消息序列化完成 - TargetNodeId: {nodeId}, MessageSize: {messageBytes.Length} bytes");
+
             try
             {
                 await connection.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, _cancellationTokenSource.Token);
+                _logger.LogInformation($"[WebSocketClusterTransport] 消息发送成功 - TargetNodeId: {nodeId}, MessageId: {message.MessageId}, MessageSize: {messageBytes.Length} bytes");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to send message to node {nodeId}");
+                _logger.LogError(ex, $"[WebSocketClusterTransport] 发送消息失败 - TargetNodeId: {nodeId}, MessageId: {message.MessageId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                 throw;
             }
         }

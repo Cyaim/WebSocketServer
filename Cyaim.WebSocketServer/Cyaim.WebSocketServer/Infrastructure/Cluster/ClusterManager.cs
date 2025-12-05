@@ -246,12 +246,21 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 {
                     try
                     {
+                        _logger.LogDebug($"开始路由消息到连接 - ConnectionId: {connectionId}, MessageSize: {data.Length} bytes, MessageType: {messageType}");
                         var success = await RouteMessageAsync(connectionId, data, messageType);
                         results[connectionId] = success;
+                        if (success)
+                        {
+                            _logger.LogDebug($"成功路由消息到连接 - ConnectionId: {connectionId}");
+                        }
+                        else
+                        {
+                            _logger.LogWarning($"路由消息到连接失败 - ConnectionId: {connectionId}");
+                        }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, $"Failed to route message to connection {connectionId}");
+                        _logger.LogError(ex, $"路由消息到连接时发生异常 - ConnectionId: {connectionId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                         results[connectionId] = false;
                     }
                 });
