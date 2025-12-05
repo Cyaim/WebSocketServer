@@ -654,8 +654,6 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 return new Dictionary<string, bool>();
             }
 
-            var results = new Dictionary<string, bool>();
-
             // Check if cluster is enabled / 检查是否启用集群
             var clusterManager = GlobalClusterCenter.ClusterManager;
             if (clusterManager != null)
@@ -663,37 +661,14 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 // Use cluster routing / 使用集群路由
                 var connectionIdsList = connectionIds.ToList();
                 var connectionIdsArray = connectionIdsList.ToArray();
-                // 使用静态日志记录（如果可用）
-                try
-                {
-                    var loggerFactory = GlobalClusterCenter.ClusterContext?.ServiceProvider?.GetService(typeof(ILoggerFactory)) as ILoggerFactory;
-                    var logger = loggerFactory?.CreateLogger("WebSocketManager");
-                    logger?.LogInformation($"[WebSocketManager] 使用集群路由发送消息 - ConnectionCount: {connectionIdsArray.Length}, MessageSize: {data.Length} bytes, MessageType: {messageType}, ConnectionIds: {string.Join(", ", connectionIdsArray)}");
-                }
-                catch { }
                 
                 var results = await clusterManager.RouteMessagesAsync(connectionIdsArray, data, (int)messageType);
-                var successCount = results.Values.Count(r => r);
-                var failCount = results.Values.Count(r => !r);
-                
-                try
-                {
-                    var loggerFactory = GlobalClusterCenter.ClusterContext?.ServiceProvider?.GetService(typeof(ILoggerFactory)) as ILoggerFactory;
-                    var logger = loggerFactory?.CreateLogger("WebSocketManager");
-                    logger?.LogInformation($"[WebSocketManager] 集群路由完成 - 成功: {successCount}, 失败: {failCount}, 总计: {results.Count}");
-                    if (failCount > 0)
-                    {
-                        var failedIds = results.Where(r => !r.Value).Select(r => r.Key).ToArray();
-                        logger?.LogWarning($"[WebSocketManager] 集群路由失败连接 - FailedConnectionIds: {string.Join(", ", failedIds)}");
-                    }
-                }
-                catch { }
-                
                 return results;
             }
             else
             {
                 // Use local WebSocket / 使用本地 WebSocket
+                var results = new Dictionary<string, bool>();
                 var tasks = new List<Task>();
                 foreach (var connectionId in connectionIds)
                 {
