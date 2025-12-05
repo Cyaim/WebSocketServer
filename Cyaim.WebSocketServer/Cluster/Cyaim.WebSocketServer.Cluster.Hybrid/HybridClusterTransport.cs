@@ -126,7 +126,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 return;
             }
 
-            _logger.LogInformation($"Starting hybrid cluster transport for node {_nodeId}");
+            _logger.LogWarning($"[HybridClusterTransport] 启动混合集群传输 - NodeId: {_nodeId}, Address: {_nodeInfo.Address}, Port: {_nodeInfo.Port}, Endpoint: {_nodeInfo.Endpoint}");
 
             try
             {
@@ -159,7 +159,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 await _messageQueueService.ConsumeAsync(_queueName, HandleMessageAsync, autoAck: false);
 
                 _started = true;
-                _logger.LogInformation($"Hybrid cluster transport started for node {_nodeId}");
+                _logger.LogWarning($"[HybridClusterTransport] 混合集群传输启动成功 - NodeId: {_nodeId}, QueueName: {_queueName}, ExchangeName: {ExchangeName}");
             }
             catch (Exception ex)
             {
@@ -246,11 +246,11 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 await _messageQueueService.PublishAsync(ExchangeName, routingKey, messageBytes, properties);
 
-                _logger.LogDebug($"Sent message {message.MessageId} to node {nodeId}");
+                _logger.LogWarning($"[HybridClusterTransport] 消息发送成功 - TargetNodeId: {nodeId}, MessageId: {message.MessageId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}, MessageSize: {messageBytes.Length} bytes");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to send message to node {nodeId}");
+                _logger.LogError(ex, $"[HybridClusterTransport] 消息发送失败 - TargetNodeId: {nodeId}, MessageId: {message.MessageId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                 throw;
             }
         }
@@ -296,11 +296,11 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 await _messageQueueService.PublishAsync(ExchangeName, BroadcastRoutingKey, messageBytes, properties);
 
-                _logger.LogDebug($"Broadcasted message {message.MessageId} to all nodes");
+                _logger.LogWarning($"[HybridClusterTransport] 广播消息成功 - MessageId: {message.MessageId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}, MessageSize: {messageBytes.Length} bytes, 已知节点数: {_knownNodes.Count}");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to broadcast message");
+                _logger.LogError(ex, $"[HybridClusterTransport] 广播消息失败 - MessageId: {message.MessageId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                 throw;
             }
         }
@@ -453,13 +453,16 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 if (message == null)
                 {
-                    _logger.LogWarning("Received null or invalid message");
+                    _logger.LogWarning($"[HybridClusterTransport] 收到空或无效消息 - CurrentNodeId: {_nodeId}");
                     return true; // Ack to remove from queue / 确认以从队列中移除
                 }
+
+                _logger.LogWarning($"[HybridClusterTransport] 收到集群消息 - MessageType: {message.Type}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}, MessageSize: {body.Length} bytes");
 
                 // Ignore messages from self / 忽略来自自己的消息
                 if (message.FromNodeId == _nodeId)
                 {
+                    _logger.LogWarning($"[HybridClusterTransport] 忽略来自自己的消息 - MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
                     return true;
                 }
 
@@ -515,6 +518,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 }
 
                 // Trigger message received event / 触发消息接收事件
+                _logger.LogWarning($"[HybridClusterTransport] 触发消息接收事件 - MessageType: {message.Type}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
                 MessageReceived?.Invoke(this, new ClusterMessageEventArgs
                 {
                     FromNodeId = message.FromNodeId,
@@ -586,7 +590,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             var wasNew = _knownNodes.TryAdd(nodeInfo.NodeId, nodeInfo);
             if (wasNew)
             {
-                _logger.LogInformation($"Node {nodeInfo.NodeId} discovered: {nodeInfo.Address}:{nodeInfo.Port}");
+                _logger.LogWarning($"[HybridClusterTransport] 发现新节点 - NodeId: {nodeInfo.NodeId}, Address: {nodeInfo.Address}, Port: {nodeInfo.Port}, CurrentNodeId: {_nodeId}, 已知节点数: {_knownNodes.Count}");
                 NodeConnected?.Invoke(this, new ClusterNodeEventArgs { NodeId = nodeInfo.NodeId });
             }
             else
@@ -608,7 +612,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
             if (_knownNodes.TryRemove(nodeId, out _))
             {
-                _logger.LogInformation($"Node {nodeId} removed from cluster");
+                _logger.LogWarning($"[HybridClusterTransport] 节点从集群中移除 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}, 剩余节点数: {_knownNodes.Count}");
                 NodeDisconnected?.Invoke(this, new ClusterNodeEventArgs { NodeId = nodeId });
             }
         }

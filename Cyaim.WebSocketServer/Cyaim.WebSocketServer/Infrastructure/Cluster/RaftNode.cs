@@ -224,7 +224,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
             if (knownNodes.Count == 0)
             {
-                _logger.LogWarning($"No known nodes found, cannot start election. Node will remain as candidate.");
+                // 单节点场景是正常的，降低日志级别避免频繁警告
+                // Single node scenario is normal, reduce log level to avoid frequent warnings
+                _logger.LogDebug($"No known nodes found, cannot start election. Node will remain as candidate. This is normal in single-node scenarios or when other nodes haven't started yet.");
                 return;
             }
 
@@ -763,27 +765,93 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             }
             else
             {
-                // For Redis/RabbitMQ, nodes are registered differently
-                // 对于 Redis/RabbitMQ，节点的注册方式不同
-                // They should maintain their own node registry
-                // 它们应该维护自己的节点注册表
-                // For now, we'll rely on the cluster configuration
-                _logger.LogDebug($"Transport is not WebSocketClusterTransport, using cluster configuration");
-                // 目前，我们将依赖集群配置
-                var clusterOption = GlobalClusterCenter.ClusterContext;
-                if (clusterOption?.Nodes != null)
+                // For HybridClusterTransport (Redis + RabbitMQ), nodes are discovered dynamically via Redis
+                // 对于 HybridClusterTransport（Redis + RabbitMQ），节点通过 Redis 动态发现
+                // Try to get known nodes from HybridClusterTransport via reflection
+                // 尝试通过反射从 HybridClusterTransport 获取已知节点
+                try
                 {
-                    foreach (var nodeConfig in clusterOption.Nodes)
+                    var transportType = _transport.GetType();
+                    if (transportType.Name == "HybridClusterTransport" || transportType.FullName?.Contains("HybridClusterTransport") == true)
                     {
-                        // For Redis/RabbitMQ, node config might be different format
-                        // 对于 Redis/RabbitMQ，节点配置可能是不同的格式
-                        // Assuming format: nodeId@address or just nodeId
-                        // 假设格式：nodeId@address 或仅 nodeId
-                        var parts = nodeConfig.Split('@');
-                        var nodeId = parts.Length > 0 ? parts[0] : nodeConfig;
-                        if (!string.IsNullOrEmpty(nodeId) && nodeId != _nodeId)
+                        _logger.LogDebug($"Transport is HybridClusterTransport, attempting to get known nodes via reflection");
+                        
+                        // Get _knownNodes field via reflection / 通过反射获取 _knownNodes 字段
+                        var knownNodesField = transportType.GetField("_knownNodes", 
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        
+                        if (knownNodesField != null)
                         {
-                            nodeIds.Add(nodeId);
+                            var knownNodesDict = knownNodesField.GetValue(_transport);
+                            if (knownNodesDict is System.Collections.IDictionary dict)
+                            {
+                                foreach (System.Collections.DictionaryEntry entry in dict)
+                                {
+                                    var nodeId = entry.Key?.ToString();
+                                    if (!string.IsNullOrEmpty(nodeId) && nodeId != _nodeId)
+                                    {
+                                        nodeIds.Add(nodeId);
+                                        _logger.LogDebug($"Found node '{nodeId}' from HybridClusterTransport");
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // If no nodes found via reflection, fall back to cluster configuration
+                        // 如果通过反射没有找到节点，回退到集群配置
+                        if (nodeIds.Count == 0)
+                        {
+                            _logger.LogDebug($"No nodes found in HybridClusterTransport, falling back to cluster configuration");
+                            var clusterOption = GlobalClusterCenter.ClusterContext;
+                            if (clusterOption?.Nodes != null)
+                            {
+                                foreach (var nodeConfig in clusterOption.Nodes)
+                                {
+                                    var parts = nodeConfig.Split('@');
+                                    var nodeId = parts.Length > 0 ? parts[0] : nodeConfig;
+                                    if (!string.IsNullOrEmpty(nodeId) && nodeId != _nodeId)
+                                    {
+                                        nodeIds.Add(nodeId);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // For other transports (Redis/RabbitMQ), use cluster configuration
+                        // 对于其他传输（Redis/RabbitMQ），使用集群配置
+                        _logger.LogDebug($"Transport is not WebSocketClusterTransport or HybridClusterTransport, using cluster configuration");
+                        var clusterOption = GlobalClusterCenter.ClusterContext;
+                        if (clusterOption?.Nodes != null)
+                        {
+                            foreach (var nodeConfig in clusterOption.Nodes)
+                            {
+                                var parts = nodeConfig.Split('@');
+                                var nodeId = parts.Length > 0 ? parts[0] : nodeConfig;
+                                if (!string.IsNullOrEmpty(nodeId) && nodeId != _nodeId)
+                                {
+                                    nodeIds.Add(nodeId);
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"Failed to get known nodes from transport, falling back to cluster configuration");
+                    // Fall back to cluster configuration / 回退到集群配置
+                    var clusterOption = GlobalClusterCenter.ClusterContext;
+                    if (clusterOption?.Nodes != null)
+                    {
+                        foreach (var nodeConfig in clusterOption.Nodes)
+                        {
+                            var parts = nodeConfig.Split('@');
+                            var nodeId = parts.Length > 0 ? parts[0] : nodeConfig;
+                            if (!string.IsNullOrEmpty(nodeId) && nodeId != _nodeId)
+                            {
+                                nodeIds.Add(nodeId);
+                            }
                         }
                     }
                 }
