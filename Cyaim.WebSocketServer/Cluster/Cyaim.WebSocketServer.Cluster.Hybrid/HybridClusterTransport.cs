@@ -138,6 +138,30 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 // Connect to message queue / 连接到消息队列
                 await _messageQueueService.ConnectAsync();
+                
+                // Verify connection is ready before proceeding / 验证连接已就绪再继续
+                // This ensures channel is fully established before RaftNode starts / 这确保在 RaftNode 启动前 channel 已完全建立
+                int verifyAttempts = 0;
+                while (verifyAttempts < 10) // Try up to 10 times / 最多尝试 10 次
+                {
+                    try
+                    {
+                        // Try to ensure connection is ready / 尝试确保连接已就绪
+                        await _messageQueueService.VerifyConnectionAsync();
+                        break; // Connection verified / 连接已验证
+                    }
+                    catch (Exception ex)
+                    {
+                        verifyAttempts++;
+                        if (verifyAttempts >= 10)
+                        {
+                            _logger.LogError(ex, $"[HybridClusterTransport] 验证 RabbitMQ 连接失败，已达到最大重试次数 - NodeId: {_nodeId}");
+                            throw;
+                        }
+                        _logger.LogWarning($"[HybridClusterTransport] 验证 RabbitMQ 连接失败，重试中 ({verifyAttempts}/10) - NodeId: {_nodeId}, Error: {ex.Message}");
+                        await Task.Delay(200); // Wait 200ms before retry / 重试前等待 200ms
+                    }
+                }
 
                 // Declare exchange / 声明交换机
                 await _messageQueueService.DeclareExchangeAsync(ExchangeName, "topic", durable: true);
@@ -156,10 +180,19 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 await _messageQueueService.BindQueueAsync(_queueName, ExchangeName, BroadcastRoutingKey);
 
                 // Start consuming messages / 开始消费消息
-                await _messageQueueService.ConsumeAsync(_queueName, HandleMessageAsync, autoAck: false);
+                // Pass currentNodeId to enable early filtering of self-messages / 传递 currentNodeId 以启用早期过滤自己的消息
+                await _messageQueueService.ConsumeAsync(_queueName, HandleMessageAsync, autoAck: false, currentNodeId: _nodeId);
+
+                // Wait a bit for initial node discovery / 等待初始节点发现
+                _logger.LogWarning($"[HybridClusterTransport] 等待初始节点发现... - NodeId: {_nodeId}");
+                await Task.Delay(2000); // Wait 2 seconds for initial discovery / 等待 2 秒进行初始发现
+                
+                // Log discovered nodes / 记录发现的节点
+                var discoveredNodes = GetKnownNodeIds();
+                _logger.LogWarning($"[HybridClusterTransport] 初始节点发现完成 - NodeId: {_nodeId}, DiscoveredNodeCount: {discoveredNodes.Count}, DiscoveredNodes: {string.Join(", ", discoveredNodes)}");
 
                 _started = true;
-                _logger.LogWarning($"[HybridClusterTransport] 混合集群传输启动成功 - NodeId: {_nodeId}, QueueName: {_queueName}, ExchangeName: {ExchangeName}");
+                _logger.LogWarning($"[HybridClusterTransport] 混合集群传输启动成功 - NodeId: {_nodeId}, QueueName: {_queueName}, ExchangeName: {ExchangeName}, KnownNodes: {discoveredNodes.Count}");
             }
             catch (Exception ex)
             {
@@ -246,7 +279,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 await _messageQueueService.PublishAsync(ExchangeName, routingKey, messageBytes, properties);
 
-                _logger.LogWarning($"[HybridClusterTransport] 消息发送成功 - TargetNodeId: {nodeId}, MessageId: {message.MessageId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}, MessageSize: {messageBytes.Length} bytes");
+                _logger.LogTrace($"[HybridClusterTransport] 消息发送成功 - TargetNodeId: {nodeId}, MessageId: {message.MessageId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}, MessageSize: {messageBytes.Length} bytes");
             }
             catch (Exception ex)
             {
@@ -291,12 +324,26 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 {
                     MessageId = message.MessageId,
                     CorrelationId = message.MessageId,
-                    Timestamp = message.Timestamp
+                    Timestamp = message.Timestamp,
+                    Headers = new Dictionary<string, object>
+                    {
+                        { "FromNodeId", _nodeId } // Add FromNodeId header to filter self-messages early / 添加 FromNodeId header 以便早期过滤自己的消息
+                    }
                 };
 
-                await _messageQueueService.PublishAsync(ExchangeName, BroadcastRoutingKey, messageBytes, properties);
-
-                _logger.LogWarning($"[HybridClusterTransport] 广播消息成功 - MessageId: {message.MessageId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}, MessageSize: {messageBytes.Length} bytes, 已知节点数: {_knownNodes.Count}");
+                // Only broadcast if there are other nodes (excluding self) / 只有在有其他节点时才广播（排除自己）
+                // Note: _knownNodes does not include self, so _knownNodes.Count is the count of other nodes
+                // 注意：_knownNodes 不包含自己，所以 _knownNodes.Count 就是其他节点的数量
+                var otherNodesCount = _knownNodes.Count;
+                if (otherNodesCount > 0)
+                {
+                    await _messageQueueService.PublishAsync(ExchangeName, BroadcastRoutingKey, messageBytes, properties);
+                    _logger.LogTrace($"[HybridClusterTransport] 广播消息成功 - MessageId: {message.MessageId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}, MessageSize: {messageBytes.Length} bytes, 已知节点数: {_knownNodes.Count}, 其他节点数: {otherNodesCount}");
+                }
+                else
+                {
+                    _logger.LogTrace($"[HybridClusterTransport] 跳过广播消息（没有其他节点）- MessageId: {message.MessageId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}, 已知节点数: {_knownNodes.Count}, 其他节点数: {otherNodesCount}");
+                }
             }
             catch (Exception ex)
             {
@@ -406,6 +453,17 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         }
 
         /// <summary>
+        /// Get all known node IDs / 获取所有已知节点 ID
+        /// </summary>
+        /// <returns>List of known node IDs / 已知节点 ID 列表</returns>
+        public List<string> GetKnownNodeIds()
+        {
+            var nodeIds = new List<string>(_knownNodes.Keys);
+            _logger.LogTrace($"[HybridClusterTransport] 获取已知节点ID - CurrentNodeId: {_nodeId}, KnownNodeCount: {nodeIds.Count}, NodeIds: {string.Join(", ", nodeIds)}");
+            return nodeIds;
+        }
+
+        /// <summary>
         /// Update current node information in Redis / 更新 Redis 中的当前节点信息
         /// </summary>
         /// <param name="nodeInfo">Updated node information / 更新的节点信息</param>
@@ -448,22 +506,44 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         {
             try
             {
+                _logger.LogTrace($"[HybridClusterTransport] HandleMessageAsync 开始处理 - CurrentNodeId: {_nodeId}, BodyLength: {body.Length}, MessageId: {properties.MessageId}, CorrelationId: {properties.CorrelationId}");
+                
                 var messageJson = Encoding.UTF8.GetString(body);
+                _logger.LogTrace($"[HybridClusterTransport] 消息JSON解析 - CurrentNodeId: {_nodeId}, MessageJsonLength: {messageJson.Length}, First100Chars: {(messageJson.Length > 100 ? messageJson.Substring(0, 100) : messageJson)}");
+                
                 var message = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
 
                 if (message == null)
                 {
-                    _logger.LogWarning($"[HybridClusterTransport] 收到空或无效消息 - CurrentNodeId: {_nodeId}");
+                    _logger.LogWarning($"[HybridClusterTransport] 收到空或无效消息 - CurrentNodeId: {_nodeId}, MessageJson: {messageJson}");
                     return true; // Ack to remove from queue / 确认以从队列中移除
                 }
 
-                _logger.LogWarning($"[HybridClusterTransport] 收到集群消息 - MessageType: {message.Type}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}, MessageSize: {body.Length} bytes");
+                _logger.LogTrace($"[HybridClusterTransport] 收到集群消息 - MessageType: {message.Type}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}, MessageSize: {body.Length} bytes");
 
-                // Ignore messages from self / 忽略来自自己的消息
+                // Ignore messages from self FIRST to avoid processing own messages / 首先忽略来自自己的消息，避免处理自己的消息
                 if (message.FromNodeId == _nodeId)
                 {
-                    _logger.LogWarning($"[HybridClusterTransport] 忽略来自自己的消息 - MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
-                    return true;
+                    // Check for duplicate messages from self to avoid processing same message multiple times / 检查来自自己的重复消息，避免多次处理相同消息
+                    if (!string.IsNullOrEmpty(message.MessageId))
+                    {
+                        string deduplicationKey = string.IsNullOrEmpty(message.ToNodeId) 
+                            ? $"{message.MessageId}:{message.FromNodeId}" 
+                            : $"{message.MessageId}:{message.FromNodeId}:{message.ToNodeId}";
+                        
+                        if (_processedMessageIds.TryGetValue(deduplicationKey, out var processedTime))
+                        {
+                            // Already processed this message from self, ignore it / 已处理过此来自自己的消息，忽略它
+                            _logger.LogTrace($"[HybridClusterTransport] 忽略来自自己的重复消息 - MessageId: {message.MessageId}, Key: {deduplicationKey}, ProcessedAt: {processedTime:yyyy-MM-dd HH:mm:ss}, CurrentNodeId: {_nodeId}");
+                            return true; // Ack to remove from queue / 确认以从队列中移除
+                        }
+                        
+                        // Mark as processed / 标记为已处理
+                        _processedMessageIds.TryAdd(deduplicationKey, DateTime.UtcNow);
+                    }
+                    
+                    _logger.LogTrace($"[HybridClusterTransport] 忽略来自自己的消息 - MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}, MessageType: {message.Type}");
+                    return true; // Ack to remove from queue / 确认以从队列中移除
                 }
 
                 // Check if message is for this node / 检查消息是否发送给当前节点
@@ -509,7 +589,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     if (_processedMessageIds.TryGetValue(deduplicationKey, out var processedTime))
                     {
                         // Message already processed, ignore it / 消息已处理，忽略它
-                        _logger.LogDebug($"Ignoring duplicate message {message.MessageId} (key: {deduplicationKey}, processed at {processedTime:yyyy-MM-dd HH:mm:ss})");
+                        _logger.LogTrace($"[HybridClusterTransport] 忽略重复消息 - MessageId: {message.MessageId}, Key: {deduplicationKey}, ProcessedAt: {processedTime:yyyy-MM-dd HH:mm:ss}, CurrentNodeId: {_nodeId}");
                         return true; // Ack to remove from queue / 确认以从队列中移除
                     }
 
@@ -518,7 +598,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 }
 
                 // Trigger message received event / 触发消息接收事件
-                _logger.LogWarning($"[HybridClusterTransport] 触发消息接收事件 - MessageType: {message.Type}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
+                _logger.LogTrace($"[HybridClusterTransport] 触发消息接收事件 - MessageType: {message.Type}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
                 MessageReceived?.Invoke(this, new ClusterMessageEventArgs
                 {
                     FromNodeId = message.FromNodeId,

@@ -172,8 +172,14 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis
                 throw new InvalidOperationException("Redis is not connected");
             }
 
+            _logger.LogWarning($"[FreeRedisService] 搜索匹配模式的键 - Pattern: {pattern}");
+            
             var keys = _redis.Keys(pattern);
-            return await Task.FromResult(keys?.ToList() ?? new List<string>());
+            var keyList = keys?.ToList() ?? new List<string>();
+            
+            _logger.LogWarning($"[FreeRedisService] 找到匹配的键 - Pattern: {pattern}, KeyCount: {keyList.Count}, Keys: {string.Join(", ", keyList)}");
+            
+            return await Task.FromResult(keyList);
         }
 
         /// <summary>
@@ -181,6 +187,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis
         /// </summary>
         public async Task<Dictionary<string, string>> GetValuesAsync(string pattern)
         {
+            _logger.LogWarning($"[FreeRedisService] 获取匹配模式的键值 - Pattern: {pattern}");
+            
             var keys = await GetKeysAsync(pattern);
             var result = new Dictionary<string, string>();
 
@@ -192,14 +200,20 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis
                     if (value != null)
                     {
                         result[key] = value;
+                        _logger.LogWarning($"[FreeRedisService] 获取键值成功 - Key: {key}, ValueLength: {value.Length}");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"[FreeRedisService] 键值为空 - Key: {key}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, $"Failed to get value for key {key}");
+                    _logger.LogError(ex, $"[FreeRedisService] 获取键值失败 - Key: {key}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                 }
             }
 
+            _logger.LogWarning($"[FreeRedisService] 获取键值完成 - Pattern: {pattern}, ResultCount: {result.Count}");
             return result;
         }
 
