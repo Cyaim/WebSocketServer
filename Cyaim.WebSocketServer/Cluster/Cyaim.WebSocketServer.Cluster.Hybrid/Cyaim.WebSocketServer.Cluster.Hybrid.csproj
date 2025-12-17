@@ -13,12 +13,12 @@
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
 		<PackageReleaseNotes>
 			Version 2.0.0 - Major Release
-            
-            - Updated to support WebSocketServer 2.0.0
-            - Enhanced hybrid cluster transport with improved reliability
-            - Better error handling and connection management
-            - Support for .NET 9.0 and .NET 10.0
-        </PackageReleaseNotes>
+
+			- Updated to support WebSocketServer 2.0.0
+			- Enhanced hybrid cluster transport with improved reliability
+			- Better error handling and connection management
+			- Support for .NET 9.0 and .NET 10.0
+		</PackageReleaseNotes>
 		<Description>
 			WebSocketServer Hybrid cluster transport extension (Redis for service discovery, RabbitMQ for message routing)
 			WebSocketServer 混合集群传输扩展（Redis 用于服务发现，RabbitMQ 用于消息路由）
@@ -40,9 +40,13 @@
 	<!-- .NET 6.0+ 框架已内置这些包，无需显式引用，框架会自动使用内置版本 -->
 
 	<ItemGroup>
+		<ProjectReference Include="..\..\Cyaim.WebSocketServer\Cyaim.WebSocketServer.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<None Include="..\..\..\LICENSE">
-		  <Pack>True</Pack>
-		  <PackagePath>\</PackagePath>
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
 		</None>
 		<None Include="..\..\Cyaim.WebSocketServer\WebSocketRepository_Logo.png" Condition="Exists('..\..\Cyaim.WebSocketServer\WebSocketRepository_Logo.png')">
 			<Pack>True</Pack>

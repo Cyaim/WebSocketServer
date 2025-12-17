@@ -527,10 +527,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 {
                     _logger.LogWarning($"[RaftNode] 投票拒绝 - NodeId: {_nodeId}, RequestTerm: {request.Term}, CurrentTerm: {CurrentTerm}, VotedFor: {VotedFor}, IsLogUpToDate: {IsLogUpToDate(request.LastLogIndex, request.LastLogTerm)}");
                 }
-                else
-                {
-                    _logger.LogWarning($"[RaftNode] 投票拒绝 - NodeId: {_nodeId}, RequestTerm: {request.Term}, CurrentTerm: {CurrentTerm}, VotedFor: {VotedFor}, IsLogUpToDate: {IsLogUpToDate(request.LastLogIndex, request.LastLogTerm)}");
-                }
 
                 var response = new RequestVoteResponseMessage
                 {
@@ -550,10 +546,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     if (t.IsFaulted)
                     {
                         _logger.LogError(t.Exception, $"[RaftNode] 发送投票响应失败 - NodeId: {_nodeId}, ToNodeId: {message.FromNodeId}");
-                    }
-                    else
-                    {
-                        _logger.LogWarning($"[RaftNode] 投票响应发送成功 - NodeId: {_nodeId}, ToNodeId: {message.FromNodeId}, VoteGranted: {voteGranted}");
                     }
                     else
                     {

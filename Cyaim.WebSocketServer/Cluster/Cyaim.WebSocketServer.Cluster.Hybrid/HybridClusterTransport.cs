@@ -77,7 +77,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             _messageQueueService = messageQueueService ?? throw new ArgumentNullException(nameof(messageQueueService));
             _nodeId = nodeId ?? throw new ArgumentNullException(nameof(nodeId));
             _nodeInfo = nodeInfo ?? throw new ArgumentNullException(nameof(nodeInfo));
-            
+
             _knownNodes = new ConcurrentDictionary<string, NodeInfo>();
             _cancellationTokenSource = new CancellationTokenSource();
             // 消息去重逻辑已移除，不再需要 _processedMessageIds
@@ -136,7 +136,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 // Connect to message queue / 连接到消息队列
                 await _messageQueueService.ConnectAsync();
-                
+
                 // Verify connection is ready before proceeding / 验证连接已就绪再继续
                 // This ensures channel is fully established before RaftNode starts / 这确保在 RaftNode 启动前 channel 已完全建立
                 int verifyAttempts = 0;
@@ -184,7 +184,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 // Wait a bit for initial node discovery / 等待初始节点发现
                 _logger.LogWarning($"[HybridClusterTransport] 等待初始节点发现... - NodeId: {_nodeId}");
                 await Task.Delay(2000); // Wait 2 seconds for initial discovery / 等待 2 秒进行初始发现
-                
+
                 // Log discovered nodes / 记录发现的节点
                 var discoveredNodes = GetKnownNodeIds();
                 _logger.LogWarning($"[HybridClusterTransport] 初始节点发现完成 - NodeId: {_nodeId}, DiscoveredNodeCount: {discoveredNodes.Count}, DiscoveredNodes: {string.Join(", ", discoveredNodes)}");
@@ -435,7 +435,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 return true; // Current node is always "connected" / 当前节点始终"已连接"
             }
 
-            return _knownNodes.TryGetValue(nodeId, out var nodeInfo) && 
+            return _knownNodes.TryGetValue(nodeId, out var nodeInfo) &&
                    nodeInfo.Status == NodeStatus.Active &&
                    DateTime.UtcNow - nodeInfo.LastHeartbeat < TimeSpan.FromSeconds(60);
         }
@@ -508,7 +508,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 const string routeKeyPrefix = "websocket:cluster:connections:";
                 var routeKey = $"{routeKeyPrefix}{connectionId}";
                 var nodeId = await _redisService.GetAsync(routeKey);
-                
+
                 if (!string.IsNullOrEmpty(nodeId))
                 {
                     _logger.LogWarning($"[HybridClusterTransport] 从 Redis 查询连接路由成功 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
@@ -537,13 +537,13 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             {
                 const string routeKeyPrefix = "websocket:cluster:connections:";
                 const string metadataKeyPrefix = "websocket:cluster:connection:metadata:";
-                
+
                 var routeKey = $"{routeKeyPrefix}{connectionId}";
                 var metadataKey = $"{metadataKeyPrefix}{connectionId}";
-                
+
                 await _redisService.DeleteAsync(routeKey);
                 await _redisService.DeleteAsync(metadataKey);
-                
+
                 _logger.LogWarning($"[HybridClusterTransport] 连接路由已从 Redis 删除 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}");
                 return true;
             }
@@ -564,10 +564,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             {
                 const string routeKeyPrefix = "websocket:cluster:connections:";
                 const string metadataKeyPrefix = "websocket:cluster:connection:metadata:";
-                
+
                 var routeKey = $"{routeKeyPrefix}{connectionId}";
                 var metadataKey = $"{metadataKeyPrefix}{connectionId}";
-                
+
                 // Check if route exists / 检查路由是否存在
                 var existingRoute = await _redisService.GetAsync(routeKey);
                 if (string.IsNullOrEmpty(existingRoute))
@@ -575,24 +575,24 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     _logger.LogWarning($"[HybridClusterTransport] 连接路由不存在，无法刷新 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}");
                     return false;
                 }
-                
+
                 // Verify node ID matches / 验证节点 ID 是否匹配
                 if (existingRoute != nodeId)
                 {
                     _logger.LogWarning($"[HybridClusterTransport] 连接路由节点 ID 不匹配，无法刷新 - ConnectionId: {connectionId}, ExpectedNodeId: {nodeId}, ActualNodeId: {existingRoute}, CurrentNodeId: {_nodeId}");
                     return false;
                 }
-                
+
                 // Refresh expiration by setting the key again with new expiration / 通过重新设置键来刷新过期时间
                 await _redisService.SetAsync(routeKey, nodeId, TimeSpan.FromHours(24)); // 重新设置 24 小时过期
-                
+
                 // Also refresh metadata expiration if it exists / 如果元数据存在，也刷新其过期时间
                 var existingMetadata = await _redisService.GetAsync(metadataKey);
                 if (!string.IsNullOrEmpty(existingMetadata))
                 {
                     await _redisService.SetAsync(metadataKey, existingMetadata, TimeSpan.FromHours(24));
                 }
-                
+
                 _logger.LogWarning($"[HybridClusterTransport] 连接路由过期时间已刷新 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
                 return true;
             }
@@ -647,10 +647,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             try
             {
                 _logger.LogWarning($"[HybridClusterTransport] HandleMessageAsync 开始处理 - CurrentNodeId: {_nodeId}, BodyLength: {body.Length}, MessageId: {properties.MessageId}, CorrelationId: {properties.CorrelationId}");
-                
+
                 var messageJson = Encoding.UTF8.GetString(body);
                 _logger.LogWarning($"[HybridClusterTransport] 消息JSON解析 - CurrentNodeId: {_nodeId}, MessageJsonLength: {messageJson.Length}, First100Chars: {(messageJson.Length > 100 ? messageJson.Substring(0, 100) : messageJson)}");
-                
+
                 var message = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
 
                 if (message == null)
@@ -667,7 +667,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     _logger.LogWarning($"[HybridClusterTransport] 忽略来自自己的消息 - MessageType: {message.Type}, MessageId: {message.MessageId}, FromNodeId: {message.FromNodeId}, CurrentNodeId: {_nodeId}");
                     return true;
                 }
-                
+
                 // 特别记录查询消息的接收，便于调试
                 if (message.Type == ClusterMessageType.QueryWebSocketConnection)
                 {
@@ -679,7 +679,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 // If ToNodeId is set, only the target node should process it
                 // 如果 ToNodeId 为 null，这是广播消息 - 所有节点都应该处理
                 // 如果 ToNodeId 已设置，只有目标节点应该处理
-                
+
                 // #region agent log
                 try
                 {
@@ -708,7 +708,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 }
                 catch { }
                 // #endregion
-                
+
                 if (!string.IsNullOrEmpty(message.ToNodeId) && message.ToNodeId != _nodeId)
                 {
                     // This message is for another node, ignore it / 此消息是发送给其他节点的，忽略它
@@ -723,28 +723,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 // Trigger message received event / 触发消息接收事件
                 _logger.LogWarning($"[HybridClusterTransport] 触发消息接收事件 - MessageType: {message.Type}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
-                
-                // #region agent log
-                try
-                {
-                    var logData = new
-                    {
-                        // Targeted message: same message can be sent to different nodes
-                        // 定向消息：相同消息可以发送到不同节点
-                        deduplicationKey = $"{message.MessageId}:{message.FromNodeId}:{message.ToNodeId}";
-                    }
 
-                    // Check if we've already processed this message / 检查是否已处理过此消息
-                    if (_processedMessageIds.TryGetValue(deduplicationKey, out var processedTime))
-                    {
-                        // Message already processed, ignore it / 消息已处理，忽略它
-                        _logger.LogDebug($"Ignoring duplicate message {message.MessageId} (key: {deduplicationKey}, processed at {processedTime:yyyy-MM-dd HH:mm:ss})");
-                        return true; // Ack to remove from queue / 确认以从队列中移除
-                    }
-
-                    // Mark message as processed / 标记消息为已处理
-                    _processedMessageIds.TryAdd(deduplicationKey, DateTime.UtcNow);
-                }
 
                 // Trigger message received event / 触发消息接收事件
                 _logger.LogTrace($"[HybridClusterTransport] 触发消息接收事件 - MessageType: {message.Type}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
@@ -753,92 +732,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     FromNodeId = message.FromNodeId,
                     Message = message
                 });
-                
-                // #region agent log
-                try
-                {
-                    var logData = new
-                    {
-                        location = "HybridClusterTransport.cs:545",
-                        message = "After invoking MessageReceived event",
-                        data = new
-                        {
-                            messageType = message.Type.ToString(),
-                            fromNodeId = message.FromNodeId,
-                            toNodeId = message.ToNodeId ?? "null",
-                            messageId = message.MessageId,
-                            currentNodeId = _nodeId
-                        },
-                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                        sessionId = "debug-session",
-                        runId = "run1",
-                        hypothesisId = "A"
-                    };
-                    var logJson = JsonSerializer.Serialize(logData);
-                    System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
-                }
-                catch { }
-                // #endregion
 
-                // Acknowledge message / 确认消息
-                // #region agent log
-                try
-                {
-                    var logData = new
-                    {
-                        location = "HybridClusterTransport.cs:525",
-                        message = "Before acknowledging message",
-                        data = new
-                        {
-                            messageType = message.Type.ToString(),
-                            fromNodeId = message.FromNodeId,
-                            toNodeId = message.ToNodeId ?? "null",
-                            messageId = message.MessageId,
-                            currentNodeId = _nodeId,
-                            deliveryTag = properties.DeliveryTag,
-                            willAck = properties.DeliveryTag > 0
-                        },
-                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                        sessionId = "debug-session",
-                        runId = "run1",
-                        hypothesisId = "D"
-                    };
-                    var logJson = JsonSerializer.Serialize(logData);
-                    System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
-                }
-                catch { }
-                // #endregion
-                
                 if (properties.DeliveryTag > 0)
                 {
                     await _messageQueueService.AckAsync(properties.DeliveryTag);
-                    
-                    // #region agent log
-                    try
-                    {
-                        var logData = new
-                        {
-                            location = "HybridClusterTransport.cs:550",
-                            message = "After acknowledging message",
-                            data = new
-                            {
-                                messageType = message.Type.ToString(),
-                                fromNodeId = message.FromNodeId,
-                                toNodeId = message.ToNodeId ?? "null",
-                                messageId = message.MessageId,
-                                currentNodeId = _nodeId,
-                                deliveryTag = properties.DeliveryTag
-                            },
-                            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                            sessionId = "debug-session",
-                            runId = "run1",
-                            hypothesisId = "D"
-                        };
-                        var logJson = JsonSerializer.Serialize(logData);
-                        System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
-                    }
-                    catch { }
-                    // #endregion
                 }
 
                 return true;

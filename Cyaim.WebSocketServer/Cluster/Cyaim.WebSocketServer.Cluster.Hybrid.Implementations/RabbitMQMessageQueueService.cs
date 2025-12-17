@@ -87,6 +87,36 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         }
 
         /// <summary>
+        /// Verify connection is ready / 验证连接已就绪
+        /// </summary>
+        public async Task VerifyConnectionAsync()
+        {
+            await EnsureChannelAsync().ConfigureAwait(false);
+
+            if (_connection == null || !_connection.IsOpen)
+            {
+                throw new InvalidOperationException("RabbitMQ connection is not ready");
+            }
+
+            if (_channel == null || !_channel.IsOpen)
+            {
+                throw new InvalidOperationException("RabbitMQ channel is not ready");
+            }
+
+            // 简单访问一次属性，确保通道可用 / Simple property access to ensure channel is usable
+            try
+            {
+                var channelNumber = _channel.ChannelNumber;
+                _logger.LogDebug($"[RabbitMQMessageQueueService] 连接验证成功 - ChannelNumber: {channelNumber}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[RabbitMQMessageQueueService] Channel 验证失败");
+                throw new InvalidOperationException("RabbitMQ channel verification failed", ex);
+            }
+        }
+
+        /// <summary>
         /// Disconnect from message queue / 断开消息队列连接
         /// </summary>
         public async Task DisconnectAsync()
@@ -191,7 +221,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Implementations
         /// <summary>
         /// Consume messages from queue / 从队列消费消息
         /// </summary>
-        public async Task ConsumeAsync(string queueName, Func<byte[], MessageProperties, Task<bool>> handler, bool autoAck = false)
+        public async Task ConsumeAsync(string queueName, Func<byte[], MessageProperties, Task<bool>> handler, bool autoAck = false, string currentNodeId = null)
         {
             await EnsureChannelAsync().ConfigureAwait(false);
 

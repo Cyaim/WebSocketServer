@@ -544,7 +544,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// <summary>
         /// Consume messages from queue / 从队列消费消息
         /// </summary>
-        public async Task ConsumeAsync(string queueName, Func<byte[], MessageProperties, Task<bool>> handler, bool autoAck = false)
+        public async Task ConsumeAsync(string queueName, Func<byte[], MessageProperties, Task<bool>> handler, bool autoAck = false, string currentNodeId = null)
         {
             await EnsureChannelAsync().ConfigureAwait(false);
 

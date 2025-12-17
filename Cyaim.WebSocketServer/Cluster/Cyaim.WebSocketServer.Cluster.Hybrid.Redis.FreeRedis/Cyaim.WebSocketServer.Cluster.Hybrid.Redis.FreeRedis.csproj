@@ -13,11 +13,11 @@
 		<PackageIcon>WebSocketRepository_Logo.png</PackageIcon>
 		<PackageReleaseNotes>
 			Version 2.0.0 - Major Release
-            
-            - FreeRedis implementation for Hybrid cluster transport
-            - Support for .NET 9.0 and .NET 10.0
-            - Modular and pluggable design
-        </PackageReleaseNotes>
+
+			- FreeRedis implementation for Hybrid cluster transport
+			- Support for .NET 9.0 and .NET 10.0
+			- Modular and pluggable design
+		</PackageReleaseNotes>
 		<Description>
 			FreeRedis implementation for WebSocketServer Hybrid cluster transport (service discovery)
 			WebSocketServer 混合集群传输的 FreeRedis 实现（服务发现）
@@ -36,12 +36,13 @@
 
 	<ItemGroup>
 		<PackageReference Include="FreeRedis" Version="1.2.0" />
+		<ProjectReference Include="..\Cyaim.WebSocketServer.Cluster.Hybrid\Cyaim.WebSocketServer.Cluster.Hybrid.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<None Include="..\..\..\LICENSE">
-		  <Pack>True</Pack>
-		  <PackagePath>\</PackagePath>
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
 		</None>
 		<None Include="..\..\Cyaim.WebSocketServer\WebSocketRepository_Logo.png">
 			<Pack>True</Pack>

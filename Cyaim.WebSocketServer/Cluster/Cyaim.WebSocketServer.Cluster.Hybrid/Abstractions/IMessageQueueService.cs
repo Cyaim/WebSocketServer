@@ -15,6 +15,15 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions
         Task ConnectAsync();
 
         /// <summary>
+        /// Verify connection is ready (optional but recommended) / 验证连接已就绪（可选但推荐）
+        /// </summary>
+        /// <remarks>
+        /// Implementations should ensure the underlying connection and channel are usable.
+        /// 实现应确保底层连接和通道可用。
+        /// </remarks>
+        Task VerifyConnectionAsync();
+
+        /// <summary>
         /// Disconnect from message queue / 断开消息队列连接
         /// </summary>
         Task DisconnectAsync();
@@ -60,7 +69,11 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions
         /// <param name="queueName">Queue name / 队列名称</param>
         /// <param name="handler">Message handler / 消息处理器</param>
         /// <param name="autoAck">Whether to auto-acknowledge / 是否自动确认</param>
-        Task ConsumeAsync(string queueName, Func<byte[], MessageProperties, Task<bool>> handler, bool autoAck = false);
+        /// <param name="currentNodeId">
+        /// Current node id, for implementations that want to early-filter self messages using headers (e.g. FromNodeId).
+        /// 当前节点 ID，供实现使用消息头（例如 FromNodeId）进行早期自发消息过滤。
+        /// </param>
+        Task ConsumeAsync(string queueName, Func<byte[], MessageProperties, Task<bool>> handler, bool autoAck = false, string currentNodeId = null);
 
         /// <summary>
         /// Acknowledge message / 确认消息
