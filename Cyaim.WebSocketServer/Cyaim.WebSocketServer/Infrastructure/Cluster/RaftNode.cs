@@ -408,23 +408,33 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
             _ = Task.Run(async () =>
             {
-                var appendEntries = new AppendEntriesMessage
+                try
                 {
-                    Term = CurrentTerm,
-                    LeaderId = _nodeId,
-                    PrevLogIndex = 0,
-                    PrevLogTerm = 0,
-                    Entries = new RaftLogEntry[0],
-                    LeaderCommit = CommitIndex
-                };
+                    var appendEntries = new AppendEntriesMessage
+                    {
+                        Term = CurrentTerm,
+                        LeaderId = _nodeId,
+                        PrevLogIndex = 0,
+                        PrevLogTerm = 0,
+                        Entries = new RaftLogEntry[0],
+                        LeaderCommit = CommitIndex
+                    };
 
-                var message = new ClusterMessage
+                    var message = new ClusterMessage
+                    {
+                        Type = ClusterMessageType.AppendEntries,
+                        Payload = System.Text.Json.JsonSerializer.Serialize(appendEntries),
+                        // Use a consistent MessageId for heartbeats to enable deduplication / 使用一致的消息ID以便去重
+                        MessageId = $"heartbeat:{_nodeId}:{CurrentTerm}"
+                    };
+
+                    _logger.LogDebug($"[RaftNode] Sending heartbeat - NodeId: {_nodeId}, Term: {CurrentTerm}, MessageId: {message.MessageId}");
+                    await _transport.BroadcastAsync(message);
+                }
+                catch (Exception ex)
                 {
-                    Type = ClusterMessageType.AppendEntries,
-                    Payload = System.Text.Json.JsonSerializer.Serialize(appendEntries)
-                };
-
-                await _transport.BroadcastAsync(message);
+                    _logger.LogError(ex, $"[RaftNode] Error sending heartbeat - NodeId: {_nodeId}");
+                }
             });
         }
 
@@ -517,6 +527,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 {
                     _logger.LogWarning($"[RaftNode] 投票拒绝 - NodeId: {_nodeId}, RequestTerm: {request.Term}, CurrentTerm: {CurrentTerm}, VotedFor: {VotedFor}, IsLogUpToDate: {IsLogUpToDate(request.LastLogIndex, request.LastLogTerm)}");
                 }
+                else
+                {
+                    _logger.LogWarning($"[RaftNode] 投票拒绝 - NodeId: {_nodeId}, RequestTerm: {request.Term}, CurrentTerm: {CurrentTerm}, VotedFor: {VotedFor}, IsLogUpToDate: {IsLogUpToDate(request.LastLogIndex, request.LastLogTerm)}");
+                }
 
                 var response = new RequestVoteResponseMessage
                 {
@@ -536,6 +550,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     if (t.IsFaulted)
                     {
                         _logger.LogError(t.Exception, $"[RaftNode] 发送投票响应失败 - NodeId: {_nodeId}, ToNodeId: {message.FromNodeId}");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"[RaftNode] 投票响应发送成功 - NodeId: {_nodeId}, ToNodeId: {message.FromNodeId}, VoteGranted: {voteGranted}");
                     }
                     else
                     {
@@ -899,7 +917,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 }
             }
 
-            _logger.LogDebug($"GetKnownNodeIds for node {_nodeId} returned {nodeIds.Count} node(s): {string.Join(", ", nodeIds)}");
+            _logger.LogTrace($"GetKnownNodeIds for node {_nodeId} returned {nodeIds.Count} node(s): {string.Join(", ", nodeIds)}");
             return nodeIds;
         }
 

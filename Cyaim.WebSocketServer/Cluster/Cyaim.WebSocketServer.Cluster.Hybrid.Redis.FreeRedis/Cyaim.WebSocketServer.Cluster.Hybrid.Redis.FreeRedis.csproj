@@ -36,7 +36,6 @@
 
 	<ItemGroup>
 		<PackageReference Include="FreeRedis" Version="1.2.0" />
-		<ProjectReference Include="..\Cyaim.WebSocketServer.Cluster.Hybrid\Cyaim.WebSocketServer.Cluster.Hybrid.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <TargetFrameworks>netstandard2.1;net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
@@ -29,16 +29,12 @@
     </ItemGroup>
     <!-- .NET Standard 2.1 需要显式引用，使用最新稳定版�? -->
     <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
-        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"
-                          Version="9.0.0" />
-        <PackageReference Include="System.Text.Json"
-                          Version="9.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+        <PackageReference Include="System.Text.Json" Version="9.0.0" />
     </ItemGroup>
     <!-- RabbitMQ.Client 7.0+ 支持 .NET Standard 2.0+，统一使用 7.2.0 -->
     <ItemGroup>
-        <PackageReference Include="RabbitMQ.Client"
-                          Version="7.2.0" />
-        <ProjectReference Include="..\Cyaim.WebSocketServer.Cluster.Hybrid\Cyaim.WebSocketServer.Cluster.Hybrid.csproj" />
+        <PackageReference Include="RabbitMQ.Client" Version="7.2.0" />
     </ItemGroup>
     <ItemGroup>
         <None Include="..\..\..\LICENSE">

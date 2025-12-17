@@ -40,10 +40,6 @@
 	<!-- .NET 6.0+ 框架已内置这些包，无需显式引用，框架会自动使用内置版本 -->
 
 	<ItemGroup>
-		<ProjectReference Include="..\..\Cyaim.WebSocketServer\Cyaim.WebSocketServer.csproj" />
-	</ItemGroup>
-
-	<ItemGroup>
 		<None Include="..\..\..\LICENSE">
 		  <Pack>True</Pack>
 		  <PackagePath>\</PackagePath>

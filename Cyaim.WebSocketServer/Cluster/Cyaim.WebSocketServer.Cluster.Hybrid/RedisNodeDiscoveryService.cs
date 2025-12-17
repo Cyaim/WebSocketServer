@@ -64,8 +64,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             // Heartbeat every 5 seconds / 每 5 秒发送一次心跳
             _heartbeatTimer = new Timer(SendHeartbeat, null, TimeSpan.Zero, TimeSpan.FromSeconds(5));
             
-            // Discover nodes every 10 seconds / 每 10 秒发现一次节点
-            _discoveryTimer = new Timer(DiscoverNodes, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10));
+            // Discover nodes every 5 seconds (more frequent to catch nodes faster) / 每 5 秒发现一次节点（更频繁以更快捕获节点）
+            _discoveryTimer = new Timer(DiscoverNodes, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5));
         }
 
         /// <summary>
@@ -262,7 +262,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         /// <summary>
         /// Discover nodes asynchronously / 异步发现节点
         /// </summary>
-        private async Task DiscoverNodesAsync()
+        public async Task DiscoverNodesAsync()
         {
             try
             {
