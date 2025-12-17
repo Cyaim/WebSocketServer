@@ -232,7 +232,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 throw new ArgumentNullException(nameof(connectionIds));
             }
 
-            var results = new Dictionary<string, bool>();
+            // Use concurrent dictionary to avoid race conditions when updating results from multiple tasks
+            // 使用并发字典，避免在多个任务并发更新结果时出现竞争条件
+            var results = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>();
             var tasks = new List<Task>();
 
             foreach (var connectionId in connectionIds)
@@ -269,7 +271,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             }
 
             await Task.WhenAll(tasks);
-            return results;
+
+            // Convert concurrent dictionary to regular dictionary for return type
+            // 将并发字典转换为普通字典以匹配返回类型
+            return new Dictionary<string, bool>(results);
         }
 
         #region Text Message Methods / 文本消息方法

@@ -26,11 +26,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         private readonly NodeInfo _nodeInfo;
         private readonly ConcurrentDictionary<string, NodeInfo> _knownNodes;
         private readonly CancellationTokenSource _cancellationTokenSource;
-        // 已处理的消息ID，用于去重
-        // Key format: "MessageId:FromNodeId" for broadcast messages, "MessageId:FromNodeId:ToNodeId" for targeted messages
-        // 键格式：广播消息为 "MessageId:FromNodeId"，定向消息为 "MessageId:FromNodeId:ToNodeId"
-        private readonly ConcurrentDictionary<string, DateTime> _processedMessageIds;
-        private readonly Timer _messageIdCleanupTimer; // 定期清理过期的消息ID
+        // 消息去重逻辑已移除，不再需要 _processedMessageIds 和 _messageIdCleanupTimer
+        // Message deduplication logic removed, no longer need _processedMessageIds and _messageIdCleanupTimer
         private bool _disposed = false;
         private bool _started = false;
 
@@ -83,7 +80,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             
             _knownNodes = new ConcurrentDictionary<string, NodeInfo>();
             _cancellationTokenSource = new CancellationTokenSource();
-            _processedMessageIds = new ConcurrentDictionary<string, DateTime>();
+            // 消息去重逻辑已移除，不再需要 _processedMessageIds
+            // Message deduplication logic removed, no longer need _processedMessageIds
 
             // Create specific loggers using logger factory / 使用 logger factory 创建特定类型的 logger
             var discoveryLogger = loggerFactory.CreateLogger<RedisNodeDiscoveryService>();
@@ -111,8 +109,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             _discoveryService.NodeDiscovered += OnNodeDiscovered;
             _discoveryService.NodeRemoved += OnNodeRemoved;
 
-            // Start message ID cleanup timer (clean up every 5 minutes) / 启动消息ID清理定时器（每5分钟清理一次）
-            _messageIdCleanupTimer = new Timer(CleanupProcessedMessageIds, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
+            // 消息去重逻辑已移除，不再需要消息ID清理定时器
+            // Message deduplication logic removed, no longer need message ID cleanup timer
         }
 
         /// <summary>
@@ -158,8 +156,16 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 // Start consuming messages / 开始消费消息
                 await _messageQueueService.ConsumeAsync(_queueName, HandleMessageAsync, autoAck: false);
 
+                // Wait a bit for initial node discovery / 等待初始节点发现
+                _logger.LogWarning($"[HybridClusterTransport] 等待初始节点发现... - NodeId: {_nodeId}");
+                await Task.Delay(2000); // Wait 2 seconds for initial discovery / 等待 2 秒进行初始发现
+                
+                // Log discovered nodes / 记录发现的节点
+                var discoveredNodes = GetKnownNodeIds();
+                _logger.LogWarning($"[HybridClusterTransport] 初始节点发现完成 - NodeId: {_nodeId}, DiscoveredNodeCount: {discoveredNodes.Count}, DiscoveredNodes: {string.Join(", ", discoveredNodes)}");
+
                 _started = true;
-                _logger.LogWarning($"[HybridClusterTransport] 混合集群传输启动成功 - NodeId: {_nodeId}, QueueName: {_queueName}, ExchangeName: {ExchangeName}");
+                _logger.LogWarning($"[HybridClusterTransport] 混合集群传输启动成功 - NodeId: {_nodeId}, QueueName: {_queueName}, ExchangeName: {ExchangeName}, KnownNodes: {discoveredNodes.Count}");
             }
             catch (Exception ex)
             {
@@ -184,7 +190,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
             try
             {
-                _messageIdCleanupTimer?.Dispose();
+                // 消息去重逻辑已移除，不再需要清理定时器
+                // Message deduplication logic removed, no longer need cleanup timer
                 await _discoveryService.StopAsync();
                 await _messageQueueService.DisconnectAsync();
                 await _redisService.DisconnectAsync();
@@ -406,6 +413,158 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         }
 
         /// <summary>
+        /// Get all known node IDs / 获取所有已知节点 ID
+        /// </summary>
+        /// <returns>List of known node IDs / 已知节点 ID 列表</returns>
+        public List<string> GetKnownNodeIds()
+        {
+            var nodeIds = new List<string>(_knownNodes.Keys);
+            _logger.LogWarning($"[HybridClusterTransport] 获取已知节点ID - CurrentNodeId: {_nodeId}, KnownNodeCount: {nodeIds.Count}, NodeIds: {string.Join(", ", nodeIds)}");
+            return nodeIds;
+        }
+
+        /// <summary>
+        /// Store connection route information using Redis
+        /// 使用 Redis 存储连接路由信息
+        /// </summary>
+        public async Task<bool> StoreConnectionRouteAsync(string connectionId, string nodeId, Dictionary<string, string> metadata = null)
+        {
+            try
+            {
+                // Redis key 前缀
+                const string routeKeyPrefix = "websocket:cluster:connections:";
+                const string metadataKeyPrefix = "websocket:cluster:connection:metadata:";
+
+                // 存储连接路由：connectionId -> nodeId
+                var routeKey = $"{routeKeyPrefix}{connectionId}";
+                await _redisService.SetAsync(routeKey, nodeId, TimeSpan.FromHours(24)); // 24小时过期
+                _logger.LogWarning($"[HybridClusterTransport] 连接路由已存储到 Redis - ConnectionId: {connectionId}, NodeId: {nodeId}, Key: {routeKey}");
+
+                // 存储连接元数据（如果提供）
+                if (metadata != null && metadata.Count > 0)
+                {
+                    var metadataKey = $"{metadataKeyPrefix}{connectionId}";
+                    var metadataJson = JsonSerializer.Serialize(metadata);
+                    await _redisService.SetAsync(metadataKey, metadataJson, TimeSpan.FromHours(24));
+                    _logger.LogWarning($"[HybridClusterTransport] 连接元数据已存储到 Redis - ConnectionId: {connectionId}, Key: {metadataKey}");
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[HybridClusterTransport] 存储连接路由到 Redis 失败 - ConnectionId: {connectionId}, NodeId: {nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Get connection route information from Redis
+        /// 从 Redis 获取连接路由信息
+        /// </summary>
+        public async Task<string> GetConnectionRouteAsync(string connectionId)
+        {
+            try
+            {
+                const string routeKeyPrefix = "websocket:cluster:connections:";
+                var routeKey = $"{routeKeyPrefix}{connectionId}";
+                var nodeId = await _redisService.GetAsync(routeKey);
+                
+                if (!string.IsNullOrEmpty(nodeId))
+                {
+                    _logger.LogWarning($"[HybridClusterTransport] 从 Redis 查询连接路由成功 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                    return nodeId;
+                }
+                else
+                {
+                    _logger.LogWarning($"[HybridClusterTransport] 从 Redis 查询连接路由未找到 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}");
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[HybridClusterTransport] 从 Redis 查询连接路由失败 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Remove connection route information from Redis
+        /// 从 Redis 删除连接路由信息
+        /// </summary>
+        public async Task<bool> RemoveConnectionRouteAsync(string connectionId)
+        {
+            try
+            {
+                const string routeKeyPrefix = "websocket:cluster:connections:";
+                const string metadataKeyPrefix = "websocket:cluster:connection:metadata:";
+                
+                var routeKey = $"{routeKeyPrefix}{connectionId}";
+                var metadataKey = $"{metadataKeyPrefix}{connectionId}";
+                
+                await _redisService.DeleteAsync(routeKey);
+                await _redisService.DeleteAsync(metadataKey);
+                
+                _logger.LogWarning($"[HybridClusterTransport] 连接路由已从 Redis 删除 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[HybridClusterTransport] 从 Redis 删除连接路由失败 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Refresh connection route expiration in Redis
+        /// 刷新 Redis 中的连接路由过期时间
+        /// </summary>
+        public async Task<bool> RefreshConnectionRouteAsync(string connectionId, string nodeId)
+        {
+            try
+            {
+                const string routeKeyPrefix = "websocket:cluster:connections:";
+                const string metadataKeyPrefix = "websocket:cluster:connection:metadata:";
+                
+                var routeKey = $"{routeKeyPrefix}{connectionId}";
+                var metadataKey = $"{metadataKeyPrefix}{connectionId}";
+                
+                // Check if route exists / 检查路由是否存在
+                var existingRoute = await _redisService.GetAsync(routeKey);
+                if (string.IsNullOrEmpty(existingRoute))
+                {
+                    _logger.LogWarning($"[HybridClusterTransport] 连接路由不存在，无法刷新 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}");
+                    return false;
+                }
+                
+                // Verify node ID matches / 验证节点 ID 是否匹配
+                if (existingRoute != nodeId)
+                {
+                    _logger.LogWarning($"[HybridClusterTransport] 连接路由节点 ID 不匹配，无法刷新 - ConnectionId: {connectionId}, ExpectedNodeId: {nodeId}, ActualNodeId: {existingRoute}, CurrentNodeId: {_nodeId}");
+                    return false;
+                }
+                
+                // Refresh expiration by setting the key again with new expiration / 通过重新设置键来刷新过期时间
+                await _redisService.SetAsync(routeKey, nodeId, TimeSpan.FromHours(24)); // 重新设置 24 小时过期
+                
+                // Also refresh metadata expiration if it exists / 如果元数据存在，也刷新其过期时间
+                var existingMetadata = await _redisService.GetAsync(metadataKey);
+                if (!string.IsNullOrEmpty(existingMetadata))
+                {
+                    await _redisService.SetAsync(metadataKey, existingMetadata, TimeSpan.FromHours(24));
+                }
+                
+                _logger.LogWarning($"[HybridClusterTransport] 连接路由过期时间已刷新 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[HybridClusterTransport] 刷新连接路由过期时间失败 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Update current node information in Redis / 更新 Redis 中的当前节点信息
         /// </summary>
         /// <param name="nodeInfo">Updated node information / 更新的节点信息</param>
@@ -448,12 +607,16 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         {
             try
             {
+                _logger.LogWarning($"[HybridClusterTransport] HandleMessageAsync 开始处理 - CurrentNodeId: {_nodeId}, BodyLength: {body.Length}, MessageId: {properties.MessageId}, CorrelationId: {properties.CorrelationId}");
+                
                 var messageJson = Encoding.UTF8.GetString(body);
+                _logger.LogWarning($"[HybridClusterTransport] 消息JSON解析 - CurrentNodeId: {_nodeId}, MessageJsonLength: {messageJson.Length}, First100Chars: {(messageJson.Length > 100 ? messageJson.Substring(0, 100) : messageJson)}");
+                
                 var message = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
 
                 if (message == null)
                 {
-                    _logger.LogWarning($"[HybridClusterTransport] 收到空或无效消息 - CurrentNodeId: {_nodeId}");
+                    _logger.LogWarning($"[HybridClusterTransport] 收到空或无效消息 - CurrentNodeId: {_nodeId}, MessageJson: {messageJson}");
                     return true; // Ack to remove from queue / 确认以从队列中移除
                 }
 
@@ -462,8 +625,14 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 // Ignore messages from self / 忽略来自自己的消息
                 if (message.FromNodeId == _nodeId)
                 {
-                    _logger.LogWarning($"[HybridClusterTransport] 忽略来自自己的消息 - MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
+                    _logger.LogWarning($"[HybridClusterTransport] 忽略来自自己的消息 - MessageType: {message.Type}, MessageId: {message.MessageId}, FromNodeId: {message.FromNodeId}, CurrentNodeId: {_nodeId}");
                     return true;
+                }
+                
+                // 特别记录查询消息的接收，便于调试
+                if (message.Type == ClusterMessageType.QueryWebSocketConnection)
+                {
+                    _logger.LogWarning($"[HybridClusterTransport] 收到查询连接消息 - FromNodeId: {message.FromNodeId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}, Payload: {message.Payload}");
                 }
 
                 // Check if message is for this node / 检查消息是否发送给当前节点
@@ -471,64 +640,170 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 // If ToNodeId is set, only the target node should process it
                 // 如果 ToNodeId 为 null，这是广播消息 - 所有节点都应该处理
                 // 如果 ToNodeId 已设置，只有目标节点应该处理
+                
+                // #region agent log
+                try
+                {
+                    var logData = new
+                    {
+                        location = "HybridClusterTransport.cs:502",
+                        message = "Checking if message is for this node",
+                        data = new
+                        {
+                            messageType = message.Type.ToString(),
+                            fromNodeId = message.FromNodeId,
+                            toNodeId = message.ToNodeId ?? "null",
+                            messageId = message.MessageId,
+                            currentNodeId = _nodeId,
+                            isToNodeIdEmpty = string.IsNullOrEmpty(message.ToNodeId),
+                            isToNodeIdMatch = message.ToNodeId == _nodeId,
+                            willIgnore = !string.IsNullOrEmpty(message.ToNodeId) && message.ToNodeId != _nodeId
+                        },
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        sessionId = "debug-session",
+                        runId = "run1",
+                        hypothesisId = "B"
+                    };
+                    var logJson = JsonSerializer.Serialize(logData);
+                    System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
+                }
+                catch { }
+                // #endregion
+                
                 if (!string.IsNullOrEmpty(message.ToNodeId) && message.ToNodeId != _nodeId)
                 {
                     // This message is for another node, ignore it / 此消息是发送给其他节点的，忽略它
                     // Note: This is expected behavior for targeted messages. Use BroadcastAsync to send to all nodes.
                     // 注意：这是定向消息的预期行为。使用 BroadcastAsync 可以向所有节点发送消息。
-                    _logger.LogTrace($"Ignoring message {message.MessageId} (type: {message.Type}) - target node is {message.ToNodeId}, current node is {_nodeId}. This is normal for targeted messages.");
+                    _logger.LogWarning($"[HybridClusterTransport] 忽略消息（目标节点不匹配）- MessageId: {message.MessageId}, MessageType: {message.Type}, TargetNodeId: {message.ToNodeId}, CurrentNodeId: {_nodeId}");
                     return true; // Ack to remove from queue / 确认以从队列中移除
                 }
 
-                // Check for duplicate messages using message ID ONLY / 仅使用消息ID检查重复消息
-                // IMPORTANT: Deduplication is based on MessageId, NOT message content / 重要：去重基于 MessageId，而不是消息内容
-                // This ensures that developers can send the same message content to different clients without being deduplicated / 
-                // 这确保了开发者可以向不同的客户端发送相同的消息内容而不会被去重
-                // For broadcast messages, use "MessageId:FromNodeId" as key to allow same message from same sender to be processed once per node
-                // For targeted messages, use "MessageId:FromNodeId:ToNodeId" to allow same message to different targets
-                // 对于广播消息，使用 "MessageId:FromNodeId" 作为键，允许来自同一发送者的相同消息在每个节点上处理一次
-                // 对于定向消息，使用 "MessageId:FromNodeId:ToNodeId" 允许相同消息发送到不同目标
-                if (!string.IsNullOrEmpty(message.MessageId))
-                {
-                    // Create unique key based on message type / 根据消息类型创建唯一键
-                    string deduplicationKey;
-                    if (string.IsNullOrEmpty(message.ToNodeId))
-                    {
-                        // Broadcast message: same message from same sender should be processed once per node
-                        // 广播消息：来自同一发送者的相同消息应在每个节点上处理一次
-                        deduplicationKey = $"{message.MessageId}:{message.FromNodeId}";
-                    }
-                    else
-                    {
-                        // Targeted message: same message can be sent to different nodes
-                        // 定向消息：相同消息可以发送到不同节点
-                        deduplicationKey = $"{message.MessageId}:{message.FromNodeId}:{message.ToNodeId}";
-                    }
-
-                    // Check if we've already processed this message / 检查是否已处理过此消息
-                    if (_processedMessageIds.TryGetValue(deduplicationKey, out var processedTime))
-                    {
-                        // Message already processed, ignore it / 消息已处理，忽略它
-                        _logger.LogDebug($"Ignoring duplicate message {message.MessageId} (key: {deduplicationKey}, processed at {processedTime:yyyy-MM-dd HH:mm:ss})");
-                        return true; // Ack to remove from queue / 确认以从队列中移除
-                    }
-
-                    // Mark message as processed / 标记消息为已处理
-                    _processedMessageIds.TryAdd(deduplicationKey, DateTime.UtcNow);
-                }
+                // 消息去重逻辑已移除 - 按用户要求移除过滤相同消息ID的逻辑
+                // Message deduplication logic removed - removed filtering of messages with same ID as per user request
 
                 // Trigger message received event / 触发消息接收事件
                 _logger.LogWarning($"[HybridClusterTransport] 触发消息接收事件 - MessageType: {message.Type}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
+                
+                // #region agent log
+                try
+                {
+                    var logData = new
+                    {
+                        location = "HybridClusterTransport.cs:516",
+                        message = "Before invoking MessageReceived event",
+                        data = new
+                        {
+                            messageType = message.Type.ToString(),
+                            fromNodeId = message.FromNodeId,
+                            toNodeId = message.ToNodeId ?? "null",
+                            messageId = message.MessageId,
+                            currentNodeId = _nodeId,
+                            hasSubscribers = MessageReceived != null,
+                            subscriberCount = MessageReceived?.GetInvocationList()?.Length ?? 0
+                        },
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        sessionId = "debug-session",
+                        runId = "run1",
+                        hypothesisId = "A"
+                    };
+                    var logJson = JsonSerializer.Serialize(logData);
+                    System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
+                }
+                catch { }
+                // #endregion
+                
                 MessageReceived?.Invoke(this, new ClusterMessageEventArgs
                 {
                     FromNodeId = message.FromNodeId,
                     Message = message
                 });
+                
+                // #region agent log
+                try
+                {
+                    var logData = new
+                    {
+                        location = "HybridClusterTransport.cs:545",
+                        message = "After invoking MessageReceived event",
+                        data = new
+                        {
+                            messageType = message.Type.ToString(),
+                            fromNodeId = message.FromNodeId,
+                            toNodeId = message.ToNodeId ?? "null",
+                            messageId = message.MessageId,
+                            currentNodeId = _nodeId
+                        },
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        sessionId = "debug-session",
+                        runId = "run1",
+                        hypothesisId = "A"
+                    };
+                    var logJson = JsonSerializer.Serialize(logData);
+                    System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
+                }
+                catch { }
+                // #endregion
 
                 // Acknowledge message / 确认消息
+                // #region agent log
+                try
+                {
+                    var logData = new
+                    {
+                        location = "HybridClusterTransport.cs:525",
+                        message = "Before acknowledging message",
+                        data = new
+                        {
+                            messageType = message.Type.ToString(),
+                            fromNodeId = message.FromNodeId,
+                            toNodeId = message.ToNodeId ?? "null",
+                            messageId = message.MessageId,
+                            currentNodeId = _nodeId,
+                            deliveryTag = properties.DeliveryTag,
+                            willAck = properties.DeliveryTag > 0
+                        },
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        sessionId = "debug-session",
+                        runId = "run1",
+                        hypothesisId = "D"
+                    };
+                    var logJson = JsonSerializer.Serialize(logData);
+                    System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
+                }
+                catch { }
+                // #endregion
+                
                 if (properties.DeliveryTag > 0)
                 {
                     await _messageQueueService.AckAsync(properties.DeliveryTag);
+                    
+                    // #region agent log
+                    try
+                    {
+                        var logData = new
+                        {
+                            location = "HybridClusterTransport.cs:550",
+                            message = "After acknowledging message",
+                            data = new
+                            {
+                                messageType = message.Type.ToString(),
+                                fromNodeId = message.FromNodeId,
+                                toNodeId = message.ToNodeId ?? "null",
+                                messageId = message.MessageId,
+                                currentNodeId = _nodeId,
+                                deliveryTag = properties.DeliveryTag
+                            },
+                            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                            sessionId = "debug-session",
+                            runId = "run1",
+                            hypothesisId = "D"
+                        };
+                        var logJson = JsonSerializer.Serialize(logData);
+                        System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
+                    }
+                    catch { }
+                    // #endregion
                 }
 
                 return true;
@@ -540,42 +815,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             }
         }
 
-        /// <summary>
-        /// Cleanup processed message IDs older than 10 minutes / 清理超过10分钟的已处理消息ID
-        /// </summary>
-        private void CleanupProcessedMessageIds(object state)
-        {
-            if (_disposed || _cancellationTokenSource.Token.IsCancellationRequested)
-                return;
-
-            try
-            {
-                var cutoffTime = DateTime.UtcNow.AddMinutes(-10);
-                var keysToRemove = new List<string>();
-
-                foreach (var kvp in _processedMessageIds)
-                {
-                    if (kvp.Value < cutoffTime)
-                    {
-                        keysToRemove.Add(kvp.Key);
-                    }
-                }
-
-                foreach (var key in keysToRemove)
-                {
-                    _processedMessageIds.TryRemove(key, out _);
-                }
-
-                if (keysToRemove.Count > 0)
-                {
-                    _logger.LogDebug($"Cleaned up {keysToRemove.Count} old message IDs from deduplication cache");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error cleaning up processed message IDs");
-            }
-        }
+        // 消息去重逻辑已移除，不再需要清理方法
+        // Message deduplication logic removed, no longer need cleanup method
 
         /// <summary>
         /// Handle node discovered event / 处理节点发现事件
@@ -752,7 +993,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             }
 
             _discoveryService?.Dispose();
-            _messageIdCleanupTimer?.Dispose();
+            // 消息去重逻辑已移除，不再需要清理定时器
+            // Message deduplication logic removed, no longer need cleanup timer
             _cancellationTokenSource?.Dispose();
         }
     }

@@ -181,6 +181,8 @@ amqp://guest:guest@localhost:5672/
 
 - ✅ Redis 服务发现 - 自动节点注册和发现
 - ✅ RabbitMQ 消息路由 - 可靠的消息传递保证
+- ✅ 连接路由存储 - 将连接路由信息存储到 Redis，实现快速查询而无需广播
+- ✅ 自动路由刷新 - 自动刷新连接路由过期时间，防止路由信息丢失
 - ✅ 智能负载均衡 - 多种负载均衡策略
 - ✅ 解耦设计 - 服务发现和消息路由分离
 - ✅ 高可用性 - Redis 和 RabbitMQ 都支持集群模式
@@ -270,6 +272,7 @@ builder.Services.AddSingleton<IClusterTransport>(provider =>
 | 持久化 | ❌ | ✅ 可选 | ✅ 可选 | ✅ 可选 |
 | 高可用 | ⭐⭐ 中 | ⭐⭐⭐ 高 | ⭐⭐⭐ 高 | ⭐⭐⭐ 高 |
 | 自动发现 | ❌ | ❌ | ❌ | ✅ |
+| 连接路由存储 | ❌ | ❌ | ❌ | ✅ (Redis) |
 | 负载均衡 | ⭐⭐ 中 | ⭐⭐ 中 | ⭐⭐ 中 | ⭐⭐⭐ 高 |
 | 额外依赖 | ❌ | Redis | RabbitMQ | Redis + RabbitMQ |
 

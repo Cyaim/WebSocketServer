@@ -72,8 +72,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         private readonly int _electionTimeoutMax = 300;
         /// <summary>
         /// Heartbeat interval in milliseconds / 心跳间隔（毫秒）
+        /// 默认 1000ms，避免过于频繁的心跳导致日志和 MQ 压力过大
         /// </summary>
-        private readonly int _heartbeatInterval = 50;
+        private readonly int _heartbeatInterval = 1000;
 
         private DateTime _lastHeartbeatTime;
         private Timer _electionTimer;
@@ -458,14 +459,18 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// <param name="e">Message event arguments / 消息事件参数</param>
         private void OnMessageReceived(object sender, ClusterMessageEventArgs e)
         {
+            _logger.LogWarning($"[RaftNode] OnMessageReceived 被调用 - NodeId: {_nodeId}, MessageType: {e.Message.Type}, FromNodeId: {e.Message.FromNodeId}, ToNodeId: {e.Message.ToNodeId}, MessageId: {e.Message.MessageId}");
+            
             _lastHeartbeatTime = DateTime.UtcNow;
 
             switch (e.Message.Type)
             {
                 case ClusterMessageType.RequestVote:
+                    _logger.LogWarning($"[RaftNode] 处理 RequestVote 消息 - NodeId: {_nodeId}, FromNodeId: {e.Message.FromNodeId}");
                     HandleRequestVote(e.Message);
                     break;
                 case ClusterMessageType.RequestVoteResponse:
+                    _logger.LogWarning($"[RaftNode] 处理 RequestVoteResponse 消息 - NodeId: {_nodeId}, FromNodeId: {e.Message.FromNodeId}");
                     HandleRequestVoteResponse(e.Message);
                     break;
                 case ClusterMessageType.AppendEntries:
@@ -486,12 +491,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         {
             try
             {
+                _logger.LogWarning($"[RaftNode] HandleRequestVote 开始处理 - NodeId: {_nodeId}, FromNodeId: {message.FromNodeId}, PayloadLength: {message.Payload?.Length ?? 0}");
+                
                 var request = System.Text.Json.JsonSerializer.Deserialize<RequestVoteMessage>(message.Payload);
+                _logger.LogWarning($"[RaftNode] RequestVote 解析成功 - NodeId: {_nodeId}, RequestTerm: {request.Term}, CandidateId: {request.CandidateId}, CurrentTerm: {CurrentTerm}, VotedFor: {VotedFor}");
 
                 bool voteGranted = false;
 
                 if (request.Term > CurrentTerm)
                 {
+                    _logger.LogWarning($"[RaftNode] 请求的任期更高，成为跟随者 - NodeId: {_nodeId}, RequestTerm: {request.Term}, CurrentTerm: {CurrentTerm}");
                     BecomeFollower(request.Term);
                 }
 
@@ -502,6 +511,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     VotedFor = request.CandidateId;
                     voteGranted = true;
                     ResetElectionTimer();
+                    _logger.LogWarning($"[RaftNode] 投票授予 - NodeId: {_nodeId}, CandidateId: {request.CandidateId}, Term: {CurrentTerm}");
+                }
+                else
+                {
+                    _logger.LogWarning($"[RaftNode] 投票拒绝 - NodeId: {_nodeId}, RequestTerm: {request.Term}, CurrentTerm: {CurrentTerm}, VotedFor: {VotedFor}, IsLogUpToDate: {IsLogUpToDate(request.LastLogIndex, request.LastLogTerm)}");
                 }
 
                 var response = new RequestVoteResponseMessage
@@ -516,18 +530,22 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     Payload = System.Text.Json.JsonSerializer.Serialize(response)
                 };
 
-                _logger.LogInformation($"Sending vote response to node {message.FromNodeId}: {(voteGranted ? "GRANTED" : "DENIED")} for term {CurrentTerm}");
+                _logger.LogWarning($"[RaftNode] 发送投票响应 - NodeId: {_nodeId}, ToNodeId: {message.FromNodeId}, VoteGranted: {voteGranted}, Term: {CurrentTerm}");
                 _ = _transport.SendAsync(message.FromNodeId, responseMessage).ContinueWith(t =>
                 {
                     if (t.IsFaulted)
                     {
-                        _logger.LogError(t.Exception, $"Failed to send vote response to node {message.FromNodeId}");
+                        _logger.LogError(t.Exception, $"[RaftNode] 发送投票响应失败 - NodeId: {_nodeId}, ToNodeId: {message.FromNodeId}");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"[RaftNode] 投票响应发送成功 - NodeId: {_nodeId}, ToNodeId: {message.FromNodeId}, VoteGranted: {voteGranted}");
                     }
                 });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error handling request vote");
+                _logger.LogError(ex, $"[RaftNode] 处理请求投票时发生错误 - NodeId: {_nodeId}, FromNodeId: {message.FromNodeId}");
             }
         }
 
@@ -767,31 +785,55 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             {
                 // For HybridClusterTransport (Redis + RabbitMQ), nodes are discovered dynamically via Redis
                 // 对于 HybridClusterTransport（Redis + RabbitMQ），节点通过 Redis 动态发现
-                // Try to get known nodes from HybridClusterTransport via reflection
-                // 尝试通过反射从 HybridClusterTransport 获取已知节点
+                // Try to get known nodes from HybridClusterTransport via reflection or public method
+                // 尝试通过反射或公共方法从 HybridClusterTransport 获取已知节点
                 try
                 {
                     var transportType = _transport.GetType();
                     if (transportType.Name == "HybridClusterTransport" || transportType.FullName?.Contains("HybridClusterTransport") == true)
                     {
-                        _logger.LogDebug($"Transport is HybridClusterTransport, attempting to get known nodes via reflection");
+                        _logger.LogWarning($"[RaftNode] Transport is HybridClusterTransport, attempting to get known nodes");
                         
-                        // Get _knownNodes field via reflection / 通过反射获取 _knownNodes 字段
-                        var knownNodesField = transportType.GetField("_knownNodes", 
-                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        // First try public method GetKnownNodeIds / 首先尝试公共方法 GetKnownNodeIds
+                        var getKnownNodeIdsMethod = transportType.GetMethod("GetKnownNodeIds", 
+                            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
                         
-                        if (knownNodesField != null)
+                        if (getKnownNodeIdsMethod != null)
                         {
-                            var knownNodesDict = knownNodesField.GetValue(_transport);
-                            if (knownNodesDict is System.Collections.IDictionary dict)
+                            var result = getKnownNodeIdsMethod.Invoke(_transport, null);
+                            if (result is List<string> knownNodeIds)
                             {
-                                foreach (System.Collections.DictionaryEntry entry in dict)
+                                foreach (var nodeId in knownNodeIds)
                                 {
-                                    var nodeId = entry.Key?.ToString();
                                     if (!string.IsNullOrEmpty(nodeId) && nodeId != _nodeId)
                                     {
                                         nodeIds.Add(nodeId);
-                                        _logger.LogDebug($"Found node '{nodeId}' from HybridClusterTransport");
+                                        _logger.LogWarning($"[RaftNode] Found node '{nodeId}' from HybridClusterTransport via GetKnownNodeIds()");
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Fallback to reflection if method not found / 如果方法未找到，回退到反射
+                        if (nodeIds.Count == 0)
+                        {
+                            _logger.LogWarning($"[RaftNode] GetKnownNodeIds() returned no nodes, trying reflection");
+                            var knownNodesField = transportType.GetField("_knownNodes", 
+                                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                            
+                            if (knownNodesField != null)
+                            {
+                                var knownNodesDict = knownNodesField.GetValue(_transport);
+                                if (knownNodesDict is System.Collections.IDictionary dict)
+                                {
+                                    foreach (System.Collections.DictionaryEntry entry in dict)
+                                    {
+                                        var nodeId = entry.Key?.ToString();
+                                        if (!string.IsNullOrEmpty(nodeId) && nodeId != _nodeId)
+                                        {
+                                            nodeIds.Add(nodeId);
+                                            _logger.LogWarning($"[RaftNode] Found node '{nodeId}' from HybridClusterTransport via reflection");
+                                        }
                                     }
                                 }
                             }

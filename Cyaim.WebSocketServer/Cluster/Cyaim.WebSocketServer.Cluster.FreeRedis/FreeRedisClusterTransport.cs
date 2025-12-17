@@ -263,6 +263,50 @@ namespace Cyaim.WebSocketServer.Cluster.FreeRedis
         }
 
         /// <summary>
+        /// Store connection route information (not supported by FreeRedis Pub/Sub transport)
+        /// 存储连接路由信息（FreeRedis Pub/Sub 传输不支持）
+        /// </summary>
+        public Task<bool> StoreConnectionRouteAsync(string connectionId, string nodeId, Dictionary<string, string> metadata = null)
+        {
+            // FreeRedis Pub/Sub transport doesn't support connection route storage
+            // FreeRedis Pub/Sub 传输不支持连接路由存储
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
+        /// Get connection route information (not supported by FreeRedis Pub/Sub transport)
+        /// 获取连接路由信息（FreeRedis Pub/Sub 传输不支持）
+        /// </summary>
+        public Task<string> GetConnectionRouteAsync(string connectionId)
+        {
+            // FreeRedis Pub/Sub transport doesn't support connection route query
+            // FreeRedis Pub/Sub 传输不支持连接路由查询
+            return Task.FromResult<string>(null);
+        }
+
+        /// <summary>
+        /// Remove connection route information (not supported by FreeRedis Pub/Sub transport)
+        /// 删除连接路由信息（FreeRedis Pub/Sub 传输不支持）
+        /// </summary>
+        public Task<bool> RemoveConnectionRouteAsync(string connectionId)
+        {
+            // FreeRedis Pub/Sub transport doesn't support connection route removal
+            // FreeRedis Pub/Sub 传输不支持连接路由删除
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
+        /// Refresh connection route expiration (not supported by FreeRedis Pub/Sub transport)
+        /// 刷新连接路由过期时间（FreeRedis Pub/Sub 传输不支持）
+        /// </summary>
+        public Task<bool> RefreshConnectionRouteAsync(string connectionId, string nodeId)
+        {
+            // FreeRedis Pub/Sub transport doesn't support connection route refresh
+            // FreeRedis Pub/Sub 传输不支持连接路由刷新
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
         /// Register a node / 注册节点
         /// </summary>
         /// <param name="node">Node information / 节点信息</param>

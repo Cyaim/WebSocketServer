@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Cluster
@@ -61,6 +62,41 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// <param name="nodeId">Node ID to check / 要检查的节点 ID</param>
         /// <returns>True if connected, false otherwise / 已连接返回 true，否则返回 false</returns>
         bool IsNodeConnected(string nodeId);
+
+        /// <summary>
+        /// Store connection route information (optional, only for transports that support it)
+        /// 存储连接路由信息（可选，仅支持此功能的传输层实现）
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        /// <param name="nodeId">Node ID where connection is located / 连接所在的节点 ID</param>
+        /// <param name="metadata">Optional connection metadata / 可选的连接元数据</param>
+        /// <returns>True if storage is supported and successful, false otherwise / 如果支持存储且成功返回 true，否则返回 false</returns>
+        Task<bool> StoreConnectionRouteAsync(string connectionId, string nodeId, Dictionary<string, string> metadata = null);
+
+        /// <summary>
+        /// Get connection route information (optional, only for transports that support it)
+        /// 获取连接路由信息（可选，仅支持此功能的传输层实现）
+        /// </summary>
+        /// <param name="connectionId">Connection ID to query / 要查询的连接 ID</param>
+        /// <returns>Node ID where connection is located, or null if not found or not supported / 连接所在的节点 ID，如果未找到或不支持则返回 null</returns>
+        Task<string> GetConnectionRouteAsync(string connectionId);
+
+        /// <summary>
+        /// Remove connection route information (optional, only for transports that support it)
+        /// 删除连接路由信息（可选，仅支持此功能的传输层实现）
+        /// </summary>
+        /// <param name="connectionId">Connection ID to remove / 要删除的连接 ID</param>
+        /// <returns>True if removal is supported and successful, false otherwise / 如果支持删除且成功返回 true，否则返回 false</returns>
+        Task<bool> RemoveConnectionRouteAsync(string connectionId);
+
+        /// <summary>
+        /// Refresh connection route expiration (optional, only for transports that support it)
+        /// 刷新连接路由过期时间（可选，仅支持此功能的传输层实现）
+        /// </summary>
+        /// <param name="connectionId">Connection ID to refresh / 要刷新的连接 ID</param>
+        /// <param name="nodeId">Node ID where connection is located / 连接所在的节点 ID</param>
+        /// <returns>True if refresh is supported and successful, false otherwise / 如果支持刷新且成功返回 true，否则返回 false</returns>
+        Task<bool> RefreshConnectionRouteAsync(string connectionId, string nodeId);
     }
 
     /// <summary>

@@ -27,6 +27,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         private IWebSocketConnectionProvider _connectionProvider;
         private WebSocketMetricsCollector _metricsCollector;
         private Timer _nodeHealthCheckTimer;
+        private Timer _connectionRouteRefreshTimer; // 定时器，用于刷新连接路由过期时间
         private readonly CancellationTokenSource _cancellationTokenSource;
 
         // Connection routing: connectionId -> nodeId / 连接路由：连接ID -> 节点ID
@@ -97,6 +98,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
             // Start periodic node health check / 启动定期节点健康检查
             _nodeHealthCheckTimer = new Timer(CheckNodeHealth, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+            
+            // Start periodic connection route refresh / 启动定期连接路由刷新
+            // 每 12 小时刷新一次，确保在 24 小时过期前刷新
+            // Refresh every 12 hours to ensure refresh before 24-hour expiration
+            _connectionRouteRefreshTimer = new Timer(RefreshConnectionRoutes, null, TimeSpan.FromHours(12), TimeSpan.FromHours(12));
         }
 
         /// <summary>
@@ -160,36 +166,57 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             // 更新集群连接数指标
             _metricsCollector?.UpdateClusterConnectionCount(1, _nodeId);
 
-            // Always broadcast connection registration to cluster (not just when leader)
-            // 始终向集群广播连接注册（不仅仅是领导者时）
-            // This ensures all nodes know about all connections
-            // 这确保所有节点都知道所有连接
-            var registration = new WebSocketConnectionRegistration
+            // 尝试通过传输层存储连接路由信息（如果支持）
+            // Try to store connection route info through transport layer (if supported)
+            var routeMetadata = new Dictionary<string, string>
             {
-                ConnectionId = connectionId,
-                NodeId = _nodeId,
-                Endpoint = endpoint,
-                RemoteIpAddress = remoteIpAddress,
-                RemotePort = remotePort,
-                RegisteredAt = DateTime.UtcNow
+                ["Endpoint"] = endpoint ?? string.Empty,
+                ["RemoteIpAddress"] = remoteIpAddress ?? string.Empty,
+                ["RemotePort"] = remotePort.ToString(),
+                ["RegisteredAt"] = DateTime.UtcNow.ToString("O")
             };
-
-            var message = new ClusterMessage
+            
+            var stored = await _transport.StoreConnectionRouteAsync(connectionId, _nodeId, routeMetadata);
+            
+            if (stored)
             {
-                Type = ClusterMessageType.RegisterWebSocketConnection,
-                Payload = JsonSerializer.Serialize(registration)
-            };
-
-            try
-            {
-                _logger.LogWarning($"[ClusterRouter] 广播连接注册消息 - ConnectionId: {connectionId}, NodeId: {_nodeId}");
-                await _transport.BroadcastAsync(message);
-                _logger.LogWarning($"[ClusterRouter] 连接注册广播成功 - ConnectionId: {connectionId}, NodeId: {_nodeId}, 当前路由表大小: {_connectionRoutes.Count}");
+                _logger.LogWarning($"[ClusterRouter] 连接路由已通过传输层存储 - ConnectionId: {connectionId}, NodeId: {_nodeId}");
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogError(ex, $"[ClusterRouter] 连接注册广播失败 - ConnectionId: {connectionId}, NodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
-                throw;
+                // 如果传输层不支持存储，使用广播方式（向后兼容）
+                // If transport doesn't support storage, use broadcast (backward compatibility)
+                // Always broadcast connection registration to cluster (not just when leader)
+                // 始终向集群广播连接注册（不仅仅是领导者时）
+                // This ensures all nodes know about all connections
+                // 这确保所有节点都知道所有连接
+                var registration = new WebSocketConnectionRegistration
+                {
+                    ConnectionId = connectionId,
+                    NodeId = _nodeId,
+                    Endpoint = endpoint,
+                    RemoteIpAddress = remoteIpAddress,
+                    RemotePort = remotePort,
+                    RegisteredAt = DateTime.UtcNow
+                };
+
+                var message = new ClusterMessage
+                {
+                    Type = ClusterMessageType.RegisterWebSocketConnection,
+                    Payload = JsonSerializer.Serialize(registration)
+                };
+
+                try
+                {
+                    _logger.LogWarning($"[ClusterRouter] 广播连接注册消息 - ConnectionId: {connectionId}, NodeId: {_nodeId}");
+                    await _transport.BroadcastAsync(message);
+                    _logger.LogWarning($"[ClusterRouter] 连接注册广播成功 - ConnectionId: {connectionId}, NodeId: {_nodeId}, 当前路由表大小: {_connectionRoutes.Count}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"[ClusterRouter] 连接注册广播失败 - ConnectionId: {connectionId}, NodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                    throw;
+                }
             }
         }
 
@@ -213,8 +240,20 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 // 更新集群连接数指标
                 _metricsCollector?.UpdateClusterConnectionCount(-1, nodeId);
 
-                // Always broadcast connection unregistration to cluster (not just when leader)
-                // 始终向集群广播连接注销（不仅仅是领导者时）
+                // 尝试通过传输层删除连接路由信息（如果支持）
+                // Try to remove connection route info through transport layer (if supported)
+                var removed = await _transport.RemoveConnectionRouteAsync(connectionId);
+                
+                if (removed)
+                {
+                    _logger.LogWarning($"[ClusterRouter] 连接路由已通过传输层删除 - ConnectionId: {connectionId}, NodeId: {nodeId}");
+                }
+                else
+                {
+                    // 如果传输层不支持删除，使用广播方式（向后兼容）
+                    // If transport doesn't support removal, use broadcast (backward compatibility)
+                    // Always broadcast connection unregistration to cluster (not just when leader)
+                    // 始终向集群广播连接注销（不仅仅是领导者时）
                     var message = new ClusterMessage
                     {
                         Type = ClusterMessageType.UnregisterWebSocketConnection,
@@ -222,8 +261,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     };
 
                     await _transport.BroadcastAsync(message);
-
-                _logger.LogDebug($"Unregistered connection {connectionId} from node {nodeId} and broadcast to cluster");
+                    _logger.LogDebug($"Unregistered connection {connectionId} from node {nodeId} and broadcast to cluster");
+                }
             }
         }
 
@@ -598,24 +637,43 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// <returns>Node ID where connection is located, or null if not found / 连接所在的节点 ID，如果未找到则返回 null</returns>
         private async Task<string> QueryConnectionAsync(string connectionId)
         {
-            _logger.LogError($"[ClusterRouter] 查询连接位置 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, 当前路由表连接数: {_connectionRoutes.Count}");
+            _logger.LogWarning($"[ClusterRouter] 查询连接位置 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, 当前路由表连接数: {_connectionRoutes.Count}");
             
+            // 首先尝试通过传输层查询连接路由（如果支持）
+            // First try to query connection route through transport layer (if supported)
+            var nodeId = await _transport.GetConnectionRouteAsync(connectionId);
+            
+            if (!string.IsNullOrEmpty(nodeId))
+            {
+                // 更新本地路由表缓存
+                // Update local routing table cache
+                _connectionRoutes.AddOrUpdate(connectionId, nodeId, (key, oldValue) => nodeId);
+                _logger.LogWarning($"[ClusterRouter] 通过传输层查询成功 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                return nodeId;
+            }
+
+            // 如果传输层不支持查询或查询失败，使用广播方式（向后兼容）
+            // If transport doesn't support query or query failed, use broadcast (backward compatibility)
             // 记录当前路由表中的一些连接ID（用于调试）
             var sampleConnections = _connectionRoutes.Keys.Take(10).ToArray();
             _logger.LogWarning($"[ClusterRouter] 路由表示例连接（前10个）: {string.Join(", ", sampleConnections)}");
             
+            // 为查询消息生成唯一的 MessageId，避免被去重逻辑过滤
+            // Generate unique MessageId for query message to avoid being filtered by deduplication logic
             var message = new ClusterMessage
             {
                 Type = ClusterMessageType.QueryWebSocketConnection,
-                Payload = JsonSerializer.Serialize(new { ConnectionId = connectionId })
+                Payload = JsonSerializer.Serialize(new { ConnectionId = connectionId }),
+                MessageId = $"{_nodeId}:query:{connectionId}:{DateTime.UtcNow.Ticks}:{Guid.NewGuid():N}", // 生成唯一的 MessageId
+                FromNodeId = _nodeId
             };
 
             // Broadcast query / 广播查询
-            _logger.LogError($"[ClusterRouter] 广播查询消息 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}");
+            _logger.LogWarning($"[ClusterRouter] 广播查询消息 - ConnectionId: {connectionId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
             try
             {
                 await _transport.BroadcastAsync(message);
-                _logger.LogWarning($"[ClusterRouter] 查询消息广播成功 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}");
+                _logger.LogWarning($"[ClusterRouter] 查询消息广播成功 - ConnectionId: {connectionId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
             }
             catch (Exception ex)
             {
@@ -630,10 +688,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             {
                 await Task.Delay(50); // 每次等待50ms
                 
-                if (_connectionRoutes.TryGetValue(connectionId, out var nodeId))
+                if (_connectionRoutes.TryGetValue(connectionId, out var foundNodeId))
                 {
-                    _logger.LogWarning($"[ClusterRouter] 查询成功 - ConnectionId: {connectionId}, NodeId: {nodeId}, 查询次数: {i + 1}, CurrentNodeId: {_nodeId}, 路由表大小: {_connectionRoutes.Count}");
-                    return nodeId;
+                    _logger.LogWarning($"[ClusterRouter] 查询成功 - ConnectionId: {connectionId}, NodeId: {foundNodeId}, 查询次数: {i + 1}, CurrentNodeId: {_nodeId}, 路由表大小: {_connectionRoutes.Count}");
+                    return foundNodeId;
                 }
             }
 
@@ -685,17 +743,117 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// <param name="e">Message event arguments / 消息事件参数</param>
         private void OnTransportMessageReceived(object sender, ClusterMessageEventArgs e)
         {
+            // #region agent log
+            try
+            {
+                var logData = new
+                {
+                    location = "ClusterRouter.cs:690",
+                    message = "OnTransportMessageReceived entry",
+                    data = new
+                    {
+                        messageType = e.Message.Type.ToString(),
+                        fromNodeId = e.FromNodeId,
+                        toNodeId = e.Message.ToNodeId ?? "null",
+                        messageId = e.Message.MessageId,
+                        currentNodeId = _nodeId
+                    },
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    sessionId = "debug-session",
+                    runId = "run1",
+                    hypothesisId = "E"
+                };
+                var logJson = System.Text.Json.JsonSerializer.Serialize(logData);
+                System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
+            }
+            catch { }
+            // #endregion
+            
             _ = Task.Run(async () =>
             {
                 try
                 {
                     _logger.LogWarning($"[ClusterRouter] 收到集群消息 - MessageType: {e.Message.Type}, FromNodeId: {e.FromNodeId}, ToNodeId: {e.Message.ToNodeId}, MessageId: {e.Message.MessageId}, CurrentNodeId: {_nodeId}");
                     
+                    // #region agent log
+                    try
+                    {
+                        var logData = new
+                        {
+                            location = "ClusterRouter.cs:710",
+                            message = "Before switch statement",
+                            data = new
+                            {
+                                messageType = e.Message.Type.ToString(),
+                                fromNodeId = e.FromNodeId,
+                                toNodeId = e.Message.ToNodeId ?? "null",
+                                messageId = e.Message.MessageId,
+                                currentNodeId = _nodeId
+                            },
+                            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                            sessionId = "debug-session",
+                            runId = "run1",
+                            hypothesisId = "E"
+                        };
+                        var logJson = System.Text.Json.JsonSerializer.Serialize(logData);
+                        System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
+                    }
+                    catch { }
+                    // #endregion
+                    
                     switch (e.Message.Type)
                     {
                         case ClusterMessageType.ForwardWebSocketMessage:
                             _logger.LogWarning($"[ClusterRouter] 处理转发WebSocket消息 - FromNodeId: {e.FromNodeId}, CurrentNodeId: {_nodeId}");
+                            // #region agent log
+                            try
+                            {
+                                var logData = new
+                                {
+                                    location = "ClusterRouter.cs:702",
+                                    message = "Before HandleForwardMessage",
+                                    data = new
+                                    {
+                                        messageType = e.Message.Type.ToString(),
+                                        fromNodeId = e.FromNodeId,
+                                        messageId = e.Message.MessageId,
+                                        currentNodeId = _nodeId
+                                    },
+                                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                                    sessionId = "debug-session",
+                                    runId = "run1",
+                                    hypothesisId = "E"
+                                };
+                                var logJson = System.Text.Json.JsonSerializer.Serialize(logData);
+                                System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
+                            }
+                            catch { }
+                            // #endregion
                             await HandleForwardMessage(e.Message);
+                            // #region agent log
+                            try
+                            {
+                                var logData = new
+                                {
+                                    location = "ClusterRouter.cs:725",
+                                    message = "After HandleForwardMessage",
+                                    data = new
+                                    {
+                                        messageType = e.Message.Type.ToString(),
+                                        fromNodeId = e.FromNodeId,
+                                        messageId = e.Message.MessageId,
+                                        currentNodeId = _nodeId
+                                    },
+                                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                                    sessionId = "debug-session",
+                                    runId = "run1",
+                                    hypothesisId = "E"
+                                };
+                                var logJson = System.Text.Json.JsonSerializer.Serialize(logData);
+                                System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
+                            }
+                            catch { }
+                            // #endregion
                             break;
 
                         case ClusterMessageType.ForwardWebSocketStream:
@@ -939,6 +1097,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 var registration = JsonSerializer.Deserialize<WebSocketConnectionRegistration>(message.Payload);
                 _logger.LogWarning($"[ClusterRouter] 解析连接注册 - ConnectionId: {registration.ConnectionId}, NodeId: {registration.NodeId}, CurrentNodeId: {_nodeId}");
 
+                // 如果使用 Redis，连接路由信息应该已经在 Redis 中，这里只需要更新本地缓存
+                // If using Redis, connection route info should already be in Redis, just update local cache here
+                // 如果未使用 Redis，则从广播消息中更新路由表（向后兼容）
+                // If not using Redis, update routing table from broadcast message (backward compatibility)
                 if (registration.NodeId != _nodeId)
                 {
                     // Check if connection was previously on a different node (transfer case) / 检查连接是否之前在另一个节点上（转移情况）
@@ -1058,15 +1220,57 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 {
                     _logger.LogWarning($"[ClusterRouter] 连接在路由表中找到 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}, IsLocal: {nodeId == _nodeId}");
                     
+                    // Always respond to query if connection is found in routing table, regardless of whether it's local or remote
+                    // 如果连接在路由表中找到，始终响应查询，无论它是本地还是远程连接
+                    // This helps other nodes discover connections even if registration broadcast failed
+                    // 这有助于其他节点发现连接，即使注册广播失败
                     if (nodeId == _nodeId)
                     {
-                        // Respond to query / 响应查询
-                        _logger.LogWarning($"[ClusterRouter] 连接在本节点，响应查询 - ConnectionId: {connectionId}, FromNodeId: {message.FromNodeId}, CurrentNodeId: {_nodeId}");
+                        // Connection is local - verify it exists and respond / 连接是本地的 - 验证它存在并响应
+                        _logger.LogWarning($"[ClusterRouter] 连接在本节点，验证并响应查询 - ConnectionId: {connectionId}, FromNodeId: {message.FromNodeId}, CurrentNodeId: {_nodeId}");
+                        
+                        // Verify connection actually exists locally / 验证连接实际存在于本地
+                        var connectionExists = _connectionProvider != null && 
+                                             _connectionProvider.GetConnection(connectionId) != null &&
+                                             _connectionProvider.GetConnection(connectionId).State == System.Net.WebSockets.WebSocketState.Open;
+                        
+                        if (connectionExists)
+                        {
+                            var registration = new WebSocketConnectionRegistration
+                            {
+                                ConnectionId = connectionId,
+                                NodeId = _nodeId,
+                                RegisteredAt = DateTime.UtcNow
+                            };
+
+                            var response = new ClusterMessage
+                            {
+                                Type = ClusterMessageType.RegisterWebSocketConnection,
+                                Payload = JsonSerializer.Serialize(registration),
+                                ToNodeId = message.FromNodeId,
+                                MessageId = Guid.NewGuid().ToString("N"), // 生成唯一的 MessageId，避免被去重逻辑过滤
+                                FromNodeId = _nodeId
+                            };
+
+                            await _transport.SendAsync(message.FromNodeId, response);
+                            _logger.LogWarning($"[ClusterRouter] 查询响应已发送（本地连接）- ConnectionId: {connectionId}, ToNodeId: {message.FromNodeId}, MessageId: {response.MessageId}, CurrentNodeId: {_nodeId}");
+                        }
+                        else
+                        {
+                            _logger.LogWarning($"[ClusterRouter] 连接在本节点路由表中但实际不存在，移除路由表项 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}");
+                            _connectionRoutes.TryRemove(connectionId, out _);
+                        }
+                    }
+                    else
+                    {
+                        // Connection is on another node - respond with the node ID so querying node can update its routing table
+                        // 连接在其他节点上 - 响应节点ID，以便查询节点可以更新其路由表
+                        _logger.LogWarning($"[ClusterRouter] 连接在其他节点，响应查询（告知节点ID）- ConnectionId: {connectionId}, NodeId: {nodeId}, FromNodeId: {message.FromNodeId}, CurrentNodeId: {_nodeId}");
                         
                         var registration = new WebSocketConnectionRegistration
                         {
                             ConnectionId = connectionId,
-                            NodeId = _nodeId,
+                            NodeId = nodeId, // 告知查询者连接在哪个节点
                             RegisteredAt = DateTime.UtcNow
                         };
 
@@ -1074,15 +1278,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                         {
                             Type = ClusterMessageType.RegisterWebSocketConnection,
                             Payload = JsonSerializer.Serialize(registration),
-                            ToNodeId = message.FromNodeId
+                            ToNodeId = message.FromNodeId,
+                            MessageId = Guid.NewGuid().ToString("N"), // 生成唯一的 MessageId，避免被去重逻辑过滤
+                            FromNodeId = _nodeId
                         };
 
                         await _transport.SendAsync(message.FromNodeId, response);
-                        _logger.LogWarning($"[ClusterRouter] 查询响应已发送 - ConnectionId: {connectionId}, ToNodeId: {message.FromNodeId}, CurrentNodeId: {_nodeId}");
-                    }
-                    else
-                    {
-                        _logger.LogWarning($"[ClusterRouter] 连接在其他节点，不响应查询 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                        _logger.LogWarning($"[ClusterRouter] 查询响应已发送（远程连接）- ConnectionId: {connectionId}, NodeId: {nodeId}, ToNodeId: {message.FromNodeId}, MessageId: {response.MessageId}, CurrentNodeId: {_nodeId}");
                     }
                 }
                 else
@@ -1262,6 +1464,81 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during node health check");
+            }
+        }
+
+        /// <summary>
+        /// Refresh connection routes for all local active connections / 刷新所有本地活跃连接的路由信息
+        /// </summary>
+        /// <param name="state">Timer state / 定时器状态</param>
+        private async void RefreshConnectionRoutes(object state)
+        {
+            try
+            {
+                if (_cancellationTokenSource.Token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                // Get all local connections (connections on this node) / 获取所有本地连接（此节点上的连接）
+                var localConnections = _connectionRoutes
+                    .Where(kvp => kvp.Value == _nodeId)
+                    .Select(kvp => kvp.Key)
+                    .ToList();
+
+                if (localConnections.Count == 0)
+                {
+                    return; // No local connections to refresh / 没有本地连接需要刷新
+                }
+
+                _logger.LogWarning($"[ClusterRouter] 开始刷新连接路由 - 本地连接数: {localConnections.Count}, CurrentNodeId: {_nodeId}");
+
+                int refreshedCount = 0;
+                int failedCount = 0;
+
+                foreach (var connectionId in localConnections)
+                {
+                    try
+                    {
+                        // Verify connection is still active by checking if it exists in local routing table
+                        // 通过检查连接是否仍在本地路由表中来验证连接是否仍然活跃
+                        if (_connectionRoutes.TryGetValue(connectionId, out var nodeId) && nodeId == _nodeId)
+                        {
+                            // Refresh connection route expiration / 刷新连接路由过期时间
+                            var refreshed = await _transport.RefreshConnectionRouteAsync(connectionId, _nodeId);
+                            if (refreshed)
+                            {
+                                refreshedCount++;
+                            }
+                            else
+                            {
+                                // If refresh is not supported, try to re-store the route / 如果不支持刷新，尝试重新存储路由
+                                if (_connectionMetadata.TryGetValue(connectionId, out var metadata))
+                                {
+                                    var routeMetadata = new Dictionary<string, string>
+                                    {
+                                        ["RemoteIpAddress"] = metadata.RemoteIpAddress ?? string.Empty,
+                                        ["RemotePort"] = metadata.RemotePort.ToString(),
+                                        ["ConnectedAt"] = metadata.ConnectedAt.ToString("O")
+                                    };
+                                    await _transport.StoreConnectionRouteAsync(connectionId, _nodeId, routeMetadata);
+                                    refreshedCount++;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        failedCount++;
+                        _logger.LogError(ex, $"[ClusterRouter] 刷新连接路由失败 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}");
+                    }
+                }
+
+                _logger.LogWarning($"[ClusterRouter] 连接路由刷新完成 - 成功: {refreshedCount}, 失败: {failedCount}, 总计: {localConnections.Count}, CurrentNodeId: {_nodeId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[ClusterRouter] 刷新连接路由时发生异常 - CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
             }
         }
 
@@ -1693,6 +1970,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         {
             _cancellationTokenSource?.Cancel();
             _nodeHealthCheckTimer?.Dispose();
+            _connectionRouteRefreshTimer?.Dispose();
         }
     }
 

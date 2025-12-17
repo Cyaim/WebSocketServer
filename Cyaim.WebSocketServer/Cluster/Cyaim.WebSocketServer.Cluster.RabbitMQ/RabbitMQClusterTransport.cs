@@ -303,6 +303,50 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
         }
 
         /// <summary>
+        /// Store connection route information (not supported by RabbitMQ transport)
+        /// 存储连接路由信息（RabbitMQ 传输不支持）
+        /// </summary>
+        public Task<bool> StoreConnectionRouteAsync(string connectionId, string nodeId, Dictionary<string, string> metadata = null)
+        {
+            // RabbitMQ transport doesn't support connection route storage
+            // RabbitMQ 传输不支持连接路由存储
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
+        /// Get connection route information (not supported by RabbitMQ transport)
+        /// 获取连接路由信息（RabbitMQ 传输不支持）
+        /// </summary>
+        public Task<string> GetConnectionRouteAsync(string connectionId)
+        {
+            // RabbitMQ transport doesn't support connection route query
+            // RabbitMQ 传输不支持连接路由查询
+            return Task.FromResult<string>(null);
+        }
+
+        /// <summary>
+        /// Remove connection route information (not supported by RabbitMQ transport)
+        /// 删除连接路由信息（RabbitMQ 传输不支持）
+        /// </summary>
+        public Task<bool> RemoveConnectionRouteAsync(string connectionId)
+        {
+            // RabbitMQ transport doesn't support connection route removal
+            // RabbitMQ 传输不支持连接路由删除
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
+        /// Refresh connection route expiration (not supported by RabbitMQ transport)
+        /// 刷新连接路由过期时间（RabbitMQ 传输不支持）
+        /// </summary>
+        public Task<bool> RefreshConnectionRouteAsync(string connectionId, string nodeId)
+        {
+            // RabbitMQ transport doesn't support connection route refresh
+            // RabbitMQ 传输不支持连接路由刷新
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
         /// Register a node / 注册节点
         /// </summary>
         /// <param name="node">Node information / 节点信息</param>

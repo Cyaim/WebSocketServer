@@ -267,6 +267,50 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
         }
 
         /// <summary>
+        /// Store connection route information (not supported by Redis Pub/Sub transport)
+        /// 存储连接路由信息（Redis Pub/Sub 传输不支持）
+        /// </summary>
+        public Task<bool> StoreConnectionRouteAsync(string connectionId, string nodeId, Dictionary<string, string> metadata = null)
+        {
+            // Redis Pub/Sub transport doesn't support connection route storage
+            // Redis Pub/Sub 传输不支持连接路由存储
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
+        /// Get connection route information (not supported by Redis Pub/Sub transport)
+        /// 获取连接路由信息（Redis Pub/Sub 传输不支持）
+        /// </summary>
+        public Task<string> GetConnectionRouteAsync(string connectionId)
+        {
+            // Redis Pub/Sub transport doesn't support connection route query
+            // Redis Pub/Sub 传输不支持连接路由查询
+            return Task.FromResult<string>(null);
+        }
+
+        /// <summary>
+        /// Remove connection route information (not supported by Redis Pub/Sub transport)
+        /// 删除连接路由信息（Redis Pub/Sub 传输不支持）
+        /// </summary>
+        public Task<bool> RemoveConnectionRouteAsync(string connectionId)
+        {
+            // Redis Pub/Sub transport doesn't support connection route removal
+            // Redis Pub/Sub 传输不支持连接路由删除
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
+        /// Refresh connection route expiration (not supported by Redis Pub/Sub transport)
+        /// 刷新连接路由过期时间（Redis Pub/Sub 传输不支持）
+        /// </summary>
+        public Task<bool> RefreshConnectionRouteAsync(string connectionId, string nodeId)
+        {
+            // Redis Pub/Sub transport doesn't support connection route refresh
+            // Redis Pub/Sub 传输不支持连接路由刷新
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
         /// Register a node / 注册节点
         /// </summary>
         /// <param name="node">Node information / 节点信息</param>

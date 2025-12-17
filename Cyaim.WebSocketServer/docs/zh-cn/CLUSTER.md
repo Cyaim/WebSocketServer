@@ -214,10 +214,32 @@ var quality = await transport.GetNetworkQualityAsync(targetNodeId);
 connectionId -> nodeId
 ```
 
+### 连接路由存储
+
+根据使用的传输层类型，连接路由信息可能存储在不同的位置：
+
+#### 广播方式（WebSocket、Redis Pub/Sub、RabbitMQ）
+
+- 连接注册时：向所有节点广播连接注册消息
+- 连接查询时：广播查询消息，等待其他节点响应
+- 优点：无需额外存储，实现简单
+- 缺点：需要广播查询，延迟较高
+
+#### Redis 存储方式（Hybrid 混合传输）
+
+- 连接注册时：将连接路由信息存储到 Redis（`websocket:cluster:connections:{connectionId}` -> `{nodeId}`）
+- 连接查询时：直接从 Redis 读取，无需广播
+- 连接注销时：从 Redis 删除连接路由信息
+- **自动续期**：每 12 小时自动刷新所有本地活跃连接的路由信息，确保在 24 小时过期前刷新
+- 优点：查询速度快，无需广播，所有节点共享同一路由表
+- 缺点：需要 Redis 支持（仅 Hybrid 传输支持）
+
 ### 路由流程
 
 1. **本地连接**: 消息直接发送到本地 WebSocket
-2. **远程连接**: 消息通过传输层转发到目标节点
+2. **远程连接**: 
+   - 如果使用 Redis 存储（Hybrid 传输）：直接从 Redis 查询连接位置
+   - 如果使用广播方式：先查询本地路由表，如果未找到则广播查询
 3. **未知连接**: 返回错误或查询集群
 
 ### 单连接路由 vs 批量路由

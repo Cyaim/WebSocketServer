@@ -430,6 +430,50 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
         }
 
         /// <summary>
+        /// Store connection route information (not supported by WebSocket transport)
+        /// 存储连接路由信息（WebSocket 传输不支持）
+        /// </summary>
+        public Task<bool> StoreConnectionRouteAsync(string connectionId, string nodeId, Dictionary<string, string> metadata = null)
+        {
+            // WebSocket transport doesn't support connection route storage
+            // WebSocket 传输不支持连接路由存储
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
+        /// Get connection route information (not supported by WebSocket transport)
+        /// 获取连接路由信息（WebSocket 传输不支持）
+        /// </summary>
+        public Task<string> GetConnectionRouteAsync(string connectionId)
+        {
+            // WebSocket transport doesn't support connection route query
+            // WebSocket 传输不支持连接路由查询
+            return Task.FromResult<string>(null);
+        }
+
+        /// <summary>
+        /// Remove connection route information (not supported by WebSocket transport)
+        /// 删除连接路由信息（WebSocket 传输不支持）
+        /// </summary>
+        public Task<bool> RemoveConnectionRouteAsync(string connectionId)
+        {
+            // WebSocket transport doesn't support connection route removal
+            // WebSocket 传输不支持连接路由删除
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
+        /// Refresh connection route expiration (not supported by WebSocket transport)
+        /// 刷新连接路由过期时间（WebSocket 传输不支持）
+        /// </summary>
+        public Task<bool> RefreshConnectionRouteAsync(string connectionId, string nodeId)
+        {
+            // WebSocket transport doesn't support connection route refresh
+            // WebSocket 传输不支持连接路由刷新
+            return Task.FromResult(false);
+        }
+
+        /// <summary>
         /// Measure network latency to a node / 测量到节点的网络延迟
         /// </summary>
         /// <param name="nodeId">Target node ID / 目标节点 ID</param>

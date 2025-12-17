@@ -64,6 +64,8 @@ Compared to single transport methods, the Hybrid solution has the following adva
 
 - ✅ **Redis-based Service Discovery** - Automatic node registration and discovery
 - ✅ **RabbitMQ Message Routing** - Efficient message routing between nodes
+- ✅ **Connection Route Storage** - Store connection routes in Redis for fast queries without broadcasting
+- ✅ **Automatic Route Refresh** - Automatically refresh connection route expiration to prevent loss
 - ✅ **Automatic Load Balancing** - Multiple load balancing strategies
 - ✅ **Abstraction Layer** - Support different Redis and RabbitMQ libraries
 - ✅ **Node Health Monitoring** - Automatic detection of offline nodes
@@ -932,6 +934,74 @@ timer.Start();
 app.Run();
 ```
 
+## Connection Route Storage
+
+### Redis-Based Connection Route Storage
+
+`HybridClusterTransport` supports storing connection route information in Redis for fast queries without broadcasting:
+
+#### How It Works
+
+1. **On Connection Registration**:
+   - Store connection route info to Redis: `websocket:cluster:connections:{connectionId}` -> `{nodeId}`
+   - Store connection metadata: `websocket:cluster:connection:metadata:{connectionId}` -> JSON
+   - Set 24-hour expiration
+
+2. **On Connection Query**:
+   - Query directly from Redis, no broadcast needed
+   - If found, update local routing table cache
+
+3. **On Connection Unregistration**:
+   - Remove connection route info and metadata from Redis
+
+4. **Automatic Refresh**:
+   - Every 12 hours, automatically refresh route info for all local active connections
+   - Reset 24-hour expiration to ensure active connections' route info doesn't expire
+
+#### Advantages
+
+- ✅ **Fast Query** - Direct read from Redis, low latency
+- ✅ **No Broadcasting** - Reduces RabbitMQ message volume
+- ✅ **Auto Sync** - All nodes share the same Redis, routing table auto-syncs
+- ✅ **Auto Refresh** - Active connections' route info won't be lost due to expiration
+
+#### Implementation Details
+
+Connection route storage is implemented through optional methods in the `IClusterTransport` interface:
+
+- `StoreConnectionRouteAsync` - Store connection route information
+- `GetConnectionRouteAsync` - Get connection route information
+- `RemoveConnectionRouteAsync` - Remove connection route information
+- `RefreshConnectionRouteAsync` - Refresh connection route expiration
+
+Only `HybridClusterTransport` implements these methods. Other transports (WebSocket, Redis Pub/Sub, RabbitMQ) don't support this feature and will automatically fall back to broadcasting.
+
+#### Configuration
+
+Connection route storage is **automatically enabled**, no configuration needed. When using `HybridClusterTransport`:
+
+- Connection routes are automatically stored to Redis on registration
+- Connection routes are automatically queried from Redis on query
+- Local connections' routes are automatically refreshed every 12 hours
+
+#### Redis Key Format
+
+```
+websocket:cluster:connections:{connectionId} -> {nodeId}
+websocket:cluster:connection:metadata:{connectionId} -> JSON
+```
+
+#### Automatic Refresh Mechanism
+
+The system periodically (every 12 hours) checks all local active connections and refreshes their expiration in Redis:
+
+- Only refreshes local connections (`nodeId == current node ID`)
+- Verifies connections still exist in local routing table
+- If refresh fails, attempts to re-store route info
+- Logs count of successful and failed refreshes
+
+This ensures that even if connections exist for more than 24 hours, route info won't be lost due to expiration.
+
 ## Message Deduplication Mechanism
 
 ### Automatic Duplicate Prevention
@@ -939,26 +1009,24 @@ app.Run();
 `HybridClusterTransport` has built-in message deduplication to ensure messages are not processed multiple times:
 
 1. **Target Node Check** - Only the target node processes messages intended for it
-2. **Message ID Deduplication** - Uses message ID to prevent processing the same message twice
-3. **Automatic Cleanup** - Periodically cleans up expired message ID records (every 5 minutes, keeps records from last 10 minutes)
+2. **Message ID Deduplication** - ~~Uses message ID to prevent processing the same message twice~~ (Removed per user request)
+3. **Automatic Cleanup** - ~~Periodically cleans up expired message ID records (every 5 minutes, keeps records from last 10 minutes)~~ (Removed per user request)
+
+> **Note**: Message deduplication mechanism has been removed per user request. The system no longer filters duplicate message IDs.
 
 ### How It Works
 
 ```text
-Message Arrives → Check if from self → Check target node → Check if processed → Process message
+Message Arrives → Check if from self → Check target node → Process message
 ```
 
 #### Target Node Check
 
 - If message's `ToNodeId` is not empty and not equal to current node ID, message is ignored
-- If `ToNodeId` is `null` (broadcast message), all nodes process it (but deduplicated by message ID)
+- If `ToNodeId` is `null` (broadcast message), all nodes process it
 - If `ToNodeId` equals current node ID, message is processed
 
-#### Message ID Deduplication
-
-- Each message has a unique `MessageId`
-- Before processing, checks if this `MessageId` has been processed
-- If already processed, message is ignored to prevent duplicate processing
+> **Note**: Message ID deduplication has been removed. The system no longer checks if a message ID has been processed.
 
 ### Example Scenarios
 
@@ -980,8 +1048,7 @@ await clusterTransport.SendAsync("node2", new ClusterMessage { ... });
 await clusterTransport.BroadcastAsync(new ClusterMessage { ... });
 
 // Result:
-// - All nodes: Receive message
-// - But deduplicated by message ID, ensuring each node processes only once ✅
+// - All nodes: Receive and process message ✅
 ```
 
 **Scenario 3: Duplicate Message Arrival (Network Retransmission, etc.)**
@@ -989,24 +1056,18 @@ await clusterTransport.BroadcastAsync(new ClusterMessage { ... });
 ```csharp
 // If same message arrives multiple times due to network issues
 // Result:
-// - First time: Processed normally ✅
-// - Subsequent duplicates: Automatically ignored via message ID check ✅
+// - All duplicates: Processed normally ✅
+// Note: If business logic requires deduplication, implement it at the application layer
 ```
 
 ### Configuration
 
-The message deduplication mechanism is **automatically enabled**, no configuration needed. The system will:
+Target node check is **automatically enabled**, no configuration needed. The system will:
 
 - Automatically check target node
-- Automatically use message ID for deduplication
-- Automatically clean up expired message ID records (every 5 minutes)
+- Automatically ignore messages sent to other nodes
 
-### Performance Considerations
-
-- Message ID cache uses in-memory storage, periodically cleaned to prevent memory leaks
-- Cleanup interval: Every 5 minutes
-- Retention time: Message IDs from last 10 minutes
-- For high-concurrency scenarios, memory usage is minimal (each message ID uses about tens of bytes)
+> **Note**: Message ID deduplication has been removed. The system no longer caches or checks message IDs.
 
 ## Troubleshooting
 
@@ -1030,11 +1091,13 @@ The message deduplication mechanism is **automatically enabled**, no configurati
 
 ### Messages Being Processed Multiple Times
 
-- ✅ **Fixed**: `HybridClusterTransport` has built-in message deduplication
-- If still experiencing duplicate processing, check:
-  - Whether message's `MessageId` is unique
-  - Whether message's `ToNodeId` is correctly set
-  - Logs for "Ignoring duplicate message" or "Ignoring message - target node is" messages
+- ⚠️ **Note**: Message deduplication mechanism has been removed. The system no longer filters duplicate message IDs.
+- If business logic requires deduplication, implement it at the application layer:
+  - Check message ID in message processing logic
+  - Use distributed locks or cache to record processed message IDs
+  - Implement deduplication logic based on business requirements
+- Check whether message's `ToNodeId` is correctly set
+- Check logs for "Ignoring message - target node is" messages (this is normal, indicating correct message routing)
 
 ## Related Documentation
 

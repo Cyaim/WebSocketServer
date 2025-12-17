@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
 using Microsoft.Extensions.Logging;
@@ -26,6 +27,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         // RabbitMQ.Client 7.0+ 使用 AsyncEventingBasicConsumer
         private readonly Dictionary<string, AsyncEventingBasicConsumer> _consumers;
         private bool _disposed = false;
+        private readonly SemaphoreSlim _channelLock = new SemaphoreSlim(1, 1);
 
         /// <summary>
         /// Constructor / 构造函数
@@ -44,22 +46,56 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task ConnectAsync()
         {
-            if (_connection != null && _connection.IsOpen)
-            {
-                return;
-            }
-
+            await _channelLock.WaitAsync().ConfigureAwait(false);
             try
             {
-                var factory = new ConnectionFactory { Uri = new Uri(_connectionString) };
-                _connection = await factory.CreateConnectionAsync();
-                _channel = await _connection.CreateChannelAsync();
-                _logger.LogInformation("Connected to RabbitMQ");
+                if (_connection != null && _connection.IsOpen && _channel != null && _channel.IsOpen)
+                {
+                    _logger.LogDebug($"[RabbitMQMessageQueueService] RabbitMQ 已连接，跳过重连 - ConnectionIsOpen: {_connection.IsOpen}, ChannelIsOpen: {_channel.IsOpen}");
+                    return;
+                }
+
+                // 清理旧连接 / Cleanup old connection
+                try
+                {
+                    if (_channel != null)
+                    {
+                        await _channel.CloseAsync().ConfigureAwait(false);
+                        _channel.Dispose();
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    if (_connection != null)
+                    {
+                        await _connection.CloseAsync().ConfigureAwait(false);
+                        _connection.Dispose();
+                    }
+                }
+                catch { }
+
+                _connection = null;
+                _channel = null;
+
+                try
+                {
+                    _logger.LogWarning($"[RabbitMQMessageQueueService] 开始连接 RabbitMQ - ConnectionString: {_connectionString}");
+                    var factory = new ConnectionFactory { Uri = new Uri(_connectionString) };
+                    _connection = await factory.CreateConnectionAsync().ConfigureAwait(false);
+                    _channel = await _connection.CreateChannelAsync().ConfigureAwait(false);
+                    _logger.LogWarning($"[RabbitMQMessageQueueService] RabbitMQ 连接成功 - ConnectionIsOpen: {_connection.IsOpen}, ChannelIsOpen: {_channel.IsOpen}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"[RabbitMQMessageQueueService] RabbitMQ 连接失败 - ConnectionString: {_connectionString}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                    throw;
+                }
             }
-            catch (Exception ex)
+            finally
             {
-                _logger.LogError(ex, "Failed to connect to RabbitMQ");
-                throw;
+                _channelLock.Release();
             }
         }
 
@@ -94,12 +130,13 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task DeclareExchangeAsync(string exchangeName, string exchangeType, bool durable = true)
         {
-            if (_channel == null)
-            {
-                throw new InvalidOperationException("RabbitMQ is not connected");
-            }
+            await EnsureChannelAsync().ConfigureAwait(false);
 
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 声明交换机 - ExchangeName: {exchangeName}, ExchangeType: {exchangeType}, Durable: {durable}");
+            
             await _channel.ExchangeDeclareAsync(exchangeName, exchangeType, durable: durable, autoDelete: false);
+            
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 交换机声明成功 - ExchangeName: {exchangeName}, ExchangeType: {exchangeType}");
         }
 
         /// <summary>
@@ -107,11 +144,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task<string> DeclareQueueAsync(string queueName, bool durable = false, bool exclusive = false, bool autoDelete = true)
         {
-            if (_channel == null)
-            {
-                throw new InvalidOperationException("RabbitMQ is not connected");
-            }
+            await EnsureChannelAsync().ConfigureAwait(false);
 
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 声明队列 - QueueName: {queueName}, Durable: {durable}, Exclusive: {exclusive}, AutoDelete: {autoDelete}");
+            
             var result = await _channel.QueueDeclareAsync(
                 queue: queueName,
                 durable: durable,
@@ -119,6 +155,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 autoDelete: autoDelete,
                 arguments: null);
 
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 队列声明成功 - QueueName: {result.QueueName}, ConsumerCount: {result.ConsumerCount}, MessageCount: {result.MessageCount}");
+            
             return result.QueueName;
         }
 
@@ -127,12 +165,13 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task BindQueueAsync(string queueName, string exchangeName, string routingKey)
         {
-            if (_channel == null)
-            {
-                throw new InvalidOperationException("RabbitMQ is not connected");
-            }
+            await EnsureChannelAsync().ConfigureAwait(false);
 
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 绑定队列到交换机 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}");
+            
             await _channel.QueueBindAsync(queueName, exchangeName, routingKey);
+            
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 队列绑定成功 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}");
         }
 
         /// <summary>
@@ -140,9 +179,12 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task PublishAsync(string exchangeName, string routingKey, byte[] message, MessageProperties properties = null)
         {
-            if (_channel == null)
+            await EnsureChannelAsync().ConfigureAwait(false);
+
+            if (_channel == null || !_channel.IsOpen)
             {
-                throw new InvalidOperationException("RabbitMQ is not connected");
+                _logger.LogError($"[RabbitMQMessageQueueService] Channel 未打开，无法发布消息 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}");
+                throw new InvalidOperationException("RabbitMQ channel is not open");
             }
 
             var basicProperties = new BasicProperties();
@@ -169,12 +211,24 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 }
             }
 
-            await _channel.BasicPublishAsync(
-                exchange: exchangeName,
-                routingKey: routingKey,
-                mandatory: false,
-                basicProperties: basicProperties,
-                body: new ReadOnlyMemory<byte>(message));
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 发布消息 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, MessageId: {properties?.MessageId}, MessageSize: {message.Length} bytes, ChannelIsOpen: {_channel.IsOpen}");
+            
+            try
+            {
+                await _channel.BasicPublishAsync(
+                    exchange: exchangeName,
+                    routingKey: routingKey,
+                    mandatory: false,
+                    basicProperties: basicProperties,
+                    body: new ReadOnlyMemory<byte>(message));
+                
+                _logger.LogWarning($"[RabbitMQMessageQueueService] 消息发布成功 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, MessageId: {properties?.MessageId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[RabbitMQMessageQueueService] 消息发布失败 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, MessageId: {properties?.MessageId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                throw;
+            }
         }
 
         /// <summary>
@@ -182,10 +236,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task ConsumeAsync(string queueName, Func<byte[], MessageProperties, Task<bool>> handler, bool autoAck = false)
         {
-            if (_channel == null)
-            {
-                throw new InvalidOperationException("RabbitMQ is not connected");
-            }
+            await EnsureChannelAsync().ConfigureAwait(false);
 
             if (_consumers.ContainsKey(queueName))
             {
@@ -202,6 +253,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             {
                 try
                 {
+                    _logger.LogWarning($"[RabbitMQMessageQueueService] 收到消息 - QueueName: {queueName}, RoutingKey: {ea.RoutingKey}, Exchange: {ea.Exchange}, DeliveryTag: {ea.DeliveryTag}, MessageSize: {ea.Body.Length} bytes");
+                    
                     var properties = new MessageProperties
                     {
                         MessageId = ea.BasicProperties.MessageId,
@@ -224,23 +277,27 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                         }
                     }
 
+                    _logger.LogWarning($"[RabbitMQMessageQueueService] 开始处理消息 - QueueName: {queueName}, MessageId: {properties.MessageId}, DeliveryTag: {ea.DeliveryTag}");
                     var success = await handler(ea.Body.ToArray(), properties);
+                    _logger.LogWarning($"[RabbitMQMessageQueueService] 消息处理完成 - QueueName: {queueName}, MessageId: {properties.MessageId}, Success: {success}, DeliveryTag: {ea.DeliveryTag}");
                     
                     if (!autoAck)
                     {
                         if (success)
                         {
                             await _channel.BasicAckAsync(ea.DeliveryTag, false);
+                            _logger.LogDebug($"[RabbitMQMessageQueueService] 消息已确认 - QueueName: {queueName}, DeliveryTag: {ea.DeliveryTag}");
                         }
                         else
                         {
                             await _channel.BasicNackAsync(ea.DeliveryTag, false, true); // Requeue / 重新入队
+                            _logger.LogWarning($"[RabbitMQMessageQueueService] 消息已拒绝并重新入队 - QueueName: {queueName}, DeliveryTag: {ea.DeliveryTag}");
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, $"Error processing message from queue {queueName}");
+                    _logger.LogError(ex, $"[RabbitMQMessageQueueService] 处理消息时发生异常 - QueueName: {queueName}, DeliveryTag: {ea.DeliveryTag}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                     if (!autoAck)
                     {
                         await _channel.BasicNackAsync(ea.DeliveryTag, false, true);
@@ -248,7 +305,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 }
             };
 
-            await _channel.BasicConsumeAsync(queueName, autoAck, consumer);
+            var consumerTag = await _channel.BasicConsumeAsync(queueName, autoAck, consumer);
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者已启动 - QueueName: {queueName}, ConsumerTag: {consumerTag}, AutoAck: {autoAck}");
         }
 
         /// <summary>
@@ -256,10 +314,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task AckAsync(ulong deliveryTag)
         {
-            if (_channel == null)
-            {
-                throw new InvalidOperationException("RabbitMQ is not connected");
-            }
+            await EnsureChannelAsync().ConfigureAwait(false);
 
             await _channel.BasicAckAsync(deliveryTag, false);
         }
@@ -269,12 +324,22 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task RejectAsync(ulong deliveryTag, bool requeue = false)
         {
-            if (_channel == null)
-            {
-                throw new InvalidOperationException("RabbitMQ is not connected");
-            }
+            await EnsureChannelAsync().ConfigureAwait(false);
 
             await _channel.BasicNackAsync(deliveryTag, false, requeue);
+        }
+
+        /// <summary>
+        /// Ensure connection and channel are open / 确保连接和通道已打开
+        /// </summary>
+        private async Task EnsureChannelAsync()
+        {
+            if (_channel != null && _channel.IsOpen && _connection != null && _connection.IsOpen)
+            {
+                return;
+            }
+
+            await ConnectAsync().ConfigureAwait(false);
         }
 
         /// <summary>
