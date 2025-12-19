@@ -278,7 +278,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 await _messageQueueService.PublishAsync(ExchangeName, routingKey, messageBytes, properties);
 
-                _logger.LogTrace($"[HybridClusterTransport] 消息发送成功 - TargetNodeId: {nodeId}, MessageId: {message.MessageId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}, MessageSize: {messageBytes.Length} bytes");
+                _logger.LogWarning($"[HybridClusterTransport] 消息发送成功 - TargetNodeId: {nodeId}, MessageId: {message.MessageId}, MessageType: {message.Type}, RoutingKey: {routingKey}, ExchangeName: {ExchangeName}, CurrentNodeId: {_nodeId}, MessageSize: {messageBytes.Length} bytes");
             }
             catch (Exception ex)
             {
@@ -427,6 +427,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         {
             if (string.IsNullOrEmpty(nodeId))
             {
+                _logger.LogWarning($"[HybridClusterTransport] IsNodeConnected: 节点ID为空 - CurrentNodeId: {_nodeId}");
                 return false;
             }
 
@@ -435,9 +436,22 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 return true; // Current node is always "connected" / 当前节点始终"已连接"
             }
 
-            return _knownNodes.TryGetValue(nodeId, out var nodeInfo) &&
-                   nodeInfo.Status == NodeStatus.Active &&
-                   DateTime.UtcNow - nodeInfo.LastHeartbeat < TimeSpan.FromSeconds(60);
+            var exists = _knownNodes.TryGetValue(nodeId, out var nodeInfo);
+            if (!exists)
+            {
+                _logger.LogWarning($"[HybridClusterTransport] IsNodeConnected: 节点不在已知节点列表中 - TargetNodeId: {nodeId}, CurrentNodeId: {_nodeId}, KnownNodeCount: {_knownNodes.Count}, KnownNodes: {string.Join(", ", _knownNodes.Keys)}");
+                return false;
+            }
+
+            var isActive = nodeInfo.Status == NodeStatus.Active;
+            var timeSinceHeartbeat = DateTime.UtcNow - nodeInfo.LastHeartbeat;
+            var isHeartbeatRecent = timeSinceHeartbeat < TimeSpan.FromSeconds(60);
+
+            var isConnected = isActive && isHeartbeatRecent;
+
+            _logger.LogWarning($"[HybridClusterTransport] IsNodeConnected: 节点连接状态检查 - TargetNodeId: {nodeId}, CurrentNodeId: {_nodeId}, Exists: {exists}, Status: {nodeInfo.Status}, IsActive: {isActive}, TimeSinceHeartbeat: {timeSinceHeartbeat.TotalSeconds}秒, IsHeartbeatRecent: {isHeartbeatRecent}, IsConnected: {isConnected}");
+
+            return isConnected;
         }
 
         /// <summary>
@@ -757,19 +771,36 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         {
             if (nodeInfo == null || nodeInfo.NodeId == _nodeId)
             {
+                _logger.LogWarning($"[HybridClusterTransport] OnNodeDiscovered: 跳过无效节点或自己的节点 - NodeId: {nodeInfo?.NodeId ?? "null"}, CurrentNodeId: {_nodeId}");
                 return;
+            }
+
+            // 确保 LastHeartbeat 已设置
+            if (nodeInfo.LastHeartbeat == default)
+            {
+                nodeInfo.LastHeartbeat = DateTime.UtcNow;
+                _logger.LogWarning($"[HybridClusterTransport] OnNodeDiscovered: 节点心跳时间未设置，使用当前时间 - NodeId: {nodeInfo.NodeId}, CurrentNodeId: {_nodeId}");
+            }
+
+            // 确保 Status 已设置
+            if (nodeInfo.Status == NodeStatus.Unknown)
+            {
+                nodeInfo.Status = NodeStatus.Active;
+                _logger.LogWarning($"[HybridClusterTransport] OnNodeDiscovered: 节点状态未设置，设置为 Active - NodeId: {nodeInfo.NodeId}, CurrentNodeId: {_nodeId}");
             }
 
             var wasNew = _knownNodes.TryAdd(nodeInfo.NodeId, nodeInfo);
             if (wasNew)
             {
-                _logger.LogWarning($"[HybridClusterTransport] 发现新节点 - NodeId: {nodeInfo.NodeId}, Address: {nodeInfo.Address}, Port: {nodeInfo.Port}, CurrentNodeId: {_nodeId}, 已知节点数: {_knownNodes.Count}");
+                _logger.LogWarning($"[HybridClusterTransport] 发现新节点 - NodeId: {nodeInfo.NodeId}, Address: {nodeInfo.Address}, Port: {nodeInfo.Port}, Status: {nodeInfo.Status}, LastHeartbeat: {nodeInfo.LastHeartbeat}, CurrentNodeId: {_nodeId}, 已知节点数: {_knownNodes.Count}");
                 NodeConnected?.Invoke(this, new ClusterNodeEventArgs { NodeId = nodeInfo.NodeId });
             }
             else
             {
                 // Update existing node info / 更新现有节点信息
+                var oldNodeInfo = _knownNodes[nodeInfo.NodeId];
                 _knownNodes[nodeInfo.NodeId] = nodeInfo;
+                _logger.LogWarning($"[HybridClusterTransport] 更新现有节点信息 - NodeId: {nodeInfo.NodeId}, OldStatus: {oldNodeInfo.Status}, NewStatus: {nodeInfo.Status}, OldLastHeartbeat: {oldNodeInfo.LastHeartbeat}, NewLastHeartbeat: {nodeInfo.LastHeartbeat}, CurrentNodeId: {_nodeId}, 已知节点数: {_knownNodes.Count}");
             }
         }
 

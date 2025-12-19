@@ -457,7 +457,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
                 _logger.LogWarning($"[ClusterRouter] 准备通过传输层发送消息 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, MessageId: {uniqueMessageId}, CurrentNodeId: {_nodeId}, MessageType: {message.Type}");
 
-                await _transport.SendAsync(targetNodeId, message);
+                try
+                {
+                    await _transport.SendAsync(targetNodeId, message);
+                    _logger.LogWarning($"[ClusterRouter] 消息已通过传输层发送 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, MessageId: {uniqueMessageId}, CurrentNodeId: {_nodeId}");
+                }
+                catch (Exception sendEx)
+                {
+                    _logger.LogError(sendEx, $"[ClusterRouter] 通过传输层发送消息失败 - ConnectionId: {connectionId}, TargetNodeId: {targetNodeId}, MessageId: {uniqueMessageId}, CurrentNodeId: {_nodeId}, Error: {sendEx.Message}, StackTrace: {sendEx.StackTrace}");
+                    throw;
+                }
 
                 // 记录集群消息转发指标
                 _metricsCollector?.RecordClusterMessageForwarded(_nodeId, targetNodeId);
