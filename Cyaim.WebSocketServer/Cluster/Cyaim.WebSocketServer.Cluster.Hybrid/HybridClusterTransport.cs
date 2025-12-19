@@ -782,11 +782,11 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 _logger.LogWarning($"[HybridClusterTransport] OnNodeDiscovered: 节点心跳时间未设置，使用当前时间 - NodeId: {nodeInfo.NodeId}, CurrentNodeId: {_nodeId}");
             }
 
-            // 确保 Status 已设置
-            if (nodeInfo.Status == NodeStatus.Unknown)
+            // 确保 Status 已设置（枚举默认值为 Active，但为了安全起见，如果状态不是 Active/Draining/Offline，设置为 Active）
+            if (nodeInfo.Status != NodeStatus.Active && nodeInfo.Status != NodeStatus.Draining && nodeInfo.Status != NodeStatus.Offline)
             {
                 nodeInfo.Status = NodeStatus.Active;
-                _logger.LogWarning($"[HybridClusterTransport] OnNodeDiscovered: 节点状态未设置，设置为 Active - NodeId: {nodeInfo.NodeId}, CurrentNodeId: {_nodeId}");
+                _logger.LogWarning($"[HybridClusterTransport] OnNodeDiscovered: 节点状态无效，设置为 Active - NodeId: {nodeInfo.NodeId}, InvalidStatus: {nodeInfo.Status}, CurrentNodeId: {_nodeId}");
             }
 
             var wasNew = _knownNodes.TryAdd(nodeInfo.NodeId, nodeInfo);
