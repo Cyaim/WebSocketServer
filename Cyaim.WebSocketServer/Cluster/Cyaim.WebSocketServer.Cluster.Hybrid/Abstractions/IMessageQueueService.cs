@@ -125,6 +125,11 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions
         public ulong DeliveryTag { get; set; }
 
         /// <summary>
+        /// Routing key (for RabbitMQ) / 路由键（用于 RabbitMQ）
+        /// </summary>
+        public string RoutingKey { get; set; }
+
+        /// <summary>
         /// Constructor / 构造函数
         /// </summary>
         public MessageProperties()

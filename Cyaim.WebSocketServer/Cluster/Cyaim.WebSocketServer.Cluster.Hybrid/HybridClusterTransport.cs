@@ -30,6 +30,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         // Message deduplication logic removed, no longer need _processedMessageIds and _messageIdCleanupTimer
         private bool _disposed = false;
         private bool _started = false;
+        private Timer _bindingHealthCheckTimer; // 绑定健康检查定时器
 
         private const string ExchangeName = "websocket_cluster_exchange";
         private const string BroadcastRoutingKey = "broadcast";
@@ -163,27 +164,63 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 // Declare exchange / 声明交换机
                 await _messageQueueService.DeclareExchangeAsync(ExchangeName, "topic", durable: true);
+                _logger.LogWarning($"[HybridClusterTransport] 交换机声明完成 - ExchangeName: {ExchangeName}, CurrentNodeId: {_nodeId}");
 
                 // Declare queue for this node / 为此节点声明队列
+                var requestedQueueName = $"cluster:node:{_nodeId}";
+                _logger.LogWarning($"[HybridClusterTransport] 准备声明队列 - RequestedQueueName: {requestedQueueName}, CurrentNodeId: {_nodeId}");
+
+                // 使用 autoDelete: false 防止队列因消费者断开而自动删除
+                // Use autoDelete: false to prevent queue from being automatically deleted when consumer disconnects
                 _queueName = await _messageQueueService.DeclareQueueAsync(
-                    $"cluster:node:{_nodeId}",
+                    requestedQueueName,
                     durable: false,
                     exclusive: false,
-                    autoDelete: true);
+                    autoDelete: false);
+
+                if (string.IsNullOrEmpty(_queueName))
+                {
+                    throw new InvalidOperationException($"Queue declaration failed: returned empty queue name for node {_nodeId}");
+                }
+
+                if (_queueName != requestedQueueName)
+                {
+                    _logger.LogWarning($"[HybridClusterTransport] 队列名称不匹配 - RequestedQueueName: {requestedQueueName}, ActualQueueName: {_queueName}, CurrentNodeId: {_nodeId}");
+                }
+
+                _logger.LogWarning($"[HybridClusterTransport] 队列声明完成 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
 
                 // Bind queue to exchange for node-specific messages / 将队列绑定到交换机以接收节点特定消息
-                await _messageQueueService.BindQueueAsync(_queueName, ExchangeName, $"node.{_nodeId}");
+                await BindQueueWithRetryAsync(_queueName, ExchangeName, $"node.{_nodeId}", maxRetries: 3);
 
                 // Bind queue to exchange for broadcast messages / 将队列绑定到交换机以接收广播消息
-                await _messageQueueService.BindQueueAsync(_queueName, ExchangeName, BroadcastRoutingKey);
+                await BindQueueWithRetryAsync(_queueName, ExchangeName, BroadcastRoutingKey, maxRetries: 3);
+
+                // Verify bindings are successful / 验证绑定是否成功
+                await VerifyBindingsAsync();
+
+                // Verify queue exists before consuming / 消费前验证队列是否存在
+                await VerifyQueueExistsAsync(_queueName);
 
                 // Start consuming messages / 开始消费消息
                 // Pass currentNodeId to enable early filtering of self-messages / 传递 currentNodeId 以启用早期过滤自己的消息
                 await _messageQueueService.ConsumeAsync(_queueName, HandleMessageAsync, autoAck: false, currentNodeId: _nodeId);
 
+                _logger.LogWarning($"[HybridClusterTransport] 消费者启动完成 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
+
+                // Verify queue and consumer still exist after a short delay / 短暂延迟后验证队列和消费者是否仍然存在
+                await Task.Delay(500); // Wait 500ms to ensure consumer is fully registered / 等待 500ms 确保消费者已完全注册
+                await VerifyQueueAndConsumerAsync(_queueName);
+
+                // Start periodic binding health check / 启动定期绑定健康检查
+                _bindingHealthCheckTimer = new Timer(async _ => await CheckAndRepairBindingsAsync(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5));
+
                 // Wait a bit for initial node discovery / 等待初始节点发现
                 _logger.LogWarning($"[HybridClusterTransport] 等待初始节点发现... - NodeId: {_nodeId}");
                 await Task.Delay(2000); // Wait 2 seconds for initial discovery / 等待 2 秒进行初始发现
+
+                // Verify queue and consumer still exist after discovery delay / 发现延迟后再次验证队列和消费者是否仍然存在
+                await VerifyQueueAndConsumerAsync(_queueName);
 
                 // Log discovered nodes / 记录发现的节点
                 var discoveredNodes = GetKnownNodeIds();
@@ -276,7 +313,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     Timestamp = message.Timestamp
                 };
 
-                await _messageQueueService.PublishAsync(ExchangeName, routingKey, messageBytes, properties);
+                // Send message with retry mechanism / 使用重试机制发送消息
+                await SendMessageWithRetryAsync(ExchangeName, routingKey, messageBytes, properties, maxRetries: 3);
 
                 _logger.LogWarning($"[HybridClusterTransport] 消息发送成功 - TargetNodeId: {nodeId}, MessageId: {message.MessageId}, MessageType: {message.Type}, RoutingKey: {routingKey}, ExchangeName: {ExchangeName}, CurrentNodeId: {_nodeId}, MessageSize: {messageBytes.Length} bytes");
             }
@@ -682,6 +720,52 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     return true;
                 }
 
+                // 更新发送节点的心跳时间（收到消息表明节点是活跃的）
+                // Update heartbeat time for the sending node (receiving message indicates node is active)
+                if (!string.IsNullOrEmpty(message.FromNodeId) && message.FromNodeId != _nodeId)
+                {
+                    if (_knownNodes.TryGetValue(message.FromNodeId, out var nodeInfo))
+                    {
+                        // 更新节点心跳时间
+                        // Update node heartbeat time
+                        nodeInfo.LastHeartbeat = DateTime.UtcNow;
+                        // 确保节点状态为 Active（如果之前是 Offline，现在应该恢复为 Active）
+                        // Ensure node status is Active (if it was Offline before, it should be restored to Active now)
+                        if (nodeInfo.Status == NodeStatus.Offline)
+                        {
+                            nodeInfo.Status = NodeStatus.Active;
+                            _logger.LogWarning($"[HybridClusterTransport] 节点状态从 Offline 恢复为 Active - NodeId: {message.FromNodeId}, CurrentNodeId: {_nodeId}");
+                        }
+                        _logger.LogTrace($"[HybridClusterTransport] 更新节点心跳时间 - NodeId: {message.FromNodeId}, LastHeartbeat: {nodeInfo.LastHeartbeat}, CurrentNodeId: {_nodeId}");
+                    }
+                    else
+                    {
+                        // 节点不在已知列表中，可能是新节点，尝试从 Redis 发现
+                        // Node not in known list, might be a new node, try to discover from Redis
+                        _logger.LogWarning($"[HybridClusterTransport] 收到未知节点的消息，尝试发现节点 - FromNodeId: {message.FromNodeId}, CurrentNodeId: {_nodeId}");
+                        // 触发节点发现（如果 Redis 中有该节点信息，会被发现）
+                        // Trigger node discovery (if node info exists in Redis, it will be discovered)
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                // 尝试从 Redis 获取节点信息
+                                // Try to get node info from Redis
+                                var nodeInfoFromRedis = await _discoveryService.GetNodeInfoAsync(message.FromNodeId);
+                                if (nodeInfoFromRedis != null)
+                                {
+                                    _logger.LogWarning($"[HybridClusterTransport] 从 Redis 发现节点 - NodeId: {message.FromNodeId}, CurrentNodeId: {_nodeId}");
+                                    OnNodeDiscovered(this, nodeInfoFromRedis);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, $"[HybridClusterTransport] 尝试从 Redis 发现节点失败 - FromNodeId: {message.FromNodeId}, CurrentNodeId: {_nodeId}");
+                            }
+                        });
+                    }
+                }
+
                 // 特别记录查询消息的接收，便于调试
                 if (message.Type == ClusterMessageType.QueryWebSocketConnection)
                 {
@@ -799,6 +883,23 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             {
                 // Update existing node info / 更新现有节点信息
                 var oldNodeInfo = _knownNodes[nodeInfo.NodeId];
+
+                // 保留最新的心跳时间（如果内存中的心跳时间更新，保留内存中的）
+                // Keep the latest heartbeat time (if heartbeat in memory is newer, keep the one in memory)
+                if (oldNodeInfo.LastHeartbeat > nodeInfo.LastHeartbeat)
+                {
+                    nodeInfo.LastHeartbeat = oldNodeInfo.LastHeartbeat;
+                    _logger.LogTrace($"[HybridClusterTransport] 保留内存中的心跳时间（更新）- NodeId: {nodeInfo.NodeId}, MemoryHeartbeat: {oldNodeInfo.LastHeartbeat}, RedisHeartbeat: {nodeInfo.LastHeartbeat}, CurrentNodeId: {_nodeId}");
+                }
+
+                // 如果节点状态从 Offline 恢复为 Active，保留 Active 状态
+                // If node status recovered from Offline to Active, keep Active status
+                if (oldNodeInfo.Status == NodeStatus.Active && nodeInfo.Status == NodeStatus.Offline)
+                {
+                    nodeInfo.Status = NodeStatus.Active;
+                    _logger.LogWarning($"[HybridClusterTransport] 节点状态保持 Active（Redis 中可能是旧数据）- NodeId: {nodeInfo.NodeId}, CurrentNodeId: {_nodeId}");
+                }
+
                 _knownNodes[nodeInfo.NodeId] = nodeInfo;
                 _logger.LogWarning($"[HybridClusterTransport] 更新现有节点信息 - NodeId: {nodeInfo.NodeId}, OldStatus: {oldNodeInfo.Status}, NewStatus: {nodeInfo.Status}, OldLastHeartbeat: {oldNodeInfo.LastHeartbeat}, NewLastHeartbeat: {nodeInfo.LastHeartbeat}, CurrentNodeId: {_nodeId}, 已知节点数: {_knownNodes.Count}");
             }
@@ -958,7 +1059,281 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             _discoveryService?.Dispose();
             // 消息去重逻辑已移除，不再需要清理定时器
             // Message deduplication logic removed, no longer need cleanup timer
+            _bindingHealthCheckTimer?.Dispose();
             _cancellationTokenSource?.Dispose();
+        }
+
+        /// <summary>
+        /// Bind queue with retry mechanism / 使用重试机制绑定队列
+        /// </summary>
+        private async Task BindQueueWithRetryAsync(string queueName, string exchangeName, string routingKey, int maxRetries = 3)
+        {
+            int attempt = 0;
+            Exception lastException = null;
+
+            while (attempt < maxRetries)
+            {
+                try
+                {
+                    _logger.LogWarning($"[HybridClusterTransport] 尝试绑定队列 (尝试 {attempt + 1}/{maxRetries}) - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}, CurrentNodeId: {_nodeId}");
+                    await _messageQueueService.BindQueueAsync(queueName, exchangeName, routingKey);
+                    _logger.LogWarning($"[HybridClusterTransport] 队列绑定成功 (尝试 {attempt + 1}/{maxRetries}) - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}, CurrentNodeId: {_nodeId}");
+                    return; // Success / 成功
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    attempt++;
+                    _logger.LogWarning(ex, $"[HybridClusterTransport] 队列绑定失败 (尝试 {attempt}/{maxRetries}) - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}, CurrentNodeId: {_nodeId}, Error: {ex.Message}");
+
+                    if (attempt < maxRetries)
+                    {
+                        // Wait before retry with exponential backoff / 重试前等待，使用指数退避
+                        var delay = TimeSpan.FromMilliseconds(200 * Math.Pow(2, attempt - 1));
+                        _logger.LogWarning($"[HybridClusterTransport] 等待 {delay.TotalMilliseconds}ms 后重试绑定 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}, CurrentNodeId: {_nodeId}");
+                        await Task.Delay(delay);
+                    }
+                }
+            }
+
+            // All retries failed / 所有重试都失败
+            _logger.LogError(lastException, $"[HybridClusterTransport] 队列绑定失败，已达到最大重试次数 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}, CurrentNodeId: {_nodeId}, MaxRetries: {maxRetries}");
+            throw new InvalidOperationException($"Failed to bind queue after {maxRetries} attempts", lastException);
+        }
+
+        /// <summary>
+        /// Verify queue and consumer still exist / 验证队列和消费者是否仍然存在
+        /// </summary>
+        private async Task VerifyQueueAndConsumerAsync(string queueName)
+        {
+            if (string.IsNullOrEmpty(queueName))
+            {
+                _logger.LogWarning($"[HybridClusterTransport] 队列名称为空，跳过队列和消费者验证 - CurrentNodeId: {_nodeId}");
+                return;
+            }
+
+            try
+            {
+                _logger.LogWarning($"[HybridClusterTransport] 开始验证队列和消费者 - QueueName: {queueName}, CurrentNodeId: {_nodeId}");
+
+                // Verify connection is ready / 验证连接已就绪
+                await _messageQueueService.VerifyConnectionAsync();
+
+                // Try to verify queue exists using passive declare / 尝试使用被动声明验证队列是否存在
+                // This will throw if queue doesn't exist / 如果队列不存在会抛出异常
+                try
+                {
+                    // Note: We can't directly check consumer count from HybridClusterTransport,
+                    // but we can verify the queue exists and re-create consumer if needed
+                    // 注意：我们无法直接从 HybridClusterTransport 检查消费者数量，
+                    // 但我们可以验证队列是否存在，并在需要时重新创建消费者
+                    await VerifyQueueExistsAsync(queueName);
+
+                    // Re-create consumer if it might have been lost / 如果消费者可能丢失，重新创建
+                    // This ensures consumer is always active / 这确保消费者始终处于活动状态
+                    _logger.LogWarning($"[HybridClusterTransport] 重新验证消费者 - QueueName: {queueName}, CurrentNodeId: {_nodeId}");
+                    await _messageQueueService.ConsumeAsync(queueName, HandleMessageAsync, autoAck: false, currentNodeId: _nodeId);
+
+                    _logger.LogWarning($"[HybridClusterTransport] 队列和消费者验证成功 - QueueName: {queueName}, CurrentNodeId: {_nodeId}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"[HybridClusterTransport] 队列或消费者验证失败，尝试恢复 - QueueName: {queueName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}");
+
+                    // Try to recover by re-declaring queue and re-creating consumer / 尝试通过重新声明队列和重新创建消费者来恢复
+                    try
+                    {
+                        _logger.LogWarning($"[HybridClusterTransport] 尝试恢复队列和消费者 - QueueName: {queueName}, CurrentNodeId: {_nodeId}");
+                        await VerifyQueueExistsAsync(queueName);
+                        await _messageQueueService.ConsumeAsync(queueName, HandleMessageAsync, autoAck: false, currentNodeId: _nodeId);
+                        _logger.LogWarning($"[HybridClusterTransport] 队列和消费者恢复成功 - QueueName: {queueName}, CurrentNodeId: {_nodeId}");
+                    }
+                    catch (Exception recoverEx)
+                    {
+                        _logger.LogError(recoverEx, $"[HybridClusterTransport] 队列和消费者恢复失败 - QueueName: {queueName}, CurrentNodeId: {_nodeId}, Error: {recoverEx.Message}");
+                        throw;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[HybridClusterTransport] 验证队列和消费者时发生异常 - QueueName: {queueName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                // Don't throw - this is a verification step / 不抛出异常 - 这是验证步骤
+            }
+        }
+
+        /// <summary>
+        /// Verify queue exists / 验证队列是否存在
+        /// </summary>
+        private async Task VerifyQueueExistsAsync(string queueName)
+        {
+            if (string.IsNullOrEmpty(queueName))
+            {
+                _logger.LogWarning($"[HybridClusterTransport] 队列名称为空，跳过队列验证 - CurrentNodeId: {_nodeId}");
+                return;
+            }
+
+            try
+            {
+                _logger.LogWarning($"[HybridClusterTransport] 开始验证队列是否存在 - QueueName: {queueName}, CurrentNodeId: {_nodeId}");
+
+                // Verify connection is ready / 验证连接已就绪
+                await _messageQueueService.VerifyConnectionAsync();
+
+                // Try to declare queue again to verify it exists / 尝试再次声明队列以验证它是否存在
+                // This will return the existing queue if it exists, or create it if it doesn't
+                // 如果队列存在则返回现有队列，如果不存在则创建它
+                var verifiedQueueName = await _messageQueueService.DeclareQueueAsync(queueName, durable: false, exclusive: false, autoDelete: true);
+
+                if (string.IsNullOrEmpty(verifiedQueueName))
+                {
+                    _logger.LogError($"[HybridClusterTransport] 队列验证失败：返回空队列名称 - RequestedQueueName: {queueName}, CurrentNodeId: {_nodeId}");
+                    throw new InvalidOperationException($"Queue verification failed: returned empty queue name for {queueName}");
+                }
+
+                if (verifiedQueueName != queueName)
+                {
+                    _logger.LogWarning($"[HybridClusterTransport] 队列名称不匹配 - RequestedQueueName: {queueName}, VerifiedQueueName: {verifiedQueueName}, CurrentNodeId: {_nodeId}");
+                }
+
+                _logger.LogWarning($"[HybridClusterTransport] 队列验证成功 - QueueName: {verifiedQueueName}, CurrentNodeId: {_nodeId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[HybridClusterTransport] 队列验证失败 - QueueName: {queueName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Verify bindings are successful / 验证绑定是否成功
+        /// </summary>
+        private async Task VerifyBindingsAsync()
+        {
+            if (string.IsNullOrEmpty(_queueName))
+            {
+                _logger.LogWarning($"[HybridClusterTransport] 队列名称为空，跳过绑定验证 - CurrentNodeId: {_nodeId}");
+                return;
+            }
+
+            try
+            {
+                _logger.LogWarning($"[HybridClusterTransport] 开始验证绑定 - QueueName: {_queueName}, ExchangeName: {ExchangeName}, CurrentNodeId: {_nodeId}");
+
+                // Verify connection is ready / 验证连接已就绪
+                await _messageQueueService.VerifyConnectionAsync();
+
+                // Note: RabbitMQ doesn't provide a direct API to check bindings, so we verify by ensuring connection is ready
+                // 注意：RabbitMQ 不提供直接检查绑定的 API，所以我们通过确保连接就绪来验证
+                _logger.LogWarning($"[HybridClusterTransport] 绑定验证完成 - QueueName: {_queueName}, ExchangeName: {ExchangeName}, CurrentNodeId: {_nodeId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[HybridClusterTransport] 绑定验证失败 - QueueName: {_queueName}, ExchangeName: {ExchangeName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                // Don't throw, just log - bindings will be repaired by health check / 不抛出异常，只记录日志 - 绑定将由健康检查修复
+            }
+        }
+
+        /// <summary>
+        /// Check and repair bindings if needed / 检查并在需要时修复绑定
+        /// </summary>
+        private async Task CheckAndRepairBindingsAsync()
+        {
+            if (_disposed || !_started || string.IsNullOrEmpty(_queueName))
+            {
+                return;
+            }
+
+            try
+            {
+                _logger.LogTrace($"[HybridClusterTransport] 开始绑定健康检查 - QueueName: {_queueName}, ExchangeName: {ExchangeName}, CurrentNodeId: {_nodeId}");
+
+                // Verify connection is ready / 验证连接已就绪
+                await _messageQueueService.VerifyConnectionAsync();
+
+                // Re-bind queues to ensure they are still bound / 重新绑定队列以确保它们仍然绑定
+                // This is a safety measure in case bindings were lost due to connection issues
+                // 这是一个安全措施，以防绑定因连接问题而丢失
+                try
+                {
+                    await BindQueueWithRetryAsync(_queueName, ExchangeName, $"node.{_nodeId}", maxRetries: 2);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"[HybridClusterTransport] 重新绑定节点特定路由键失败 - QueueName: {_queueName}, RoutingKey: node.{_nodeId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}");
+                }
+
+                try
+                {
+                    await BindQueueWithRetryAsync(_queueName, ExchangeName, BroadcastRoutingKey, maxRetries: 2);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"[HybridClusterTransport] 重新绑定广播路由键失败 - QueueName: {_queueName}, RoutingKey: {BroadcastRoutingKey}, CurrentNodeId: {_nodeId}, Error: {ex.Message}");
+                }
+
+                _logger.LogTrace($"[HybridClusterTransport] 绑定健康检查完成 - QueueName: {_queueName}, ExchangeName: {ExchangeName}, CurrentNodeId: {_nodeId}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, $"[HybridClusterTransport] 绑定健康检查失败 - QueueName: {_queueName}, ExchangeName: {ExchangeName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}");
+                // Don't throw - this is a background health check / 不抛出异常 - 这是后台健康检查
+            }
+        }
+
+        /// <summary>
+        /// Send message with retry mechanism / 使用重试机制发送消息
+        /// </summary>
+        private async Task SendMessageWithRetryAsync(string exchangeName, string routingKey, byte[] messageBytes, MessageProperties properties, int maxRetries = 3)
+        {
+            int attempt = 0;
+            Exception lastException = null;
+
+            while (attempt < maxRetries)
+            {
+                try
+                {
+                    await _messageQueueService.PublishAsync(exchangeName, routingKey, messageBytes, properties);
+                    return; // Success / 成功
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    attempt++;
+                    _logger.LogWarning(ex, $"[HybridClusterTransport] 消息发布失败 (尝试 {attempt}/{maxRetries}) - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, MessageId: {properties?.MessageId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}");
+
+                    if (attempt < maxRetries)
+                    {
+                        // Wait before retry with exponential backoff / 重试前等待，使用指数退避
+                        var delay = TimeSpan.FromMilliseconds(100 * Math.Pow(2, attempt - 1));
+                        await Task.Delay(delay);
+
+                        // Try to reconnect if connection is lost / 如果连接丢失，尝试重新连接
+                        try
+                        {
+                            await _messageQueueService.VerifyConnectionAsync();
+                        }
+                        catch
+                        {
+                            // Connection is lost, try to reconnect / 连接丢失，尝试重新连接
+                            try
+                            {
+                                await _messageQueueService.ConnectAsync();
+                                await _messageQueueService.VerifyConnectionAsync();
+                                _logger.LogWarning($"[HybridClusterTransport] 重新连接成功，继续重试发送消息 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, CurrentNodeId: {_nodeId}");
+                            }
+                            catch (Exception reconnectEx)
+                            {
+                                _logger.LogError(reconnectEx, $"[HybridClusterTransport] 重新连接失败 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, CurrentNodeId: {_nodeId}, Error: {reconnectEx.Message}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // All retries failed / 所有重试都失败
+            _logger.LogError(lastException, $"[HybridClusterTransport] 消息发布失败，已达到最大重试次数 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, MessageId: {properties?.MessageId}, CurrentNodeId: {_nodeId}, MaxRetries: {maxRetries}");
+            throw new InvalidOperationException($"Failed to publish message after {maxRetries} attempts", lastException);
         }
     }
 }

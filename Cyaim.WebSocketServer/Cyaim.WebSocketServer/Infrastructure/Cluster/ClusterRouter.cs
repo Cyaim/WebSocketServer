@@ -71,6 +71,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// </summary>
         private readonly ConcurrentDictionary<string, StreamChunkBuffer> _streamChunks;
 
+        // Pending connection queries: connectionId -> task completion source / 待查询的连接：连接ID -> 任务完成源
+        /// <summary>
+        /// Pending connection queries / 待查询的连接
+        /// </summary>
+        private readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _pendingConnectionQueries;
+
         /// <summary>
         /// Constructor / 构造函数
         /// </summary>
@@ -92,6 +98,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             _nodeConnectionCounts = new ConcurrentDictionary<string, int>();
             _pendingForwards = new ConcurrentDictionary<string, TaskCompletionSource<byte[]>>();
             _streamChunks = new ConcurrentDictionary<string, StreamChunkBuffer>();
+            _pendingConnectionQueries = new ConcurrentDictionary<string, TaskCompletionSource<string>>();
 
             _transport.MessageReceived += OnTransportMessageReceived;
             _transport.NodeDisconnected += OnNodeDisconnected;
@@ -370,26 +377,56 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             }
             else
             {
-                // Connection not found - query cluster to find the node / 未找到连接 - 查询集群以找到节点
-                // 无论是否为 leader，都尝试查询连接位置（因为连接可能在其他节点）
-                // Whether leader or not, try to query connection location (connection might be on another node)
-                _logger.LogError($"[ClusterRouter] 连接不在本地路由表中 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, RoutingTableSize: {_connectionRoutes.Count}, 开始查询集群...");
+                // Connection not found in local routing table - query Redis directly (hybrid transport model)
+                // 连接不在本地路由表中 - 直接从 Redis 查询（混合传输模型）
+                // 在混合传输模型下，其他节点的连接不维护在内存中，每次都从 Redis 查询
+                // In hybrid transport model, other nodes' connections are not maintained in memory, query from Redis each time
+                _logger.LogWarning($"[ClusterRouter] 连接不在本地路由表中，直接从 Redis 查询 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}, RoutingTableSize: {_connectionRoutes.Count}");
 
-                // 先检查路由表中是否有类似的前缀匹配（用于调试）
-                var similarConnections = _connectionRoutes.Keys.Where(k => k.StartsWith(connectionId.Substring(0, Math.Min(10, connectionId.Length)))).Take(5).ToArray();
-                if (similarConnections.Length > 0)
+                // 优先从 Redis 查询（如果传输层支持）
+                // First try to query from Redis (if transport supports it)
+                var nodeId = await _transport.GetConnectionRouteAsync(connectionId);
+
+                if (!string.IsNullOrEmpty(nodeId))
                 {
-                    _logger.LogWarning($"[ClusterRouter] 发现类似连接ID（用于调试）- ConnectionId: {connectionId}, 类似连接: {string.Join(", ", similarConnections)}");
+                    // 在混合传输模型下，只将本地连接添加到路由表
+                    // In hybrid transport model, only add local connections to routing table
+                    if (nodeId == _nodeId)
+                    {
+                        // 本地连接，添加到路由表并直接处理
+                        // Local connection, add to routing table and handle directly
+                        _connectionRoutes.AddOrUpdate(connectionId, nodeId, (key, oldValue) => nodeId);
+                        _logger.LogWarning($"[ClusterRouter] 从 Redis 查询成功（本地连接）- ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+
+                        // 重新尝试路由（现在应该在路由表中）
+                        // Retry routing (should be in routing table now)
+                        return await RouteMessageAsync(connectionId, data, messageType, localHandler);
+                    }
+                    else
+                    {
+                        // 远程连接，直接转发，不添加到路由表
+                        // Remote connection, forward directly, don't add to routing table
+                        _logger.LogWarning($"[ClusterRouter] 从 Redis 查询成功（远程连接），直接转发 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                        var result = await ForwardToNodeAsync(nodeId, connectionId, data, messageType);
+                        if (!result)
+                        {
+                            _logger.LogError($"[ClusterRouter] 从 Redis 查询后转发失败 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                        }
+                        return result;
+                    }
                 }
 
+                // 如果 Redis 查询失败，使用广播方式查询（向后兼容）
+                // If Redis query fails, use broadcast query (backward compatibility)
+                _logger.LogWarning($"[ClusterRouter] Redis 查询失败，使用广播查询 - ConnectionId: {connectionId}, CurrentNodeId: {_nodeId}");
                 var found = await QueryConnectionAsync(connectionId);
                 if (found != null)
                 {
-                    _logger.LogWarning($"[ClusterRouter] 查询成功找到连接 - ConnectionId: {connectionId}, FoundNodeId: {found}, CurrentNodeId: {_nodeId}, 开始转发消息");
+                    _logger.LogWarning($"[ClusterRouter] 广播查询成功找到连接 - ConnectionId: {connectionId}, FoundNodeId: {found}, CurrentNodeId: {_nodeId}, 开始转发消息");
                     var result = await ForwardToNodeAsync(found, connectionId, data, messageType);
                     if (!result)
                     {
-                        _logger.LogError($"[ClusterRouter] 查询后转发失败 - ConnectionId: {connectionId}, FoundNodeId: {found}, CurrentNodeId: {_nodeId}");
+                        _logger.LogError($"[ClusterRouter] 广播查询后转发失败 - ConnectionId: {connectionId}, FoundNodeId: {found}, CurrentNodeId: {_nodeId}");
                     }
                     return result;
                 }
@@ -680,18 +717,26 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
             if (!string.IsNullOrEmpty(nodeId))
             {
-                // 更新本地路由表缓存
-                // Update local routing table cache
-                _connectionRoutes.AddOrUpdate(connectionId, nodeId, (key, oldValue) => nodeId);
-                _logger.LogWarning($"[ClusterRouter] 通过传输层查询成功 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                // 在混合传输模型下，只将本地连接添加到路由表，其他节点的连接不维护在内存中
+                // In hybrid transport model, only add local connections to routing table, other nodes' connections are not maintained in memory
+                if (nodeId == _nodeId)
+                {
+                    // 本地连接，添加到路由表
+                    // Local connection, add to routing table
+                    _connectionRoutes.AddOrUpdate(connectionId, nodeId, (key, oldValue) => nodeId);
+                    _logger.LogWarning($"[ClusterRouter] 通过传输层查询成功（本地连接）- ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                }
+                else
+                {
+                    // 远程连接，不添加到路由表，直接从 Redis 查询即可
+                    // Remote connection, don't add to routing table, query directly from Redis
+                    _logger.LogWarning($"[ClusterRouter] 通过传输层查询成功（远程连接，不缓存）- ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                }
                 return nodeId;
             }
 
             // 如果传输层不支持查询或查询失败，使用广播方式（向后兼容）
             // If transport doesn't support query or query failed, use broadcast (backward compatibility)
-            // 记录当前路由表中的一些连接ID（用于调试）
-            var sampleConnections = _connectionRoutes.Keys.Take(10).ToArray();
-            _logger.LogWarning($"[ClusterRouter] 路由表示例连接（前10个）: {string.Join(", ", sampleConnections)}");
 
             // 为查询消息生成唯一的 MessageId，避免被去重逻辑过滤
             // Generate unique MessageId for query message to avoid being filtered by deduplication logic
@@ -716,22 +761,44 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 return null;
             }
 
-            // Wait for response with retries / 等待响应，带重试
-            // 增加等待时间，因为网络延迟可能导致响应较慢
-            // Increase wait time as network latency may cause slower responses
-            for (int i = 0; i < 10; i++) // 增加到10次重试，总共最多500ms
-            {
-                await Task.Delay(50); // 每次等待50ms
+            // Wait for response using TaskCompletionSource / 使用 TaskCompletionSource 等待响应
+            // 在混合传输模型下，远程连接不会添加到路由表，所以不能依赖路由表更新
+            // In hybrid transport model, remote connections are not added to routing table, so cannot rely on routing table updates
+            var tcs = new TaskCompletionSource<string>();
+            _pendingConnectionQueries.TryAdd(connectionId, tcs);
 
-                if (_connectionRoutes.TryGetValue(connectionId, out var foundNodeId))
+            try
+            {
+                // Wait for response with timeout (1 second) / 等待响应，带超时（1秒）
+                using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1)))
                 {
-                    _logger.LogWarning($"[ClusterRouter] 查询成功 - ConnectionId: {connectionId}, NodeId: {foundNodeId}, 查询次数: {i + 1}, CurrentNodeId: {_nodeId}, 路由表大小: {_connectionRoutes.Count}");
+                    cts.Token.Register(() => tcs.TrySetCanceled());
+                    var foundNodeId = await tcs.Task;
+
+                    // 在混合传输模型下，只将本地连接添加到路由表
+                    // In hybrid transport model, only add local connections to routing table
+                    if (foundNodeId == _nodeId)
+                    {
+                        _connectionRoutes.AddOrUpdate(connectionId, foundNodeId, (key, oldValue) => foundNodeId);
+                        _logger.LogWarning($"[ClusterRouter] 广播查询成功（本地连接）- ConnectionId: {connectionId}, NodeId: {foundNodeId}, CurrentNodeId: {_nodeId}");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"[ClusterRouter] 广播查询成功（远程连接，不缓存）- ConnectionId: {connectionId}, NodeId: {foundNodeId}, CurrentNodeId: {_nodeId}");
+                    }
+
                     return foundNodeId;
                 }
             }
-
-            _logger.LogError($"[ClusterRouter] 查询失败 - ConnectionId: {connectionId} 在集群中未找到，当前路由表连接数: {_connectionRoutes.Count}, CurrentNodeId: {_nodeId}。可能原因：1) 连接未注册 2) 注册广播未到达其他节点 3) 其他节点未处理注册消息");
-            return null;
+            catch (OperationCanceledException)
+            {
+                _logger.LogError($"[ClusterRouter] 查询超时 - ConnectionId: {connectionId} 在集群中未找到，当前路由表连接数: {_connectionRoutes.Count}, CurrentNodeId: {_nodeId}。可能原因：1) 连接未注册 2) 注册广播未到达其他节点 3) 其他节点未处理注册消息");
+                return null;
+            }
+            finally
+            {
+                _pendingConnectionQueries.TryRemove(connectionId, out _);
+            }
         }
 
         /// <summary>
@@ -1132,14 +1199,26 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 _logger.LogWarning($"[ClusterRouter] 收到连接注册消息 - FromNodeId: {message.FromNodeId}, CurrentNodeId: {_nodeId}");
 
                 var registration = JsonSerializer.Deserialize<WebSocketConnectionRegistration>(message.Payload);
-                _logger.LogWarning($"[ClusterRouter] 解析连接注册 - ConnectionId: {registration.ConnectionId}, NodeId: {registration.NodeId}, CurrentNodeId: {_nodeId}");
+                _logger.LogWarning($"[ClusterRouter] 解析连接注册 - ConnectionId: {registration.ConnectionId}, NodeId: {registration.NodeId}, CurrentNodeId: {_nodeId}, ToNodeId: {message.ToNodeId}");
 
-                // 如果使用 Redis，连接路由信息应该已经在 Redis 中，这里只需要更新本地缓存
-                // If using Redis, connection route info should already be in Redis, just update local cache here
-                // 如果未使用 Redis，则从广播消息中更新路由表（向后兼容）
-                // If not using Redis, update routing table from broadcast message (backward compatibility)
+                // 如果这是查询响应（ToNodeId 是当前节点），设置查询结果
+                // If this is a query response (ToNodeId is current node), set query result
+                if (!string.IsNullOrEmpty(message.ToNodeId) && message.ToNodeId == _nodeId)
+                {
+                    if (_pendingConnectionQueries.TryRemove(registration.ConnectionId, out var queryTcs))
+                    {
+                        queryTcs.TrySetResult(registration.NodeId);
+                        _logger.LogWarning($"[ClusterRouter] 设置查询结果（查询响应）- ConnectionId: {registration.ConnectionId}, NodeId: {registration.NodeId}, CurrentNodeId: {_nodeId}");
+                        return; // 查询响应已处理，不需要继续处理注册逻辑
+                    }
+                }
+
+                // 在混合传输模型下，只维护本地节点的连接，其他节点的连接不维护在内存中
+                // In hybrid transport model, only maintain local node's connections, other nodes' connections are not maintained in memory
                 if (registration.NodeId != _nodeId)
                 {
+                    // 其他节点的连接，不添加到本地路由表，只更新连接计数（用于负载均衡）
+                    // Other nodes' connections, don't add to local routing table, only update connection count (for load balancing)
                     // Check if connection was previously on a different node (transfer case) / 检查连接是否之前在另一个节点上（转移情况）
                     var previousNodeId = _connectionRoutes.GetValueOrDefault(registration.ConnectionId);
                     if (previousNodeId != null && previousNodeId != registration.NodeId)
@@ -1149,19 +1228,18 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
                         // Decrement count for previous node / 减少前一个节点的计数
                         _nodeConnectionCounts.AddOrUpdate(previousNodeId, 0, (key, value) => Math.Max(0, value - 1));
+
+                        // 如果之前错误地添加到了路由表，现在移除（只应该维护本地连接）
+                        // If previously incorrectly added to routing table, remove it now (should only maintain local connections)
+                        if (previousNodeId != _nodeId)
+                        {
+                            _connectionRoutes.TryRemove(registration.ConnectionId, out _);
+                        }
                     }
 
-                    // Update routing table / 更新路由表
-                    _connectionRoutes.AddOrUpdate(registration.ConnectionId, registration.NodeId, (key, oldValue) =>
-                    {
-                        if (oldValue != registration.NodeId)
-                        {
-                            _logger.LogWarning($"[ClusterRouter] 更新路由表 - ConnectionId: {registration.ConnectionId}, OldNodeId: {oldValue}, NewNodeId: {registration.NodeId}, CurrentNodeId: {_nodeId}");
-                        }
-                        return registration.NodeId;
-                    });
-
-                    _logger.LogWarning($"[ClusterRouter] 连接注册处理完成 - ConnectionId: {registration.ConnectionId}, NodeId: {registration.NodeId}, CurrentNodeId: {_nodeId}, 路由表大小: {_connectionRoutes.Count}");
+                    // 不更新路由表（其他节点的连接不维护在内存中）
+                    // Don't update routing table (other nodes' connections are not maintained in memory)
+                    _logger.LogWarning($"[ClusterRouter] 收到其他节点的连接注册消息，不添加到本地路由表 - ConnectionId: {registration.ConnectionId}, NodeId: {registration.NodeId}, CurrentNodeId: {_nodeId}, 路由表大小: {_connectionRoutes.Count}");
 
                     // Store endpoint information if available / 如果可用，存储端点信息
                     if (!string.IsNullOrEmpty(registration.Endpoint))
@@ -1265,9 +1343,21 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     if (!string.IsNullOrEmpty(redisNodeId))
                     {
                         nodeId = redisNodeId;
-                        // 更新本地路由表缓存
-                        _connectionRoutes.AddOrUpdate(connectionId, nodeId, (key, oldValue) => nodeId);
-                        _logger.LogWarning($"[ClusterRouter] 从 Redis 查询成功，更新路由表 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                        // 在混合传输模型下，只将本地连接添加到路由表，其他节点的连接不维护在内存中
+                        // In hybrid transport model, only add local connections to routing table, other nodes' connections are not maintained in memory
+                        if (nodeId == _nodeId)
+                        {
+                            // 本地连接，添加到路由表
+                            // Local connection, add to routing table
+                            _connectionRoutes.AddOrUpdate(connectionId, nodeId, (key, oldValue) => nodeId);
+                            _logger.LogWarning($"[ClusterRouter] 从 Redis 查询成功（本地连接），更新路由表 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                        }
+                        else
+                        {
+                            // 远程连接，不添加到路由表
+                            // Remote connection, don't add to routing table
+                            _logger.LogWarning($"[ClusterRouter] 从 Redis 查询成功（远程连接，不缓存）- ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                        }
                         foundInRoutingTable = true;
                     }
                 }
@@ -1275,6 +1365,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 if (foundInRoutingTable && !string.IsNullOrEmpty(nodeId))
                 {
                     _logger.LogWarning($"[ClusterRouter] 连接已找到 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}, IsLocal: {nodeId == _nodeId}");
+
+                    // 如果有待查询的任务，设置结果
+                    // If there's a pending query task, set the result
+                    if (_pendingConnectionQueries.TryRemove(connectionId, out var queryTcs))
+                    {
+                        queryTcs.TrySetResult(nodeId);
+                        _logger.LogWarning($"[ClusterRouter] 设置查询结果 - ConnectionId: {connectionId}, NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                    }
 
                     // Always respond to query if connection is found, regardless of whether it's local or remote
                     // 如果找到连接，始终响应查询，无论它是本地还是远程连接

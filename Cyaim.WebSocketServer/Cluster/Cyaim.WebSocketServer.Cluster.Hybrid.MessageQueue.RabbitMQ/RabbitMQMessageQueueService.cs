@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions;
@@ -56,7 +57,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             _declaredQueues = new Dictionary<string, (bool, bool, bool)>();
             _queueBindings = new Dictionary<string, List<(string, string)>>();
         }
-         
+
         /// <summary>
         /// Connect to message queue / 连接到消息队列
         /// </summary>
@@ -209,10 +210,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                     var (handler, autoAck) = _consumerHandlers[queueName];
                     _currentNodeIds.TryGetValue(queueName, out var currentNodeId);
                     _logger.LogWarning($"[RabbitMQMessageQueueService] 重新创建消费者 - QueueName: {queueName}, CurrentNodeId: {currentNodeId}");
-                    
+
                     // Remove old consumer from dictionary / 从字典中移除旧消费者
                     _consumers.Remove(queueName);
-                    
+
                     // Recreate consumer / 重新创建消费者
                     var consumer = new AsyncEventingBasicConsumer(_channel);
                     _consumers[queueName] = consumer;
@@ -222,7 +223,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                         try
                         {
                             _logger.LogTrace($"[RabbitMQMessageQueueService] 收到消息 - QueueName: {queueName}, RoutingKey: {ea.RoutingKey}, Exchange: {ea.Exchange}, DeliveryTag: {ea.DeliveryTag}, MessageSize: {ea.Body.Length} bytes");
-                            
+
                             var properties = new MessageProperties
                             {
                                 MessageId = ea.BasicProperties.MessageId,
@@ -246,7 +247,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                             }
 
                             // Early filter: Check if message is from self (for broadcast messages) / 早期过滤：检查消息是否来自自己（用于广播消息）
-                            if (!string.IsNullOrEmpty(currentNodeId) && 
+                            if (!string.IsNullOrEmpty(currentNodeId) &&
                                 properties.Headers.TryGetValue("FromNodeId", out var fromNodeIdObj) &&
                                 fromNodeIdObj?.ToString() == currentNodeId)
                             {
@@ -259,10 +260,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                                 return;
                             }
 
-                    _logger.LogTrace($"[RabbitMQMessageQueueService] 开始处理消息 - QueueName: {queueName}, MessageId: {properties.MessageId}, DeliveryTag: {ea.DeliveryTag}");
-                    var success = await handler(ea.Body.ToArray(), properties);
+                            _logger.LogTrace($"[RabbitMQMessageQueueService] 开始处理消息 - QueueName: {queueName}, MessageId: {properties.MessageId}, DeliveryTag: {ea.DeliveryTag}");
+                            var success = await handler(ea.Body.ToArray(), properties);
                             _logger.LogTrace($"[RabbitMQMessageQueueService] 消息处理完成 - QueueName: {queueName}, MessageId: {properties.MessageId}, Success: {success}, DeliveryTag: {ea.DeliveryTag}");
-                            
+
                             if (!autoAck)
                             {
                                 if (success)
@@ -305,7 +306,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         public async Task VerifyConnectionAsync()
         {
             await EnsureConnectedAsync();
-            
+
             // Additional verification: ensure channel is truly ready / 额外验证：确保 channel 真正就绪
             if (_connection == null || !_connection.IsOpen)
             {
@@ -315,7 +316,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             {
                 throw new InvalidOperationException("RabbitMQ channel is not ready");
             }
-            
+
             // Test channel with a simple operation / 使用简单操作测试 channel
             try
             {
@@ -443,9 +444,9 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             await EnsureChannelAsync().ConfigureAwait(false);
 
             _logger.LogWarning($"[RabbitMQMessageQueueService] 声明交换机 - ExchangeName: {exchangeName}, ExchangeType: {exchangeType}, Durable: {durable}");
-            
+
             await _channel.ExchangeDeclareAsync(exchangeName, exchangeType, durable: durable, autoDelete: false);
-            
+
             _logger.LogWarning($"[RabbitMQMessageQueueService] 交换机声明成功 - ExchangeName: {exchangeName}, ExchangeType: {exchangeType}");
         }
 
@@ -454,20 +455,59 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task<string> DeclareQueueAsync(string queueName, bool durable = false, bool exclusive = false, bool autoDelete = true)
         {
+            if (string.IsNullOrEmpty(queueName))
+            {
+                throw new ArgumentException("Queue name cannot be null or empty", nameof(queueName));
+            }
+
             await EnsureChannelAsync().ConfigureAwait(false);
 
-            _logger.LogWarning($"[RabbitMQMessageQueueService] 声明队列 - QueueName: {queueName}, Durable: {durable}, Exclusive: {exclusive}, AutoDelete: {autoDelete}");
-            
-            var result = await _channel.QueueDeclareAsync(
-                queue: queueName,
-                durable: durable,
-                exclusive: exclusive,
-                autoDelete: autoDelete,
-                arguments: null);
+            if (_channel == null || !_channel.IsOpen)
+            {
+                _logger.LogError($"[RabbitMQMessageQueueService] Channel 未打开，无法声明队列 - QueueName: {queueName}");
+                throw new InvalidOperationException("RabbitMQ channel is not open");
+            }
 
-            _logger.LogWarning($"[RabbitMQMessageQueueService] 队列声明成功 - QueueName: {result.QueueName}, ConsumerCount: {result.ConsumerCount}, MessageCount: {result.MessageCount}");
-            
-            return result.QueueName;
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 开始声明队列 - QueueName: {queueName}, Durable: {durable}, Exclusive: {exclusive}, AutoDelete: {autoDelete}, ChannelIsOpen: {_channel.IsOpen}");
+
+            try
+            {
+                var result = await _channel.QueueDeclareAsync(
+                    queue: queueName,
+                    durable: durable,
+                    exclusive: exclusive,
+                    autoDelete: autoDelete,
+                    arguments: null);
+
+                // 保存队列信息以便重新连接时恢复
+                // Save queue info for reconnection recovery
+                _declaredQueues[queueName] = (durable, exclusive, autoDelete);
+                _logger.LogWarning($"[RabbitMQMessageQueueService] 队列信息已保存 - QueueName: {queueName}, TotalQueues: {_declaredQueues.Count}");
+
+                _logger.LogWarning($"[RabbitMQMessageQueueService] 队列声明成功 - QueueName: {result.QueueName}, ConsumerCount: {result.ConsumerCount}, MessageCount: {result.MessageCount}, Durable: {durable}, Exclusive: {exclusive}, AutoDelete: {autoDelete}");
+
+                // Verify queue exists by checking result / 通过检查结果验证队列是否存在
+                if (string.IsNullOrEmpty(result.QueueName))
+                {
+                    _logger.LogError($"[RabbitMQMessageQueueService] 队列声明返回空名称 - RequestedQueueName: {queueName}");
+                    throw new InvalidOperationException($"Queue declaration returned empty queue name for requested name: {queueName}");
+                }
+
+                if (result.QueueName != queueName)
+                {
+                    _logger.LogWarning($"[RabbitMQMessageQueueService] 队列名称不匹配 - RequestedQueueName: {queueName}, ActualQueueName: {result.QueueName}");
+                    // Update saved queue info with actual queue name / 使用实际队列名称更新保存的队列信息
+                    _declaredQueues.Remove(queueName);
+                    _declaredQueues[result.QueueName] = (durable, exclusive, autoDelete);
+                }
+
+                return result.QueueName;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[RabbitMQMessageQueueService] 队列声明失败 - QueueName: {queueName}, Durable: {durable}, Exclusive: {exclusive}, AutoDelete: {autoDelete}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                throw;
+            }
         }
 
         /// <summary>
@@ -475,13 +515,61 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task BindQueueAsync(string queueName, string exchangeName, string routingKey)
         {
+            if (string.IsNullOrEmpty(queueName))
+            {
+                throw new ArgumentException("Queue name cannot be null or empty", nameof(queueName));
+            }
+            if (string.IsNullOrEmpty(exchangeName))
+            {
+                throw new ArgumentException("Exchange name cannot be null or empty", nameof(exchangeName));
+            }
+            if (string.IsNullOrEmpty(routingKey))
+            {
+                throw new ArgumentException("Routing key cannot be null or empty", nameof(routingKey));
+            }
+
             await EnsureChannelAsync().ConfigureAwait(false);
 
-            _logger.LogWarning($"[RabbitMQMessageQueueService] 绑定队列到交换机 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}");
-            
-            await _channel.QueueBindAsync(queueName, exchangeName, routingKey);
-            
-            _logger.LogWarning($"[RabbitMQMessageQueueService] 队列绑定成功 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}");
+            if (_channel == null || !_channel.IsOpen)
+            {
+                _logger.LogError($"[RabbitMQMessageQueueService] Channel 未打开，无法绑定队列 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}");
+                throw new InvalidOperationException("RabbitMQ channel is not open");
+            }
+
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 开始绑定队列到交换机 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}, ChannelIsOpen: {_channel.IsOpen}");
+
+            try
+            {
+                await _channel.QueueBindAsync(queueName, exchangeName, routingKey);
+                _logger.LogWarning($"[RabbitMQMessageQueueService] 队列绑定操作完成 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}");
+
+                // 保存绑定信息以便重新连接时恢复
+                // Save binding info for reconnection recovery
+                if (!_queueBindings.ContainsKey(queueName))
+                {
+                    _queueBindings[queueName] = new List<(string ExchangeName, string RoutingKey)>();
+                }
+
+                // 检查是否已存在相同的绑定，避免重复添加
+                // Check if the same binding already exists to avoid duplicates
+                var existingBinding = _queueBindings[queueName].FirstOrDefault(b => b.ExchangeName == exchangeName && b.RoutingKey == routingKey);
+                if (existingBinding == default)
+                {
+                    _queueBindings[queueName].Add((exchangeName, routingKey));
+                    _logger.LogWarning($"[RabbitMQMessageQueueService] 绑定信息已保存 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}, TotalBindings: {_queueBindings[queueName].Count}");
+                }
+                else
+                {
+                    _logger.LogTrace($"[RabbitMQMessageQueueService] 绑定信息已存在，跳过保存 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}");
+                }
+
+                _logger.LogWarning($"[RabbitMQMessageQueueService] 队列绑定成功 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}, SavedBindings: {_queueBindings[queueName].Count}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[RabbitMQMessageQueueService] 队列绑定失败 - QueueName: {queueName}, ExchangeName: {exchangeName}, RoutingKey: {routingKey}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                throw;
+            }
         }
 
         /// <summary>
@@ -489,22 +577,55 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task PublishAsync(string exchangeName, string routingKey, byte[] message, MessageProperties properties = null)
         {
-            await EnsureChannelAsync().ConfigureAwait(false);
-
-            if (_channel == null || !_channel.IsOpen)
+            if (string.IsNullOrEmpty(exchangeName))
             {
-                _logger.LogError($"[RabbitMQMessageQueueService] Channel 未打开，无法发布消息 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}");
-                throw new InvalidOperationException("RabbitMQ channel is not open");
+                throw new ArgumentException("Exchange name cannot be null or empty", nameof(exchangeName));
+            }
+            if (string.IsNullOrEmpty(routingKey))
+            {
+                throw new ArgumentException("Routing key cannot be null or empty", nameof(routingKey));
+            }
+            if (message == null || message.Length == 0)
+            {
+                throw new ArgumentException("Message cannot be null or empty", nameof(message));
+            }
+
+            // Ensure channel is ready with retry / 确保 channel 就绪，带重试
+            int retryCount = 0;
+            const int maxRetries = 2;
+            while (retryCount <= maxRetries)
+            {
+                try
+                {
+                    await EnsureChannelAsync().ConfigureAwait(false);
+
+                    if (_channel == null || !_channel.IsOpen)
+                    {
+                        throw new InvalidOperationException("RabbitMQ channel is not open");
+                    }
+                    break; // Success / 成功
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    if (retryCount > maxRetries)
+                    {
+                        _logger.LogError(ex, $"[RabbitMQMessageQueueService] Channel 准备失败，已达到最大重试次数 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, MaxRetries: {maxRetries}");
+                        throw new InvalidOperationException("Failed to prepare RabbitMQ channel after retries", ex);
+                    }
+                    _logger.LogWarning(ex, $"[RabbitMQMessageQueueService] Channel 准备失败，重试中 ({retryCount}/{maxRetries}) - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, Error: {ex.Message}");
+                    await Task.Delay(100 * retryCount); // Exponential backoff / 指数退避
+                }
             }
 
             var basicProperties = new BasicProperties();
-            
+
             if (properties != null)
             {
                 basicProperties.MessageId = properties.MessageId;
                 basicProperties.CorrelationId = properties.CorrelationId;
                 basicProperties.ReplyTo = properties.ReplyTo;
-                
+
                 if (properties.Timestamp.HasValue)
                 {
                     basicProperties.Timestamp = new AmqpTimestamp(
@@ -522,21 +643,36 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             }
 
             _logger.LogWarning($"[RabbitMQMessageQueueService] 发布消息 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, MessageId: {properties?.MessageId}, MessageSize: {message.Length} bytes, ChannelIsOpen: {_channel.IsOpen}");
-            
+
             try
             {
+                // Double-check channel is still open before publishing / 发布前再次检查 channel 是否仍然打开
+                if (_channel == null || !_channel.IsOpen)
+                {
+                    _logger.LogError($"[RabbitMQMessageQueueService] Channel 在发布前关闭 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, MessageId: {properties?.MessageId}");
+                    throw new InvalidOperationException("RabbitMQ channel closed before publishing");
+                }
+
                 await _channel.BasicPublishAsync(
                     exchange: exchangeName,
                     routingKey: routingKey,
                     mandatory: false,
                     basicProperties: basicProperties,
                     body: new ReadOnlyMemory<byte>(message));
-                
-                _logger.LogWarning($"[RabbitMQMessageQueueService] 消息发布成功 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, MessageId: {properties?.MessageId}");
+
+                _logger.LogTrace($"[RabbitMQMessageQueueService] 消息发布成功 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, MessageId: {properties?.MessageId}, MessageSize: {message.Length} bytes");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"[RabbitMQMessageQueueService] 消息发布失败 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}, MessageId: {properties?.MessageId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+
+                // If channel is closed, mark for reconnection / 如果 channel 关闭，标记需要重新连接
+                if (_channel == null || !_channel.IsOpen)
+                {
+                    _logger.LogWarning($"[RabbitMQMessageQueueService] Channel 已关闭，标记需要重新连接 - ExchangeName: {exchangeName}, RoutingKey: {routingKey}");
+                    // Channel will be recreated on next EnsureChannelAsync call / Channel 将在下次 EnsureChannelAsync 调用时重新创建
+                }
+
                 throw;
             }
         }
@@ -546,11 +682,49 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task ConsumeAsync(string queueName, Func<byte[], MessageProperties, Task<bool>> handler, bool autoAck = false, string currentNodeId = null)
         {
+            if (string.IsNullOrEmpty(queueName))
+            {
+                throw new ArgumentException("Queue name cannot be null or empty", nameof(queueName));
+            }
+            if (handler == null)
+            {
+                throw new ArgumentNullException(nameof(handler));
+            }
+
             await EnsureChannelAsync().ConfigureAwait(false);
+
+            if (_channel == null || !_channel.IsOpen)
+            {
+                _logger.LogError($"[RabbitMQMessageQueueService] Channel 未打开，无法启动消费者 - QueueName: {queueName}");
+                throw new InvalidOperationException("RabbitMQ channel is not open");
+            }
+
+            // Verify queue exists before consuming / 消费前验证队列是否存在
+            try
+            {
+                _logger.LogWarning($"[RabbitMQMessageQueueService] 验证队列是否存在 - QueueName: {queueName}");
+                var queueDeclareResult = await _channel.QueueDeclarePassiveAsync(queueName);
+                _logger.LogWarning($"[RabbitMQMessageQueueService] 队列验证成功 - QueueName: {queueName}, ConsumerCount: {queueDeclareResult.ConsumerCount}, MessageCount: {queueDeclareResult.MessageCount}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[RabbitMQMessageQueueService] 队列验证失败，尝试重新声明 - QueueName: {queueName}, Error: {ex.Message}");
+                // Queue doesn't exist, try to redeclare it / 队列不存在，尝试重新声明
+                if (_declaredQueues.TryGetValue(queueName, out var queueInfo))
+                {
+                    var (durable, exclusive, autoDelete) = queueInfo;
+                    await DeclareQueueAsync(queueName, durable, exclusive, autoDelete);
+                }
+                else
+                {
+                    _logger.LogError($"[RabbitMQMessageQueueService] 队列信息未找到，无法重新声明 - QueueName: {queueName}");
+                    throw new InvalidOperationException($"Queue {queueName} does not exist and cannot be redeclared", ex);
+                }
+            }
 
             // Store handler for reconnection / 存储处理器以便重新连接
             _consumerHandlers[queueName] = (handler, autoAck);
-            
+
             // Store currentNodeId for filtering self-messages / 存储 currentNodeId 以便过滤自己的消息
             if (!string.IsNullOrEmpty(currentNodeId))
             {
@@ -559,7 +733,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
 
             if (_consumers.ContainsKey(queueName))
             {
-                _logger.LogWarning($"Consumer for queue {queueName} already exists, skipping recreation");
+                _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者已存在，跳过重新创建 - QueueName: {queueName}");
                 return;
             }
 
@@ -568,18 +742,21 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             var consumer = new AsyncEventingBasicConsumer(_channel);
             _consumers[queueName] = consumer;
 
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 准备启动消费者 - QueueName: {queueName}, ChannelIsOpen: {_channel.IsOpen}, CurrentConsumers: {_consumers.Count}");
+
             consumer.ReceivedAsync += async (model, ea) =>
             {
                 try
                 {
                     _logger.LogWarning($"[RabbitMQMessageQueueService] 收到消息 - QueueName: {queueName}, RoutingKey: {ea.RoutingKey}, Exchange: {ea.Exchange}, DeliveryTag: {ea.DeliveryTag}, MessageSize: {ea.Body.Length} bytes");
-                    
+
                     var properties = new MessageProperties
                     {
                         MessageId = ea.BasicProperties.MessageId,
                         CorrelationId = ea.BasicProperties.CorrelationId,
                         ReplyTo = ea.BasicProperties.ReplyTo,
                         DeliveryTag = ea.DeliveryTag,
+                        RoutingKey = ea.RoutingKey,
                         Headers = new Dictionary<string, object>()
                     };
 
@@ -597,7 +774,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                     }
 
                     // Early filter: Check if message is from self (for broadcast messages) / 早期过滤：检查消息是否来自自己（用于广播消息）
-                    if (!string.IsNullOrEmpty(currentNodeId) && 
+                    if (!string.IsNullOrEmpty(currentNodeId) &&
                         properties.Headers.TryGetValue("FromNodeId", out var fromNodeIdObj) &&
                         fromNodeIdObj?.ToString() == currentNodeId)
                     {
@@ -613,7 +790,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                     _logger.LogWarning($"[RabbitMQMessageQueueService] 开始处理消息 - QueueName: {queueName}, MessageId: {properties.MessageId}, DeliveryTag: {ea.DeliveryTag}");
                     var success = await handler(ea.Body.ToArray(), properties);
                     _logger.LogWarning($"[RabbitMQMessageQueueService] 消息处理完成 - QueueName: {queueName}, MessageId: {properties.MessageId}, Success: {success}, DeliveryTag: {ea.DeliveryTag}");
-                    
+
                     if (!autoAck)
                     {
                         if (success)
@@ -638,8 +815,30 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 }
             };
 
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 准备启动消费者 - QueueName: {queueName}, AutoAck: {autoAck}, ChannelIsOpen: {_channel.IsOpen}, CurrentConsumers: {_consumers.Count}");
+
             var consumerTag = await _channel.BasicConsumeAsync(queueName, autoAck, consumer);
-            _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者已启动 - QueueName: {queueName}, ConsumerTag: {consumerTag}, AutoAck: {autoAck}");
+
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者启动成功 - QueueName: {queueName}, ConsumerTag: {consumerTag}, AutoAck: {autoAck}, TotalConsumers: {_consumers.Count}");
+
+            // Verify consumer is actually consuming by checking queue status / 通过检查队列状态验证消费者确实在消费
+            // Note: QueueDeclarePassiveAsync will throw if queue doesn't exist
+            // 注意：如果队列不存在，QueueDeclarePassiveAsync 会抛出异常
+            try
+            {
+                var queueInfo = await _channel.QueueDeclarePassiveAsync(queueName);
+                _logger.LogWarning($"[RabbitMQMessageQueueService] 队列状态确认 - QueueName: {queueName}, ConsumerCount: {queueInfo.ConsumerCount}, MessageCount: {queueInfo.MessageCount}, QueueExists: true");
+
+                if (queueInfo.ConsumerCount == 0)
+                {
+                    _logger.LogWarning($"[RabbitMQMessageQueueService] 警告：队列消费者数量为 0，但消费者已启动 - QueueName: {queueName}, ConsumerTag: {consumerTag}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[RabbitMQMessageQueueService] 队列状态确认失败 - QueueName: {queueName}, Error: {ex.Message}");
+                // Don't throw - consumer might still work / 不抛出异常 - 消费者可能仍然有效
+            }
         }
 
         /// <summary>

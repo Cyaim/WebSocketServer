@@ -63,7 +63,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
             // Heartbeat every 5 seconds / 每 5 秒发送一次心跳
             _heartbeatTimer = new Timer(SendHeartbeat, null, TimeSpan.Zero, TimeSpan.FromSeconds(5));
-            
+
             // Discover nodes every 5 seconds (more frequent to catch nodes faster) / 每 5 秒发现一次节点（更频繁以更快捕获节点）
             _discoveryTimer = new Timer(DiscoverNodes, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5));
         }
@@ -145,7 +145,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             {
                 var key = $"{_clusterPrefix}:nodes:{_nodeId}";
                 var value = JsonSerializer.Serialize(_nodeInfo);
-                
+
                 // Set node info with 30 seconds expiration, will be refreshed by heartbeat / 设置节点信息，30 秒过期，由心跳刷新
                 await _redisService.SetAsync(key, value, TimeSpan.FromSeconds(30));
 
@@ -238,7 +238,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 var key = $"{_clusterPrefix}:nodes:{_nodeId}";
                 var value = JsonSerializer.Serialize(_nodeInfo);
-                
+
                 // Refresh node info with 30 seconds expiration / 刷新节点信息，30 秒过期
                 await _redisService.SetAsync(key, value, TimeSpan.FromSeconds(30));
             }
@@ -268,7 +268,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             {
                 var pattern = $"{_clusterPrefix}:nodes:*";
                 _logger.LogWarning($"[RedisNodeDiscoveryService] 开始发现节点 - Pattern: {pattern}, CurrentNodeId: {_nodeId}");
-                
+
                 var nodes = await _redisService.GetValuesAsync(pattern);
                 _logger.LogWarning($"[RedisNodeDiscoveryService] 从 Redis 获取到节点数据 - Pattern: {pattern}, FoundKeys: {nodes.Count}, CurrentNodeId: {_nodeId}");
 
@@ -279,12 +279,12 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     try
                     {
                         _logger.LogWarning($"[RedisNodeDiscoveryService] 处理节点数据 - Key: {kvp.Key}, ValueLength: {kvp.Value?.Length ?? 0}, CurrentNodeId: {_nodeId}");
-                        
+
                         var nodeInfo = JsonSerializer.Deserialize<NodeInfo>(kvp.Value);
                         if (nodeInfo != null)
                         {
                             _logger.LogWarning($"[RedisNodeDiscoveryService] 解析节点信息成功 - Key: {kvp.Key}, NodeId: {nodeInfo.NodeId}, CurrentNodeId: {_nodeId}, LastHeartbeat: {nodeInfo.LastHeartbeat}");
-                            
+
                             if (nodeInfo.NodeId != _nodeId)
                             {
                                 discoveredNodeIds.Add(nodeInfo.NodeId);
@@ -292,7 +292,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                                 // Check if node is still alive (heartbeat within 60 seconds) / 检查节点是否仍然存活（60 秒内有心跳）
                                 var timeSinceHeartbeat = DateTime.UtcNow - nodeInfo.LastHeartbeat;
                                 _logger.LogWarning($"[RedisNodeDiscoveryService] 检查节点存活状态 - NodeId: {nodeInfo.NodeId}, TimeSinceHeartbeat: {timeSinceHeartbeat.TotalSeconds}秒, IsAlive: {timeSinceHeartbeat < TimeSpan.FromSeconds(60)}");
-                                
+
                                 if (timeSinceHeartbeat < TimeSpan.FromSeconds(60))
                                 {
                                     _logger.LogWarning($"[RedisNodeDiscoveryService] 触发节点发现事件 - NodeId: {nodeInfo.NodeId}, Address: {nodeInfo.Address}, Port: {nodeInfo.Port}");
@@ -321,12 +321,54 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                         _logger.LogError(ex, $"[RedisNodeDiscoveryService] 反序列化节点信息失败 - Key: {kvp.Key}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                     }
                 }
-                
+
                 _logger.LogWarning($"[RedisNodeDiscoveryService] 节点发现完成 - Pattern: {pattern}, DiscoveredNodeCount: {discoveredNodeIds.Count}, DiscoveredNodes: {string.Join(", ", discoveredNodeIds)}, CurrentNodeId: {_nodeId}");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"[RedisNodeDiscoveryService] 发现节点失败 - Pattern: {_clusterPrefix}:nodes:*, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+            }
+        }
+
+        /// <summary>
+        /// Get node information by node ID / 根据节点 ID 获取节点信息
+        /// </summary>
+        /// <param name="nodeId">Node ID / 节点 ID</param>
+        /// <returns>Node information or null if not found / 节点信息，如果未找到则返回 null</returns>
+        public async Task<NodeInfo> GetNodeInfoAsync(string nodeId)
+        {
+            if (string.IsNullOrEmpty(nodeId))
+            {
+                return null;
+            }
+
+            try
+            {
+                var key = $"{_clusterPrefix}:nodes:{nodeId}";
+                var value = await _redisService.GetAsync(key);
+
+                if (string.IsNullOrEmpty(value))
+                {
+                    _logger.LogTrace($"[RedisNodeDiscoveryService] 节点信息未找到 - NodeId: {nodeId}, Key: {key}, CurrentNodeId: {_nodeId}");
+                    return null;
+                }
+
+                var nodeInfo = JsonSerializer.Deserialize<NodeInfo>(value);
+                if (nodeInfo != null)
+                {
+                    _logger.LogTrace($"[RedisNodeDiscoveryService] 获取节点信息成功 - NodeId: {nodeId}, Key: {key}, CurrentNodeId: {_nodeId}, LastHeartbeat: {nodeInfo.LastHeartbeat}");
+                }
+                else
+                {
+                    _logger.LogWarning($"[RedisNodeDiscoveryService] 节点信息反序列化失败 - NodeId: {nodeId}, Key: {key}, Value: {value}, CurrentNodeId: {_nodeId}");
+                }
+
+                return nodeInfo;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[RedisNodeDiscoveryService] 获取节点信息失败 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                return null;
             }
         }
 
@@ -391,7 +433,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 var key = $"{_clusterPrefix}:nodes:{_nodeId}";
                 var value = JsonSerializer.Serialize(_nodeInfo);
-                
+
                 await _redisService.SetAsync(key, value, TimeSpan.FromSeconds(30));
 
                 // Publish node update event / 发布节点更新事件
