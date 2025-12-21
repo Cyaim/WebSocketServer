@@ -453,7 +453,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// <summary>
         /// Declare a queue / 声明队列
         /// </summary>
-        public async Task<string> DeclareQueueAsync(string queueName, bool durable = false, bool exclusive = false, bool autoDelete = true)
+        public async Task<string> DeclareQueueAsync(string queueName, bool durable = false, bool exclusive = false, bool autoDelete = false)
         {
             if (string.IsNullOrEmpty(queueName))
             {
