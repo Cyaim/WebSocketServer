@@ -208,19 +208,12 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 _logger.LogWarning($"[HybridClusterTransport] 消费者启动完成 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
 
-                // Verify queue and consumer still exist after a short delay / 短暂延迟后验证队列和消费者是否仍然存在
-                await Task.Delay(500); // Wait 500ms to ensure consumer is fully registered / 等待 500ms 确保消费者已完全注册
-                await VerifyQueueAndConsumerAsync(_queueName);
-
                 // Start periodic binding health check / 启动定期绑定健康检查
                 _bindingHealthCheckTimer = new Timer(async _ => await CheckAndRepairBindingsAsync(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5));
 
                 // Wait a bit for initial node discovery / 等待初始节点发现
                 _logger.LogWarning($"[HybridClusterTransport] 等待初始节点发现... - NodeId: {_nodeId}");
                 await Task.Delay(2000); // Wait 2 seconds for initial discovery / 等待 2 秒进行初始发现
-
-                // Verify queue and consumer still exist after discovery delay / 发现延迟后再次验证队列和消费者是否仍然存在
-                await VerifyQueueAndConsumerAsync(_queueName);
 
                 // Log discovered nodes / 记录发现的节点
                 var discoveredNodes = GetKnownNodeIds();
@@ -1116,21 +1109,14 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             {
                 _logger.LogWarning($"[HybridClusterTransport] 开始验证队列和消费者 - QueueName: {queueName}, CurrentNodeId: {_nodeId}");
 
-                // Verify connection is ready / 验证连接已就绪
-                await _messageQueueService.VerifyConnectionAsync();
-
-                // Try to verify queue exists using passive declare / 尝试使用被动声明验证队列是否存在
-                // This will throw if queue doesn't exist / 如果队列不存在会抛出异常
+                // 直接验证队列是否存在，不调用 VerifyConnectionAsync 避免死锁
+                // Directly verify queue exists, don't call VerifyConnectionAsync to avoid deadlock
+                // ConsumeAsync 内部会确保连接和 channel 就绪
+                // ConsumeAsync will ensure connection and channel are ready internally
                 try
                 {
-                    // Note: We can't directly check consumer count from HybridClusterTransport,
-                    // but we can verify the queue exists and re-create consumer if needed
-                    // 注意：我们无法直接从 HybridClusterTransport 检查消费者数量，
-                    // 但我们可以验证队列是否存在，并在需要时重新创建消费者
-                    await VerifyQueueExistsAsync(queueName);
-
-                    // Re-create consumer if it might have been lost / 如果消费者可能丢失，重新创建
-                    // This ensures consumer is always active / 这确保消费者始终处于活动状态
+                    // 尝试重新创建消费者，如果消费者已存在会跳过
+                    // Try to recreate consumer, will skip if consumer already exists
                     _logger.LogWarning($"[HybridClusterTransport] 重新验证消费者 - QueueName: {queueName}, CurrentNodeId: {_nodeId}");
                     await _messageQueueService.ConsumeAsync(queueName, HandleMessageAsync, autoAck: false, currentNodeId: _nodeId);
 
@@ -1138,21 +1124,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, $"[HybridClusterTransport] 队列或消费者验证失败，尝试恢复 - QueueName: {queueName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}");
-
-                    // Try to recover by re-declaring queue and re-creating consumer / 尝试通过重新声明队列和重新创建消费者来恢复
-                    try
-                    {
-                        _logger.LogWarning($"[HybridClusterTransport] 尝试恢复队列和消费者 - QueueName: {queueName}, CurrentNodeId: {_nodeId}");
-                        await VerifyQueueExistsAsync(queueName);
-                        await _messageQueueService.ConsumeAsync(queueName, HandleMessageAsync, autoAck: false, currentNodeId: _nodeId);
-                        _logger.LogWarning($"[HybridClusterTransport] 队列和消费者恢复成功 - QueueName: {queueName}, CurrentNodeId: {_nodeId}");
-                    }
-                    catch (Exception recoverEx)
-                    {
-                        _logger.LogError(recoverEx, $"[HybridClusterTransport] 队列和消费者恢复失败 - QueueName: {queueName}, CurrentNodeId: {_nodeId}, Error: {recoverEx.Message}");
-                        throw;
-                    }
+                    _logger.LogWarning(ex, $"[HybridClusterTransport] 消费者验证失败（可能已存在），跳过 - QueueName: {queueName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}");
+                    // 消费者可能已存在，这是正常的 / Consumer might already exist, this is normal
                 }
             }
             catch (Exception ex)
@@ -1183,7 +1156,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 // Try to declare queue again to verify it exists / 尝试再次声明队列以验证它是否存在
                 // This will return the existing queue if it exists, or create it if it doesn't
                 // 如果队列存在则返回现有队列，如果不存在则创建它
-                var verifiedQueueName = await _messageQueueService.DeclareQueueAsync(queueName, durable: false, exclusive: false, autoDelete: true);
+                var verifiedQueueName = await _messageQueueService.DeclareQueueAsync(queueName, durable: false, exclusive: false, autoDelete: false);
 
                 if (string.IsNullOrEmpty(verifiedQueueName))
                 {
