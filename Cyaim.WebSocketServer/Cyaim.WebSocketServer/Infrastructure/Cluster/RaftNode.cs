@@ -65,11 +65,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         /// <summary>
         /// Minimum election timeout in milliseconds / 最小选举超时（毫秒）
         /// </summary>
-        private readonly int _electionTimeoutMin = 150;
+        private readonly int _electionTimeoutMin = 1500;
         /// <summary>
         /// Maximum election timeout in milliseconds / 最大选举超时（毫秒）
         /// </summary>
-        private readonly int _electionTimeoutMax = 300;
+        private readonly int _electionTimeoutMax = 3000;
         /// <summary>
         /// Heartbeat interval in milliseconds / 心跳间隔（毫秒）
         /// 默认 1000ms，避免过于频繁的心跳导致日志和 MQ 压力过大
@@ -180,6 +180,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 CurrentTerm++;
                 State = RaftNodeState.Candidate;
                 VotedFor = _nodeId;
+                // 更新心跳时间，确保选举定时器从当前时间开始计算
+                _lastHeartbeatTime = DateTime.UtcNow;
                 _logger.LogInformation($"Node {_nodeId} became Candidate in term {CurrentTerm}");
 
                 // Start election / 开始选举
@@ -309,21 +311,21 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 if (isTwoNodeCluster)
                 {
                     _logger.LogInformation($"Two-node cluster detected. Using network quality-based leader selection.");
-                    
+
                     // Add a small random delay to avoid simultaneous elections / 添加小的随机延迟以避免同时选举
                     var randomDelay = new Random().Next(100, 300);
                     await Task.Delay(randomDelay);
-                    
+
                     // Re-check state in case we received a heartbeat from the other node / 重新检查状态，以防我们从另一个节点收到心跳
                     if (State != RaftNodeState.Candidate)
                     {
                         _logger.LogInformation($"Node {_nodeId} state changed during delay, aborting leader selection");
                         return;
                     }
-                    
+
                     // For 2-node clusters, select leader based on network quality / 对于2节点集群，基于网络质量选择Leader
                     var shouldBecomeLeader = await ShouldBecomeLeaderBasedOnNetworkQuality(knownNodes);
-                    
+
                     if (shouldBecomeLeader)
                     {
                         _logger.LogInformation($"Node {_nodeId} selected as leader based on network quality in 2-node cluster");
@@ -450,14 +452,22 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                 return; // Leaders don't need election timer / 领导者不需要选举定时器
             }
 
-            var timeout = new Random().Next(_electionTimeoutMin, _electionTimeoutMax);
+            // 如果是 Candidate 状态，使用更长的超时时间，确保选举有足够时间完成
+            // If in Candidate state, use longer timeout to ensure election has enough time to complete
+            var timeout = State == RaftNodeState.Candidate
+                ? new Random().Next(_electionTimeoutMax, _electionTimeoutMax * 2)
+                : new Random().Next(_electionTimeoutMin, _electionTimeoutMax);
+
             _electionTimer = new Timer(async _ =>
             {
-                if (State != RaftNodeState.Leader &&
-                    (DateTime.UtcNow - _lastHeartbeatTime).TotalMilliseconds > timeout)
+                lock (_stateLock)
                 {
-                    _logger.LogInformation($"Election timeout reached for node {_nodeId}");
-                    BecomeCandidate();
+                    if (State != RaftNodeState.Leader &&
+                        (DateTime.UtcNow - _lastHeartbeatTime).TotalMilliseconds > timeout)
+                    {
+                        _logger.LogInformation($"Election timeout reached for node {_nodeId} (State: {State}, Timeout: {timeout}ms)");
+                        BecomeCandidate();
+                    }
                 }
             }, null, timeout, Timeout.Infinite);
         }
@@ -470,7 +480,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         private void OnMessageReceived(object sender, ClusterMessageEventArgs e)
         {
             _logger.LogWarning($"[RaftNode] OnMessageReceived 被调用 - NodeId: {_nodeId}, MessageType: {e.Message.Type}, FromNodeId: {e.Message.FromNodeId}, ToNodeId: {e.Message.ToNodeId}, MessageId: {e.Message.MessageId}");
-            
+
             _lastHeartbeatTime = DateTime.UtcNow;
 
             switch (e.Message.Type)
@@ -502,7 +512,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             try
             {
                 _logger.LogWarning($"[RaftNode] HandleRequestVote 开始处理 - NodeId: {_nodeId}, FromNodeId: {message.FromNodeId}, PayloadLength: {message.Payload?.Length ?? 0}");
-                
+
                 var request = System.Text.Json.JsonSerializer.Deserialize<RequestVoteMessage>(message.Payload);
                 _logger.LogWarning($"[RaftNode] RequestVote 解析成功 - NodeId: {_nodeId}, RequestTerm: {request.Term}, CandidateId: {request.CandidateId}, CurrentTerm: {CurrentTerm}, VotedFor: {VotedFor}");
 
@@ -803,11 +813,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     if (transportType.Name == "HybridClusterTransport" || transportType.FullName?.Contains("HybridClusterTransport") == true)
                     {
                         _logger.LogWarning($"[RaftNode] Transport is HybridClusterTransport, attempting to get known nodes");
-                        
+
                         // First try public method GetKnownNodeIds / 首先尝试公共方法 GetKnownNodeIds
-                        var getKnownNodeIdsMethod = transportType.GetMethod("GetKnownNodeIds", 
+                        var getKnownNodeIdsMethod = transportType.GetMethod("GetKnownNodeIds",
                             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                        
+
                         if (getKnownNodeIdsMethod != null)
                         {
                             var result = getKnownNodeIdsMethod.Invoke(_transport, null);
@@ -823,14 +833,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                                 }
                             }
                         }
-                        
+
                         // Fallback to reflection if method not found / 如果方法未找到，回退到反射
                         if (nodeIds.Count == 0)
                         {
                             _logger.LogWarning($"[RaftNode] GetKnownNodeIds() returned no nodes, trying reflection");
-                            var knownNodesField = transportType.GetField("_knownNodes", 
+                            var knownNodesField = transportType.GetField("_knownNodes",
                                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                            
+
                             if (knownNodesField != null)
                             {
                                 var knownNodesDict = knownNodesField.GetValue(_transport);
@@ -848,7 +858,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                                 }
                             }
                         }
-                        
+
                         // If no nodes found via reflection, fall back to cluster configuration
                         // 如果通过反射没有找到节点，回退到集群配置
                         if (nodeIds.Count == 0)
@@ -953,7 +963,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                         // Also consider: if we can't measure the other node's quality to us,
                         // we'll use a tie-breaker (node ID comparison)
                         // 同时考虑：如果我们无法测量另一个节点到我们的质量，我们将使用平局决胜（节点ID比较）
-                        
+
                         if (myTotalQuality > otherQuality)
                         {
                             _logger.LogInformation($"Node {_nodeId} has better network quality ({myTotalQuality} vs {otherQuality}), becoming leader");
