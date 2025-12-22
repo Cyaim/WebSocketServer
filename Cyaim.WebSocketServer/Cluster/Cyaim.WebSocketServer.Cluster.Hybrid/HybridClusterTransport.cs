@@ -203,9 +203,47 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 // Start consuming messages / 开始消费消息
                 // Pass currentNodeId to enable early filtering of self-messages / 传递 currentNodeId 以启用早期过滤自己的消息
-                await _messageQueueService.ConsumeAsync(_queueName, HandleMessageAsync, autoAck: false, currentNodeId: _nodeId);
+                try
+                {
+                    _logger.LogWarning($"[HybridClusterTransport] 开始启动消费者 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
+                    await _messageQueueService.ConsumeAsync(_queueName, HandleMessageAsync, autoAck: false, currentNodeId: _nodeId);
+                    _logger.LogWarning($"[HybridClusterTransport] 消费者启动完成 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
 
-                _logger.LogWarning($"[HybridClusterTransport] 消费者启动完成 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
+                    // Verify consumer was actually created / 验证消费者是否真的已创建
+                    await Task.Delay(1000); // Wait 1 second for consumer to register / 等待 1 秒让消费者注册
+                    try
+                    {
+                        var consumerCount = await _messageQueueService.GetQueueConsumerCountAsync(_queueName);
+                        _logger.LogWarning($"[HybridClusterTransport] 消费者启动后验证 - QueueName: {_queueName}, ConsumerCount: {consumerCount}, CurrentNodeId: {_nodeId}");
+                        
+                        if (consumerCount == 0)
+                        {
+                            _logger.LogError($"[HybridClusterTransport] 错误：消费者启动后数量为 0，消费者可能未成功注册 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
+                            // Try to recreate consumer / 尝试重新创建消费者
+                            _logger.LogWarning($"[HybridClusterTransport] 尝试重新创建消费者 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
+                            await _messageQueueService.ConsumeAsync(_queueName, HandleMessageAsync, autoAck: false, currentNodeId: _nodeId);
+                            await Task.Delay(1000);
+                            var newConsumerCount = await _messageQueueService.GetQueueConsumerCountAsync(_queueName);
+                            _logger.LogWarning($"[HybridClusterTransport] 消费者重新创建后验证 - QueueName: {_queueName}, ConsumerCount: {newConsumerCount}, CurrentNodeId: {_nodeId}");
+                            
+                            if (newConsumerCount == 0)
+                            {
+                                _logger.LogError($"[HybridClusterTransport] 严重错误：消费者重新创建后数量仍为 0 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
+                                throw new InvalidOperationException($"Failed to create consumer for queue {_queueName} after retry: consumer count is still 0");
+                            }
+                        }
+                    }
+                    catch (Exception verifyEx)
+                    {
+                        _logger.LogError(verifyEx, $"[HybridClusterTransport] 验证消费者数量失败 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}, Error: {verifyEx.Message}, StackTrace: {verifyEx.StackTrace}");
+                        // Don't throw - consumer might still work / 不抛出异常 - 消费者可能仍然有效
+                    }
+                }
+                catch (Exception consumeEx)
+                {
+                    _logger.LogError(consumeEx, $"[HybridClusterTransport] 启动消费者失败 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}, Error: {consumeEx.Message}, StackTrace: {consumeEx.StackTrace}");
+                    throw; // Re-throw to fail startup / 重新抛出以失败启动
+                }
 
                 // Start periodic binding health check / 启动定期绑定健康检查
                 _bindingHealthCheckTimer = new Timer(async _ => await CheckAndRepairBindingsAsync(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5));
