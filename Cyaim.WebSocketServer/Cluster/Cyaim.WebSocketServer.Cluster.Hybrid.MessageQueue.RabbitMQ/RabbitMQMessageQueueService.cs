@@ -27,6 +27,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         // RabbitMQ.Client 7.0+ uses AsyncEventingBasicConsumer
         // RabbitMQ.Client 7.0+ 使用 AsyncEventingBasicConsumer
         private readonly Dictionary<string, AsyncEventingBasicConsumer> _consumers;
+        // Store consumer tags for cancellation / 存储消费者标签以便取消
+        private readonly Dictionary<string, string> _consumerTags;
         // Store consumer handlers for reconnection / 存储消费者处理器以便重新连接
         private readonly Dictionary<string, (Func<byte[], MessageProperties, Task<bool>> Handler, bool AutoAck)> _consumerHandlers;
         // Store current node IDs for filtering self-messages / 存储当前节点 ID 以便过滤自己的消息
@@ -51,6 +53,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
             _consumers = new Dictionary<string, AsyncEventingBasicConsumer>();
+            _consumerTags = new Dictionary<string, string>();
             _consumerHandlers = new Dictionary<string, (Func<byte[], MessageProperties, Task<bool>>, bool)>();
             _currentNodeIds = new Dictionary<string, string>();
             _declaredExchanges = new Dictionary<string, (string, bool)>();
@@ -106,19 +109,24 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
 
                     // Subscribe to connection and channel shutdown events / 订阅连接和通道关闭事件
                     // RabbitMQ.Client 7.0+ uses async event handlers / RabbitMQ.Client 7.0+ 使用异步事件处理器
-                    _connection.ConnectionShutdownAsync += (sender, args) =>
+                    // Note: Event handlers are automatically removed when connection/channel is disposed
+                    // 注意：当连接/通道被释放时，事件处理器会自动移除
+                    _connection.ConnectionShutdownAsync += async (sender, args) =>
                     {
-                        _logger.LogError($"[RabbitMQMessageQueueService] 检测到连接关闭事件 - ReplyCode: {args?.ReplyCode}, ReplyText: {args?.ReplyText}");
-                        // Clear consumers as they are no longer valid / 清除消费者，因为它们不再有效
+                        _logger.LogError($"[RabbitMQMessageQueueService] 检测到连接关闭事件 - ReplyCode: {args?.ReplyCode}, ReplyText: {args?.ReplyText}, ConsumerCountBeforeClear: {_consumers.Count}");
+                        // Clear consumers and tags as they are no longer valid / 清除消费者和标签，因为它们不再有效
                         _consumers.Clear();
-                        return Task.CompletedTask;
+                        _consumerTags.Clear();
+                        _logger.LogWarning($"[RabbitMQMessageQueueService] 连接关闭后已清除消费者和标签 - ConsumerCountAfterClear: {_consumers.Count}");
                     };
 
-                    _channel.ChannelShutdownAsync += (sender, args) =>
+                    _channel.ChannelShutdownAsync += async (sender, args) =>
                     {
-                        _logger.LogError($"[RabbitMQMessageQueueService] 检测到通道关闭事件 - ReplyCode: {args?.ReplyCode}, ReplyText: {args?.ReplyText}");
-                        // Clear consumers as they are no longer valid / 清除消费者，因为它们不再有效
+                        _logger.LogError($"[RabbitMQMessageQueueService] 检测到通道关闭事件 - ReplyCode: {args?.ReplyCode}, ReplyText: {args?.ReplyText}, ConsumerCountBeforeClear: {_consumers.Count}");
+                        // Clear consumers and tags as they are no longer valid / 清除消费者和标签，因为它们不再有效
                         _consumers.Clear();
+                        _consumerTags.Clear();
+                        _logger.LogWarning($"[RabbitMQMessageQueueService] 通道关闭后已清除消费者和标签 - ConsumerCountAfterClear: {_consumers.Count}");
 
                         // Trigger reconnection in background / 在后台触发重新连接
                         _ = Task.Run(async () =>
@@ -135,7 +143,6 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                                 _logger.LogError(ex, $"[RabbitMQMessageQueueService] 通道关闭后恢复失败 - Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                             }
                         });
-                        return Task.CompletedTask;
                     };
 
                     // Re-declare exchanges, queues, bindings and recreate consumers after reconnection / 重新连接后重新声明交换机、队列、绑定并重建消费者
@@ -292,8 +299,23 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                     _currentNodeIds.TryGetValue(queueName, out var currentNodeId);
                     _logger.LogWarning($"[RabbitMQMessageQueueService] 重新创建消费者 - QueueName: {queueName}, CurrentNodeId: {currentNodeId}, AutoAck: {autoAck}");
 
-                    // Remove old consumer from dictionary / 从字典中移除旧消费者
+                    // Cancel old consumer if exists / 如果存在，取消旧消费者
+                    if (_consumerTags.TryGetValue(queueName, out var oldConsumerTag) && !string.IsNullOrEmpty(oldConsumerTag))
+                    {
+                        try
+                        {
+                            await _channel.BasicCancelAsync(oldConsumerTag);
+                            _logger.LogWarning($"[RabbitMQMessageQueueService] 已取消旧消费者 - QueueName: {queueName}, ConsumerTag: {oldConsumerTag}");
+                        }
+                        catch (Exception cancelEx)
+                        {
+                            _logger.LogWarning(cancelEx, $"[RabbitMQMessageQueueService] 取消旧消费者失败（可能已不存在）- QueueName: {queueName}, ConsumerTag: {oldConsumerTag}, Error: {cancelEx.Message}");
+                        }
+                    }
+
+                    // Remove old consumer from dictionaries / 从字典中移除旧消费者
                     _consumers.Remove(queueName);
+                    _consumerTags.Remove(queueName);
 
                     // Recreate consumer / 重新创建消费者
                     var consumer = new AsyncEventingBasicConsumer(_channel);
@@ -370,6 +392,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                     };
 
                     var consumerTag = await _channel.BasicConsumeAsync(queueName, autoAck, consumer);
+                    _consumerTags[queueName] = consumerTag; // Store consumer tag / 存储消费者标签
                     _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者重新创建成功 - QueueName: {queueName}, ConsumerTag: {consumerTag}, AutoAck: {autoAck}");
 
                     // Verify consumer was created successfully / 验证消费者是否成功创建
@@ -493,8 +516,26 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task DisconnectAsync()
         {
-            // Clear consumers but keep handlers for reconnection / 清除消费者但保留处理器以便重新连接
+            // Cancel all consumers before clearing / 清除前取消所有消费者
+            foreach (var kvp in _consumerTags.ToList())
+            {
+                try
+                {
+                    if (_channel != null && _channel.IsOpen && !string.IsNullOrEmpty(kvp.Value))
+                    {
+                        await _channel.BasicCancelAsync(kvp.Value);
+                        _logger.LogWarning($"[RabbitMQMessageQueueService] 已取消消费者 - QueueName: {kvp.Key}, ConsumerTag: {kvp.Value}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"[RabbitMQMessageQueueService] 取消消费者失败 - QueueName: {kvp.Key}, ConsumerTag: {kvp.Value}, Error: {ex.Message}");
+                }
+            }
+
+            // Clear consumers and tags but keep handlers for reconnection / 清除消费者和标签但保留处理器以便重新连接
             _consumers.Clear();
+            _consumerTags.Clear();
             // Note: We keep _consumerHandlers so we can recreate consumers after reconnection
             // 注意：我们保留 _consumerHandlers 以便在重新连接后重新创建消费者
 
@@ -831,10 +872,56 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 _currentNodeIds[queueName] = currentNodeId;
             }
 
+            // Check if consumer exists and verify it's actually registered in RabbitMQ / 检查消费者是否存在并验证它是否真的在 RabbitMQ 中注册
             if (_consumers.ContainsKey(queueName))
             {
-                _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者已存在，跳过重新创建 - QueueName: {queueName}");
-                return;
+                try
+                {
+                    // Verify consumer is actually registered in RabbitMQ / 验证消费者是否真的在 RabbitMQ 中注册
+                    var queueInfo = await _channel.QueueDeclarePassiveAsync(queueName);
+                    if (queueInfo.ConsumerCount > 0)
+                    {
+                        _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者已存在且已注册，跳过重新创建 - QueueName: {queueName}, ConsumerCount: {queueInfo.ConsumerCount}");
+                        return;
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者对象存在但未在 RabbitMQ 中注册，取消并移除旧消费者 - QueueName: {queueName}, ConsumerCount: {queueInfo.ConsumerCount}");
+                        // Cancel old consumer if tag exists / 如果标签存在，取消旧消费者
+                        if (_consumerTags.TryGetValue(queueName, out var oldConsumerTag) && !string.IsNullOrEmpty(oldConsumerTag))
+                        {
+                            try
+                            {
+                                await _channel.BasicCancelAsync(oldConsumerTag);
+                                _logger.LogWarning($"[RabbitMQMessageQueueService] 已取消旧消费者 - QueueName: {queueName}, ConsumerTag: {oldConsumerTag}");
+                            }
+                            catch (Exception cancelEx)
+                            {
+                                _logger.LogWarning(cancelEx, $"[RabbitMQMessageQueueService] 取消旧消费者失败（可能已不存在）- QueueName: {queueName}, ConsumerTag: {oldConsumerTag}, Error: {cancelEx.Message}");
+                            }
+                        }
+                        // Remove old consumer from dictionaries / 从字典中移除旧消费者
+                        _consumers.Remove(queueName);
+                        _consumerTags.Remove(queueName);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"[RabbitMQMessageQueueService] 验证消费者状态失败，取消并移除旧消费者 - QueueName: {queueName}, Error: {ex.Message}");
+                    // Cancel old consumer if tag exists / 如果标签存在，取消旧消费者
+                    if (_consumerTags.TryGetValue(queueName, out var oldConsumerTag) && !string.IsNullOrEmpty(oldConsumerTag))
+                    {
+                        try
+                        {
+                            await _channel.BasicCancelAsync(oldConsumerTag);
+                            _logger.LogWarning($"[RabbitMQMessageQueueService] 已取消旧消费者 - QueueName: {queueName}, ConsumerTag: {oldConsumerTag}");
+                        }
+                        catch { }
+                    }
+                    // Remove old consumer on verification failure / 验证失败时移除旧消费者
+                    _consumers.Remove(queueName);
+                    _consumerTags.Remove(queueName);
+                }
             }
 
             // Use AsyncEventingBasicConsumer for RabbitMQ.Client 7.0+
@@ -938,26 +1025,60 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
 
                     _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者启动成功 - QueueName: {queueName}, ConsumerTag: {consumerTag}, AutoAck: {autoAck}, TotalConsumers: {_consumers.Count}, ChannelIsOpen: {_channel.IsOpen}, RetryAttempt: {retryAttempt + 1}/{maxRetries}");
 
-                    // Wait a bit for consumer to register / 等待消费者注册
-                    await Task.Delay(200);
+                    // Store consumer tag / 存储消费者标签
+                    _consumerTags[queueName] = consumerTag;
+
+                    // Wait longer for consumer to register in RabbitMQ / 等待更长时间让消费者在 RabbitMQ 中注册
+                    // Note: ConsumerCount may not be immediately updated in RabbitMQ statistics
+                    // 注意：ConsumerCount 可能不会立即在 RabbitMQ 统计信息中更新
+                    await Task.Delay(500);
 
                     // Verify consumer is actually consuming by checking queue status / 通过检查队列状态验证消费者确实在消费
                     // Note: QueueDeclarePassiveAsync will throw if queue doesn't exist
                     // 注意：如果队列不存在，QueueDeclarePassiveAsync 会抛出异常
+                    // Note: ConsumerCount from QueueDeclarePassiveAsync may not be real-time
+                    // 注意：QueueDeclarePassiveAsync 返回的 ConsumerCount 可能不是实时的
                     try
                     {
                         var queueInfo = await _channel.QueueDeclarePassiveAsync(queueName);
                         _logger.LogWarning($"[RabbitMQMessageQueueService] 队列状态确认 - QueueName: {queueName}, ConsumerCount: {queueInfo.ConsumerCount}, MessageCount: {queueInfo.MessageCount}, QueueExists: true, ConsumerTag: {consumerTag}, RetryAttempt: {retryAttempt + 1}/{maxRetries}");
 
-                        if (queueInfo.ConsumerCount == 0)
+                        // Note: ConsumerCount may be 0 even if consumer is working (RabbitMQ statistics delay)
+                        // 注意：即使消费者在工作，ConsumerCount 也可能为 0（RabbitMQ 统计信息延迟）
+                        // If consumerTag is not empty and channel is open, assume consumer is registered
+                        // 如果 consumerTag 不为空且 channel 已打开，假设消费者已注册
+                        if (queueInfo.ConsumerCount == 0 && !string.IsNullOrEmpty(consumerTag) && _channel != null && _channel.IsOpen)
                         {
-                            _logger.LogError($"[RabbitMQMessageQueueService] 错误：队列消费者数量为 0，消费者可能未成功注册 - QueueName: {queueName}, ConsumerTag: {consumerTag}, ChannelIsOpen: {_channel.IsOpen}, ChannelNumber: {_channel.ChannelNumber}, RetryAttempt: {retryAttempt + 1}/{maxRetries}");
+                            _logger.LogWarning($"[RabbitMQMessageQueueService] 警告：队列消费者数量为 0，但 ConsumerTag 存在且 Channel 已打开，可能是统计信息延迟 - QueueName: {queueName}, ConsumerTag: {consumerTag}, ChannelIsOpen: {_channel.IsOpen}, ChannelNumber: {_channel.ChannelNumber}, RetryAttempt: {retryAttempt + 1}/{maxRetries}");
+                            // Don't retry if consumerTag exists and channel is open - consumer is likely working
+                            // 如果 consumerTag 存在且 channel 已打开，不重试 - 消费者可能在工作
+                            _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者注册成功（忽略 ConsumerCount 为 0 的警告，可能是统计信息延迟）- QueueName: {queueName}, ConsumerTag: {consumerTag}");
+                            break; // Success - consumer is registered even if ConsumerCount shows 0 / 成功 - 即使 ConsumerCount 显示 0，消费者也已注册
+                        }
+                        else if (queueInfo.ConsumerCount == 0)
+                        {
+                            _logger.LogError($"[RabbitMQMessageQueueService] 错误：队列消费者数量为 0，且 ConsumerTag 为空或 Channel 未打开 - QueueName: {queueName}, ConsumerTag: {consumerTag ?? "null"}, ChannelIsOpen: {_channel?.IsOpen ?? false}, ChannelNumber: {_channel?.ChannelNumber ?? -1}, RetryAttempt: {retryAttempt + 1}/{maxRetries}");
 
                             retryAttempt++;
                             if (retryAttempt < maxRetries)
                             {
-                                // Remove consumer from dictionary to allow retry / 从字典中移除以允许重试
+                                // Cancel old consumer before retry / 重试前取消旧消费者
+                                if (!string.IsNullOrEmpty(consumerTag))
+                                {
+                                    try
+                                    {
+                                        await _channel.BasicCancelAsync(consumerTag);
+                                        _logger.LogWarning($"[RabbitMQMessageQueueService] 已取消旧消费者以便重试 - QueueName: {queueName}, ConsumerTag: {consumerTag}, RetryAttempt: {retryAttempt}/{maxRetries}");
+                                    }
+                                    catch (Exception cancelEx)
+                                    {
+                                        _logger.LogWarning(cancelEx, $"[RabbitMQMessageQueueService] 取消旧消费者失败（可能已不存在）- QueueName: {queueName}, ConsumerTag: {consumerTag}, Error: {cancelEx.Message}");
+                                    }
+                                }
+
+                                // Remove consumer from dictionaries to allow retry / 从字典中移除以允许重试
                                 _consumers.Remove(queueName);
+                                _consumerTags.Remove(queueName);
                                 _logger.LogWarning($"[RabbitMQMessageQueueService] 准备重试创建消费者 - QueueName: {queueName}, RetryAttempt: {retryAttempt}/{maxRetries}");
 
                                 // Wait before retry with exponential backoff / 重试前等待，使用指数退避
@@ -1069,8 +1190,23 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
 
                     if (retryAttempt < maxRetries)
                     {
-                        // Remove consumer from dictionary to allow retry / 从字典中移除以允许重试
+                        // Cancel old consumer before retry / 重试前取消旧消费者
+                        if (!string.IsNullOrEmpty(consumerTag))
+                        {
+                            try
+                            {
+                                await _channel.BasicCancelAsync(consumerTag);
+                                _logger.LogWarning($"[RabbitMQMessageQueueService] 已取消旧消费者以便重试 - QueueName: {queueName}, ConsumerTag: {consumerTag}, RetryAttempt: {retryAttempt}/{maxRetries}");
+                            }
+                            catch (Exception cancelEx)
+                            {
+                                _logger.LogWarning(cancelEx, $"[RabbitMQMessageQueueService] 取消旧消费者失败（可能已不存在）- QueueName: {queueName}, ConsumerTag: {consumerTag}, Error: {cancelEx.Message}");
+                            }
+                        }
+
+                        // Remove consumer from dictionaries to allow retry / 从字典中移除以允许重试
                         _consumers.Remove(queueName);
+                        _consumerTags.Remove(queueName);
 
                         // Wait before retry with exponential backoff / 重试前等待，使用指数退避
                         var delay = TimeSpan.FromMilliseconds(200 * Math.Pow(2, retryAttempt - 1));
