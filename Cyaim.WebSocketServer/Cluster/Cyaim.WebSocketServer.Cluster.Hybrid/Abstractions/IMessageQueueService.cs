@@ -87,6 +87,13 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions
         /// <param name="deliveryTag">Delivery tag / 投递标签</param>
         /// <param name="requeue">Whether to requeue / 是否重新入队</param>
         Task RejectAsync(ulong deliveryTag, bool requeue = false);
+
+        /// <summary>
+        /// Get queue consumer count / 获取队列消费者数量
+        /// </summary>
+        /// <param name="queueName">Queue name / 队列名称</param>
+        /// <returns>Consumer count / 消费者数量</returns>
+        Task<uint> GetQueueConsumerCountAsync(string queueName);
     }
 
     /// <summary>

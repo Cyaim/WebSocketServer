@@ -26,11 +26,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         private readonly NodeInfo _nodeInfo;
         private readonly ConcurrentDictionary<string, NodeInfo> _knownNodes;
         private readonly CancellationTokenSource _cancellationTokenSource;
-        // 消息去重逻辑已移除，不再需要 _processedMessageIds 和 _messageIdCleanupTimer
-        // Message deduplication logic removed, no longer need _processedMessageIds and _messageIdCleanupTimer
         private bool _disposed = false;
         private bool _started = false;
         private Timer _bindingHealthCheckTimer; // 绑定健康检查定时器
+        private Timer _consumerHealthCheckTimer; // 消费者健康检查定时器
 
         private const string ExchangeName = "websocket_cluster_exchange";
         private const string BroadcastRoutingKey = "broadcast";
@@ -210,6 +209,9 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
                 // Start periodic binding health check / 启动定期绑定健康检查
                 _bindingHealthCheckTimer = new Timer(async _ => await CheckAndRepairBindingsAsync(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5));
+
+                // Start periodic consumer health check / 启动定期消费者健康检查
+                _consumerHealthCheckTimer = new Timer(async _ => await CheckAndRepairConsumerAsync(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5));
 
                 // Wait a bit for initial node discovery / 等待初始节点发现
                 _logger.LogWarning($"[HybridClusterTransport] 等待初始节点发现... - NodeId: {_nodeId}");
@@ -1053,6 +1055,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             // 消息去重逻辑已移除，不再需要清理定时器
             // Message deduplication logic removed, no longer need cleanup timer
             _bindingHealthCheckTimer?.Dispose();
+            _consumerHealthCheckTimer?.Dispose();
             _cancellationTokenSource?.Dispose();
         }
 
@@ -1250,6 +1253,115 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, $"[HybridClusterTransport] 绑定健康检查失败 - QueueName: {_queueName}, ExchangeName: {ExchangeName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}");
+                // Don't throw - this is a background health check / 不抛出异常 - 这是后台健康检查
+            }
+        }
+
+        /// <summary>
+        /// Check and repair consumer if needed / 检查并在需要时修复消费者
+        /// </summary>
+        private async Task CheckAndRepairConsumerAsync()
+        {
+            if (_disposed || !_started || string.IsNullOrEmpty(_queueName))
+            {
+                return;
+            }
+
+            try
+            {
+                _logger.LogWarning($"[HybridClusterTransport] 开始消费者健康检查 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
+
+                // Verify connection is ready / 验证连接已就绪
+                try
+                {
+                    await _messageQueueService.VerifyConnectionAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"[HybridClusterTransport] 连接验证失败，尝试重新连接 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}");
+                    
+                    // Try to reconnect / 尝试重新连接
+                    try
+                    {
+                        await _messageQueueService.ConnectAsync();
+                        await _messageQueueService.VerifyConnectionAsync();
+                        _logger.LogWarning($"[HybridClusterTransport] 重新连接成功 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
+                        
+                        // After reconnection, consumers should be automatically recreated by RabbitMQMessageQueueService
+                        // 重新连接后，消费者应该由 RabbitMQMessageQueueService 自动重建
+                        // But let's verify and recreate if needed / 但让我们验证并在需要时重新创建
+                        await Task.Delay(500); // Wait for automatic recreation / 等待自动重建
+                    }
+                    catch (Exception reconnectEx)
+                    {
+                        _logger.LogError(reconnectEx, $"[HybridClusterTransport] 重新连接失败 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}, Error: {reconnectEx.Message}, StackTrace: {reconnectEx.StackTrace}");
+                        return; // Can't proceed without connection / 没有连接无法继续
+                    }
+                }
+
+                // Check consumer count / 检查消费者数量
+                uint consumerCount = 0;
+                bool consumerCountRetrieved = false;
+                
+                try
+                {
+                    consumerCount = await _messageQueueService.GetQueueConsumerCountAsync(_queueName);
+                    consumerCountRetrieved = true;
+                    _logger.LogWarning($"[HybridClusterTransport] 消费者健康检查 - QueueName: {_queueName}, ConsumerCount: {consumerCount}, CurrentNodeId: {_nodeId}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"[HybridClusterTransport] 获取消费者数量失败 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                    
+                    // If we can't get consumer count, assume it's 0 and try to recreate / 如果无法获取消费者数量，假设为 0 并尝试重新创建
+                    consumerCount = 0;
+                    consumerCountRetrieved = false;
+                }
+
+                if (!consumerCountRetrieved || consumerCount == 0)
+                {
+                    _logger.LogError($"[HybridClusterTransport] 检测到消费者丢失或无法获取消费者数量，尝试重新创建 - QueueName: {_queueName}, ConsumerCountRetrieved: {consumerCountRetrieved}, ConsumerCount: {consumerCount}, CurrentNodeId: {_nodeId}");
+
+                    // Try to recreate consumer / 尝试重新创建消费者
+                    try
+                    {
+                        // Ensure connection is ready before recreating / 重新创建前确保连接就绪
+                        await _messageQueueService.VerifyConnectionAsync();
+                        
+                        await _messageQueueService.ConsumeAsync(_queueName, HandleMessageAsync, autoAck: false, currentNodeId: _nodeId);
+                        _logger.LogWarning($"[HybridClusterTransport] 消费者重新创建成功 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
+
+                        // Verify consumer was created / 验证消费者是否已创建
+                        await Task.Delay(500); // Wait longer for consumer to register / 等待更长时间让消费者注册
+                        
+                        try
+                        {
+                            var newConsumerCount = await _messageQueueService.GetQueueConsumerCountAsync(_queueName);
+                            _logger.LogWarning($"[HybridClusterTransport] 消费者重新创建后验证 - QueueName: {_queueName}, ConsumerCount: {newConsumerCount}, CurrentNodeId: {_nodeId}");
+
+                            if (newConsumerCount == 0)
+                            {
+                                _logger.LogError($"[HybridClusterTransport] 警告：消费者重新创建后数量仍为 0 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}");
+                            }
+                        }
+                        catch (Exception verifyEx)
+                        {
+                            _logger.LogError(verifyEx, $"[HybridClusterTransport] 验证消费者数量失败 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}, Error: {verifyEx.Message}, StackTrace: {verifyEx.StackTrace}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"[HybridClusterTransport] 重新创建消费者失败 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                    }
+                }
+                else
+                {
+                    _logger.LogTrace($"[HybridClusterTransport] 消费者健康检查通过 - QueueName: {_queueName}, ConsumerCount: {consumerCount}, CurrentNodeId: {_nodeId}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"[HybridClusterTransport] 消费者健康检查失败 - QueueName: {_queueName}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
                 // Don't throw - this is a background health check / 不抛出异常 - 这是后台健康检查
             }
         }
