@@ -815,29 +815,66 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 }
             };
 
-            _logger.LogWarning($"[RabbitMQMessageQueueService] 准备启动消费者 - QueueName: {queueName}, AutoAck: {autoAck}, ChannelIsOpen: {_channel.IsOpen}, CurrentConsumers: {_consumers.Count}");
+            _logger.LogWarning($"[RabbitMQMessageQueueService] 准备启动消费者 - QueueName: {queueName}, AutoAck: {autoAck}, ChannelIsOpen: {_channel.IsOpen}, ChannelNumber: {_channel.ChannelNumber}, CurrentConsumers: {_consumers.Count}");
 
-            var consumerTag = await _channel.BasicConsumeAsync(queueName, autoAck, consumer);
-
-            _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者启动成功 - QueueName: {queueName}, ConsumerTag: {consumerTag}, AutoAck: {autoAck}, TotalConsumers: {_consumers.Count}");
-
-            // Verify consumer is actually consuming by checking queue status / 通过检查队列状态验证消费者确实在消费
-            // Note: QueueDeclarePassiveAsync will throw if queue doesn't exist
-            // 注意：如果队列不存在，QueueDeclarePassiveAsync 会抛出异常
+            string consumerTag = null;
             try
             {
-                var queueInfo = await _channel.QueueDeclarePassiveAsync(queueName);
-                _logger.LogWarning($"[RabbitMQMessageQueueService] 队列状态确认 - QueueName: {queueName}, ConsumerCount: {queueInfo.ConsumerCount}, MessageCount: {queueInfo.MessageCount}, QueueExists: true");
+                // RabbitMQ.Client 7.0+ BasicConsumeAsync signature: BasicConsumeAsync(string queue, bool autoAck, IBasicConsumer consumer)
+                // RabbitMQ.Client 7.0+ BasicConsumeAsync 签名：BasicConsumeAsync(string queue, bool autoAck, IBasicConsumer consumer)
+                consumerTag = await _channel.BasicConsumeAsync(queueName, autoAck, consumer);
 
-                if (queueInfo.ConsumerCount == 0)
+                if (string.IsNullOrEmpty(consumerTag))
                 {
-                    _logger.LogWarning($"[RabbitMQMessageQueueService] 警告：队列消费者数量为 0，但消费者已启动 - QueueName: {queueName}, ConsumerTag: {consumerTag}");
+                    _logger.LogError($"[RabbitMQMessageQueueService] 消费者启动失败：返回的 ConsumerTag 为空 - QueueName: {queueName}");
+                    throw new InvalidOperationException($"Consumer registration failed: returned empty consumer tag for queue {queueName}");
+                }
+
+                _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者启动成功 - QueueName: {queueName}, ConsumerTag: {consumerTag}, AutoAck: {autoAck}, TotalConsumers: {_consumers.Count}, ChannelIsOpen: {_channel.IsOpen}");
+
+                // Wait a bit for consumer to register / 等待消费者注册
+                await Task.Delay(100);
+
+                // Verify consumer is actually consuming by checking queue status / 通过检查队列状态验证消费者确实在消费
+                // Note: QueueDeclarePassiveAsync will throw if queue doesn't exist
+                // 注意：如果队列不存在，QueueDeclarePassiveAsync 会抛出异常
+                try
+                {
+                    var queueInfo = await _channel.QueueDeclarePassiveAsync(queueName);
+                    _logger.LogWarning($"[RabbitMQMessageQueueService] 队列状态确认 - QueueName: {queueName}, ConsumerCount: {queueInfo.ConsumerCount}, MessageCount: {queueInfo.MessageCount}, QueueExists: true, ConsumerTag: {consumerTag}");
+
+                    if (queueInfo.ConsumerCount == 0)
+                    {
+                        _logger.LogError($"[RabbitMQMessageQueueService] 错误：队列消费者数量为 0，消费者可能未成功注册 - QueueName: {queueName}, ConsumerTag: {consumerTag}, ChannelIsOpen: {_channel.IsOpen}, ChannelNumber: {_channel.ChannelNumber}");
+
+                        // Try to consume again / 尝试再次消费
+                        _logger.LogWarning($"[RabbitMQMessageQueueService] 尝试重新注册消费者 - QueueName: {queueName}");
+                        _consumers.Remove(queueName); // Remove from dictionary to allow retry / 从字典中移除以允许重试
+                        consumerTag = await _channel.BasicConsumeAsync(queueName, autoAck, consumer);
+                        _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者重新注册完成 - QueueName: {queueName}, ConsumerTag: {consumerTag}");
+
+                        // Verify again / 再次验证
+                        await Task.Delay(100);
+                        var queueInfo2 = await _channel.QueueDeclarePassiveAsync(queueName);
+                        _logger.LogWarning($"[RabbitMQMessageQueueService] 重新注册后队列状态 - QueueName: {queueName}, ConsumerCount: {queueInfo2.ConsumerCount}, MessageCount: {queueInfo2.MessageCount}");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"[RabbitMQMessageQueueService] 消费者注册成功确认 - QueueName: {queueName}, ConsumerCount: {queueInfo.ConsumerCount}, ConsumerTag: {consumerTag}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, $"[RabbitMQMessageQueueService] 队列状态确认失败 - QueueName: {queueName}, ConsumerTag: {consumerTag}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                    // Don't throw - consumer might still work / 不抛出异常 - 消费者可能仍然有效
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"[RabbitMQMessageQueueService] 队列状态确认失败 - QueueName: {queueName}, Error: {ex.Message}");
-                // Don't throw - consumer might still work / 不抛出异常 - 消费者可能仍然有效
+                _logger.LogError(ex, $"[RabbitMQMessageQueueService] 启动消费者时发生异常 - QueueName: {queueName}, ChannelIsOpen: {_channel?.IsOpen ?? false}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                // Remove consumer from dictionary on failure / 失败时从字典中移除消费者
+                _consumers.Remove(queueName);
+                throw;
             }
         }
 
