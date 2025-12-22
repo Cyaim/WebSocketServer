@@ -108,7 +108,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                     // RabbitMQ.Client 7.0+ uses async event handlers / RabbitMQ.Client 7.0+ 使用异步事件处理器
                     _connection.ConnectionShutdownAsync += (sender, args) =>
                     {
-                        _logger.LogError($"[RabbitMQMessageQueueService] 检测到连接关闭事件 - Reason: {args?.Reason}, ReplyCode: {args?.ReplyCode}, ReplyText: {args?.ReplyText}");
+                        _logger.LogError($"[RabbitMQMessageQueueService] 检测到连接关闭事件 - ReplyCode: {args?.ReplyCode}, ReplyText: {args?.ReplyText}");
                         // Clear consumers as they are no longer valid / 清除消费者，因为它们不再有效
                         _consumers.Clear();
                         return Task.CompletedTask;
@@ -116,10 +116,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
 
                     _channel.ChannelShutdownAsync += (sender, args) =>
                     {
-                        _logger.LogError($"[RabbitMQMessageQueueService] 检测到通道关闭事件 - Reason: {args?.Reason}, ReplyCode: {args?.ReplyCode}, ReplyText: {args?.ReplyText}");
+                        _logger.LogError($"[RabbitMQMessageQueueService] 检测到通道关闭事件 - ReplyCode: {args?.ReplyCode}, ReplyText: {args?.ReplyText}");
                         // Clear consumers as they are no longer valid / 清除消费者，因为它们不再有效
                         _consumers.Clear();
-                        
+
                         // Trigger reconnection in background / 在后台触发重新连接
                         _ = Task.Run(async () =>
                         {
