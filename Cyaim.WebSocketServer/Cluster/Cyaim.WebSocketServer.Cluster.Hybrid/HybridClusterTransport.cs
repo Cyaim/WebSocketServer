@@ -80,8 +80,6 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
             _knownNodes = new ConcurrentDictionary<string, NodeInfo>();
             _cancellationTokenSource = new CancellationTokenSource();
-            // 消息去重逻辑已移除，不再需要 _processedMessageIds
-            // Message deduplication logic removed, no longer need _processedMessageIds
 
             // Create specific loggers using logger factory / 使用 logger factory 创建特定类型的 logger
             var discoveryLogger = loggerFactory.CreateLogger<RedisNodeDiscoveryService>();
@@ -109,8 +107,6 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             _discoveryService.NodeDiscovered += OnNodeDiscovered;
             _discoveryService.NodeRemoved += OnNodeRemoved;
 
-            // 消息去重逻辑已移除，不再需要消息ID清理定时器
-            // Message deduplication logic removed, no longer need message ID cleanup timer
         }
 
         /// <summary>

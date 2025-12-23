@@ -25,7 +25,21 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         private IConnection _connection;
         private IChannel _channel;
         private readonly SemaphoreSlim _connectionLock = new SemaphoreSlim(1, 1);
-        private volatile bool _isConnecting = false;
+        private volatile ConnectionState _connectionState = ConnectionState.Disconnected;
+        private readonly object _stateLock = new object();
+        private CancellationTokenSource _reconnectCts;
+        private Task _reconnectTask;
+
+        /// <summary>
+        /// Connection state / 连接状态
+        /// </summary>
+        private enum ConnectionState
+        {
+            Disconnected,    // 未连接
+            Connecting,      // 连接中
+            Connected,       // 已连接
+            Reconnecting     // 重连中
+        }
 
         // Consumer management / 消费者管理
         private readonly Dictionary<string, AsyncEventingBasicConsumer> _consumers = new Dictionary<string, AsyncEventingBasicConsumer>();
@@ -102,41 +116,45 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             await _connectionLock.WaitAsync().ConfigureAwait(false);
             try
             {
-                // 如果已连接且正常，直接返回
+                // 检查当前状态
+                var currentState = _connectionState;
                 var isConnected = IsConnected();
-                _logger.LogDebug("[RabbitMQMessageQueueService] ConnectAsync 调用 - IsConnected: {IsConnected}, ConnectionIsNull: {ConnectionIsNull}, ConnectionIsOpen: {ConnectionIsOpen}, ChannelIsNull: {ChannelIsNull}, ChannelIsOpen: {ChannelIsOpen}, ConsumerCount: {ConsumerCount}",
-                    isConnected, _connection == null, _connection?.IsOpen ?? false, _channel == null, _channel?.IsOpen ?? false, _consumers.Count);
 
-                if (isConnected)
+                _logger.LogDebug("[RabbitMQMessageQueueService] ConnectAsync 调用 - State: {State}, IsConnected: {IsConnected}",
+                    currentState, isConnected);
+
+                // 如果已连接，更新状态并返回
+                if (isConnected && currentState == ConnectionState.Connected)
                 {
-                    _logger.LogDebug("[RabbitMQMessageQueueService] 已连接，跳过重连 - ConsumerCount: {ConsumerCount}", _consumers.Count);
+                    _logger.LogDebug("[RabbitMQMessageQueueService] 已连接，跳过");
                     return;
                 }
 
-                // 防止并发连接
-                if (_isConnecting)
+                // 如果正在连接或重连，等待完成
+                if (currentState == ConnectionState.Connecting || currentState == ConnectionState.Reconnecting)
                 {
-                    _logger.LogWarning("[RabbitMQMessageQueueService] 正在连接中，等待完成");
-                    int waitCount = 0;
-                    while (_isConnecting && waitCount < 50) // 最多等待5秒
+                    _logger.LogDebug("[RabbitMQMessageQueueService] 正在连接/重连中，等待完成");
+                    await WaitForConnectionAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                    if (IsConnected())
                     {
-                        await Task.Delay(100).ConfigureAwait(false);
-                        waitCount++;
-                        if (IsConnected())
-                        {
-                            return;
-                        }
+                        return;
                     }
                 }
 
-                _isConnecting = true;
+                // 设置状态为连接中
+                SetConnectionState(ConnectionState.Connecting);
+
                 try
                 {
                     await InternalConnectAsync().ConfigureAwait(false);
+                    SetConnectionState(ConnectionState.Connected);
+                    _logger.LogInformation("[RabbitMQMessageQueueService] 连接成功");
                 }
-                finally
+                catch (Exception ex)
                 {
-                    _isConnecting = false;
+                    SetConnectionState(ConnectionState.Disconnected);
+                    _logger.LogError(ex, "[RabbitMQMessageQueueService] 连接失败");
+                    throw;
                 }
             }
             finally
@@ -150,59 +168,27 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         private async Task InternalConnectAsync()
         {
+            // 清理旧连接
+            await CleanupConnectionAsync().ConfigureAwait(false);
+
+            _logger.LogInformation("[RabbitMQMessageQueueService] 开始连接 RabbitMQ");
+            
             try
             {
-                // 双重检查：再次验证连接状态，确保不会误清理
-                // Double-check: verify connection status again to ensure we don't accidentally cleanup
-                var isConnectedCheck = IsConnected();
-                _logger.LogDebug("[RabbitMQMessageQueueService] InternalConnectAsync 内部检查 - IsConnected: {IsConnected}, ConnectionIsNull: {ConnectionIsNull}, ConnectionIsOpen: {ConnectionIsOpen}, ChannelIsNull: {ChannelIsNull}, ChannelIsOpen: {ChannelIsOpen}, ConsumerCount: {ConsumerCount}",
-                    isConnectedCheck, _connection == null, _connection?.IsOpen ?? false, _channel == null, _channel?.IsOpen ?? false, _consumers.Count);
-
-                if (isConnectedCheck)
-                {
-                    _logger.LogDebug("[RabbitMQMessageQueueService] 内部检查：连接和 channel 都正常，跳过清理和重连 - ConsumerCount: {ConsumerCount}", _consumers.Count);
-                    return;
-                }
-
-                // 只有在连接或 channel 真正关闭时才清理
-                // Only cleanup when connection or channel is truly closed
-                bool connectionClosed = _connection == null || !_connection.IsOpen;
-                bool channelClosed = _channel == null || !_channel.IsOpen;
-
-                // 如果 connection 和 channel 都正常，但 IsConnected() 返回 false，可能是检查时机问题
-                // 这种情况下，我们不应该清理，而是直接返回
-                if (!connectionClosed && !channelClosed)
-                {
-                    _logger.LogWarning("[RabbitMQMessageQueueService] 连接和 channel 都正常，但 IsConnected() 返回 false，可能是检查时机问题，跳过清理和重连 - ConsumerCount: {ConsumerCount}", _consumers.Count);
-                    return;
-                }
-
-                // 记录需要清理的原因
-                if (connectionClosed)
-                {
-                    _logger.LogInformation("[RabbitMQMessageQueueService] Connection 为 null 或已关闭，需要清理 - ConnectionIsNull: {ConnectionIsNull}, ConnectionIsOpen: {ConnectionIsOpen}, ConsumerCount: {ConsumerCount}",
-                        _connection == null, _connection?.IsOpen ?? false, _consumers.Count);
-                }
-                else if (channelClosed)
-                {
-                    _logger.LogInformation("[RabbitMQMessageQueueService] Channel 为 null 或已关闭，需要清理 - ChannelIsNull: {ChannelIsNull}, ChannelIsOpen: {ChannelIsOpen}, ConsumerCount: {ConsumerCount}",
-                        _channel == null, _channel?.IsOpen ?? false, _consumers.Count);
-                }
-
-                // 只有在真正需要时才清理旧连接
-                // Only cleanup old connection when truly needed
-                _logger.LogInformation("[RabbitMQMessageQueueService] 开始清理旧连接 - ConnectionClosed: {ConnectionClosed}, ChannelClosed: {ChannelClosed}, ConsumerCount: {ConsumerCount}",
-                    connectionClosed, channelClosed, _consumers.Count);
-                await CleanupConnectionAsync().ConfigureAwait(false);
-
-                _logger.LogInformation("[RabbitMQMessageQueueService] 开始连接 RabbitMQ");
-                var factory = new ConnectionFactory { Uri = new Uri(_connectionString) };
+                var factory = new ConnectionFactory 
+                { 
+                    Uri = new Uri(_connectionString),
+                    AutomaticRecoveryEnabled = false, // 禁用自动恢复，使用手动重连
+                    NetworkRecoveryInterval = TimeSpan.FromSeconds(10)
+                };
 
                 _connection = await factory.CreateConnectionAsync().ConfigureAwait(false);
                 _channel = await _connection.CreateChannelAsync().ConfigureAwait(false);
 
-                // 订阅关闭事件
+                // 订阅关闭事件（先取消再订阅，避免重复）
+                _connection.ConnectionShutdownAsync -= OnConnectionShutdown;
                 _connection.ConnectionShutdownAsync += OnConnectionShutdown;
+                _channel.ChannelShutdownAsync -= OnChannelShutdown;
                 _channel.ChannelShutdownAsync += OnChannelShutdown;
 
                 _logger.LogInformation("[RabbitMQMessageQueueService] RabbitMQ 连接成功 - ConnectionIsOpen: {ConnectionIsOpen}, ChannelIsOpen: {ChannelIsOpen}",
@@ -312,23 +298,21 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         {
             try
             {
-                // 双重检查：不仅检查 IsOpen，还尝试访问属性以确保真正可用
-                // Double-check: not only check IsOpen, but also try to access properties to ensure truly available
                 if (_connection == null || _channel == null)
                 {
                     return false;
                 }
 
+                // 检查连接和通道是否打开
                 if (!_connection.IsOpen || !_channel.IsOpen)
                 {
                     return false;
                 }
 
-                // 额外验证：尝试访问 channel 属性，确保 channel 真正可用
-                // Additional verification: try to access channel property to ensure channel is truly usable
+                // 尝试访问 channel 属性以验证真正可用
                 try
                 {
-                    var _ = _channel.ChannelNumber; // 如果 channel 已关闭，访问属性会抛出异常
+                    _ = _channel.ChannelNumber;
                     return true;
                 }
                 catch
@@ -343,14 +327,69 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         }
 
         /// <summary>
+        /// Set connection state / 设置连接状态
+        /// </summary>
+        private void SetConnectionState(ConnectionState newState)
+        {
+            lock (_stateLock)
+            {
+                var oldState = _connectionState;
+                _connectionState = newState;
+                _logger.LogDebug("[RabbitMQMessageQueueService] 连接状态变更 - {OldState} -> {NewState}", oldState, newState);
+            }
+        }
+
+        /// <summary>
+        /// Get connection state / 获取连接状态
+        /// </summary>
+        private ConnectionState GetConnectionState()
+        {
+            lock (_stateLock)
+            {
+                return _connectionState;
+            }
+        }
+
+        /// <summary>
+        /// Wait for connection to be ready / 等待连接就绪
+        /// </summary>
+        private async Task WaitForConnectionAsync(TimeSpan timeout)
+        {
+            var startTime = DateTime.UtcNow;
+            while (DateTime.UtcNow - startTime < timeout)
+            {
+                if (IsConnected() && GetConnectionState() == ConnectionState.Connected)
+                {
+                    return;
+                }
+                await Task.Delay(100).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>
         /// Ensure connection is ready / 确保连接就绪
         /// </summary>
         private async Task EnsureConnectedAsync()
         {
-            if (!IsConnected())
+            // 如果已连接，直接返回
+            if (IsConnected() && GetConnectionState() == ConnectionState.Connected)
             {
-                await ConnectAsync().ConfigureAwait(false);
+                return;
             }
+
+            // 如果正在连接或重连，等待完成
+            var state = GetConnectionState();
+            if (state == ConnectionState.Connecting || state == ConnectionState.Reconnecting)
+            {
+                await WaitForConnectionAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                if (IsConnected())
+                {
+                    return;
+                }
+            }
+
+            // 需要连接或重连
+            await ConnectAsync().ConfigureAwait(false);
         }
 
         /// <summary>
@@ -378,19 +417,8 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             _consumers.Clear();
             _consumerTags.Clear();
 
-            // 后台重连
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await Task.Delay(1000).ConfigureAwait(false); // 等待1秒后重连
-                    await ConnectAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "[RabbitMQMessageQueueService] 连接关闭后重连失败");
-                }
-            });
+            // 触发重连
+            TriggerReconnect();
         }
 
         /// <summary>
@@ -405,19 +433,109 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             _consumers.Clear();
             _consumerTags.Clear();
 
-            // 后台重连
-            _ = Task.Run(async () =>
+            // 触发重连
+            TriggerReconnect();
+        }
+
+        /// <summary>
+        /// Trigger reconnection / 触发重连
+        /// </summary>
+        private void TriggerReconnect()
+        {
+            // 如果已释放，不重连
+            if (_disposed)
+            {
+                return;
+            }
+
+            // 如果已经在重连，跳过
+            var state = GetConnectionState();
+            if (state == ConnectionState.Reconnecting || state == ConnectionState.Connecting)
+            {
+                _logger.LogDebug("[RabbitMQMessageQueueService] 已在连接/重连中，跳过重复触发");
+                return;
+            }
+
+            // 如果已连接，跳过
+            if (IsConnected() && state == ConnectionState.Connected)
+            {
+                _logger.LogDebug("[RabbitMQMessageQueueService] 连接正常，跳过重连");
+                return;
+            }
+
+            // 取消之前的重连任务
+            _reconnectCts?.Cancel();
+            _reconnectCts?.Dispose();
+
+            // 创建新的重连任务
+            _reconnectCts = new CancellationTokenSource();
+            _reconnectTask = Task.Run(async () => await ReconnectAsync(_reconnectCts.Token), _reconnectCts.Token);
+        }
+
+        /// <summary>
+        /// Reconnect with retry / 重连（带重试）
+        /// </summary>
+        private async Task ReconnectAsync(CancellationToken cancellationToken)
+        {
+            SetConnectionState(ConnectionState.Reconnecting);
+
+            const int maxRetries = 10;
+            const int baseDelayMs = 1000;
+            int retryCount = 0;
+
+            while (retryCount < maxRetries && !cancellationToken.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(1000).ConfigureAwait(false); // 等待1秒后重连
-                    await ConnectAsync().ConfigureAwait(false);
+                    // 等待后重连（指数退避）
+                    var delay = Math.Min(baseDelayMs * (int)Math.Pow(2, retryCount), 30000); // 最大30秒
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+
+                    _logger.LogInformation("[RabbitMQMessageQueueService] 开始重连尝试 {RetryCount}/{MaxRetries}", retryCount + 1, maxRetries);
+
+                    await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        // 再次检查连接状态
+                        if (IsConnected())
+                        {
+                            SetConnectionState(ConnectionState.Connected);
+                            _logger.LogInformation("[RabbitMQMessageQueueService] 连接已恢复");
+                            return;
+                        }
+
+                        // 执行重连
+                        await InternalConnectAsync().ConfigureAwait(false);
+                        SetConnectionState(ConnectionState.Connected);
+                        _logger.LogInformation("[RabbitMQMessageQueueService] 重连成功");
+                        return;
+                    }
+                    finally
+                    {
+                        _connectionLock.Release();
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogDebug("[RabbitMQMessageQueueService] 重连被取消");
+                    SetConnectionState(ConnectionState.Disconnected);
+                    return;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "[RabbitMQMessageQueueService] 通道关闭后重连失败");
+                    retryCount++;
+                    _logger.LogWarning(ex, "[RabbitMQMessageQueueService] 重连尝试 {RetryCount} 失败", retryCount);
+                    
+                    if (retryCount >= maxRetries)
+                    {
+                        _logger.LogError("[RabbitMQMessageQueueService] 重连失败，已达到最大重试次数");
+                        SetConnectionState(ConnectionState.Disconnected);
+                        return;
+                    }
                 }
-            });
+            }
+
+            SetConnectionState(ConnectionState.Disconnected);
         }
 
         /// <summary>
@@ -425,9 +543,31 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         /// </summary>
         public async Task DisconnectAsync()
         {
+            // 取消重连任务
+            _reconnectCts?.Cancel();
+            if (_reconnectTask != null)
+            {
+                try
+                {
+                    await _reconnectTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // 忽略取消异常
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[RabbitMQMessageQueueService] 等待重连任务完成时发生异常");
+                }
+            }
+            _reconnectCts?.Dispose();
+            _reconnectCts = null;
+            _reconnectTask = null;
+
             await _connectionLock.WaitAsync().ConfigureAwait(false);
             try
             {
+                SetConnectionState(ConnectionState.Disconnected);
                 await CancelAllConsumersAsync().ConfigureAwait(false);
                 await CleanupConnectionAsync().ConfigureAwait(false);
                 _logger.LogInformation("[RabbitMQMessageQueueService] 已断开连接");
@@ -895,8 +1035,25 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 // 设置消息处理事件
                 consumer.ReceivedAsync += async (model, ea) =>
                 {
+                    // 使用 model（channel）而不是闭包中的 _channel，确保使用正确的 channel
+                    var channel = model as IChannel;
+                    if (channel == null)
+                    {
+                        _logger.LogWarning("[RabbitMQMessageQueueService] 收到消息但 channel 无效 - QueueName: {QueueName}, DeliveryTag: {DeliveryTag}",
+                            queueName, ea.DeliveryTag);
+                        return;
+                    }
+
                     try
                     {
+                        // 验证 channel 是否仍然有效
+                        if (!channel.IsOpen)
+                        {
+                            _logger.LogWarning("[RabbitMQMessageQueueService] 收到消息但 channel 已关闭，跳过处理 - QueueName: {QueueName}, DeliveryTag: {DeliveryTag}",
+                                queueName, ea.DeliveryTag);
+                            return;
+                        }
+
                         var properties = new MessageProperties
                         {
                             MessageId = ea.BasicProperties.MessageId,
@@ -927,7 +1084,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                         {
                             if (!autoAck)
                             {
-                                await _channel.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
+                                await SafeAckAsync(channel, ea.DeliveryTag, queueName).ConfigureAwait(false);
                             }
                             return;
                         }
@@ -940,11 +1097,11 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                         {
                             if (success)
                             {
-                                await _channel.BasicAckAsync(ea.DeliveryTag, false).ConfigureAwait(false);
+                                await SafeAckAsync(channel, ea.DeliveryTag, queueName).ConfigureAwait(false);
                             }
                             else
                             {
-                                await _channel.BasicNackAsync(ea.DeliveryTag, false, true).ConfigureAwait(false);
+                                await SafeNackAsync(channel, ea.DeliveryTag, queueName, requeue: true).ConfigureAwait(false);
                             }
                         }
                     }
@@ -954,14 +1111,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                             queueName, ea.DeliveryTag);
                         if (!autoAck)
                         {
-                            try
-                            {
-                                await _channel.BasicNackAsync(ea.DeliveryTag, false, true).ConfigureAwait(false);
-                            }
-                            catch
-                            {
-                                // 忽略确认失败
-                            }
+                            await SafeNackAsync(channel, ea.DeliveryTag, queueName, requeue: true).ConfigureAwait(false);
                         }
                     }
                 };
@@ -1012,12 +1162,65 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         }
 
         /// <summary>
+        /// Safe acknowledge message / 安全确认消息
+        /// </summary>
+        private async Task SafeAckAsync(IChannel channel, ulong deliveryTag, string queueName)
+        {
+            try
+            {
+                if (channel == null || !channel.IsOpen)
+                {
+                    _logger.LogWarning("[RabbitMQMessageQueueService] Channel 无效或已关闭，无法确认消息 - QueueName: {QueueName}, DeliveryTag: {DeliveryTag}",
+                        queueName, deliveryTag);
+                    return;
+                }
+
+                await channel.BasicAckAsync(deliveryTag, false).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // 捕获无效 delivery tag 的异常（通常在重连后发生）
+                _logger.LogWarning(ex, "[RabbitMQMessageQueueService] 确认消息失败（可能是无效的 delivery tag）- QueueName: {QueueName}, DeliveryTag: {DeliveryTag}, Error: {Error}",
+                    queueName, deliveryTag, ex.Message);
+                // 不重新抛出异常，避免导致连接关闭
+            }
+        }
+
+        /// <summary>
+        /// Safe nack message / 安全拒绝消息
+        /// </summary>
+        private async Task SafeNackAsync(IChannel channel, ulong deliveryTag, string queueName, bool requeue = false)
+        {
+            try
+            {
+                if (channel == null || !channel.IsOpen)
+                {
+                    _logger.LogWarning("[RabbitMQMessageQueueService] Channel 无效或已关闭，无法拒绝消息 - QueueName: {QueueName}, DeliveryTag: {DeliveryTag}",
+                        queueName, deliveryTag);
+                    return;
+                }
+
+                await channel.BasicNackAsync(deliveryTag, false, requeue).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // 捕获无效 delivery tag 的异常（通常在重连后发生）
+                _logger.LogWarning(ex, "[RabbitMQMessageQueueService] 拒绝消息失败（可能是无效的 delivery tag）- QueueName: {QueueName}, DeliveryTag: {DeliveryTag}, Error: {Error}",
+                    queueName, deliveryTag, ex.Message);
+                // 不重新抛出异常，避免导致连接关闭
+            }
+        }
+
+        /// <summary>
         /// Acknowledge message / 确认消息
         /// </summary>
         public async Task AckAsync(ulong deliveryTag)
         {
             await EnsureConnectedAsync().ConfigureAwait(false);
-            await _channel.BasicAckAsync(deliveryTag, false).ConfigureAwait(false);
+            if (_channel != null && _channel.IsOpen)
+            {
+                await SafeAckAsync(_channel, deliveryTag, "unknown").ConfigureAwait(false);
+            }
         }
 
         /// <summary>
@@ -1026,7 +1229,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         public async Task RejectAsync(ulong deliveryTag, bool requeue = false)
         {
             await EnsureConnectedAsync().ConfigureAwait(false);
-            await _channel.BasicNackAsync(deliveryTag, false, requeue).ConfigureAwait(false);
+            if (_channel != null && _channel.IsOpen)
+            {
+                await SafeNackAsync(_channel, deliveryTag, "unknown", requeue).ConfigureAwait(false);
+            }
         }
 
         #endregion
@@ -1048,6 +1254,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
 
             _connectionLock?.Dispose();
             _consumerLock?.Dispose();
+            _reconnectCts?.Dispose();
         }
 
         #endregion
