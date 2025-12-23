@@ -806,36 +806,6 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 // If ToNodeId is set, only the target node should process it
                 // 如果 ToNodeId 为 null，这是广播消息 - 所有节点都应该处理
                 // 如果 ToNodeId 已设置，只有目标节点应该处理
-
-                // #region agent log
-                try
-                {
-                    var logData = new
-                    {
-                        location = "HybridClusterTransport.cs:502",
-                        message = "Checking if message is for this node",
-                        data = new
-                        {
-                            messageType = message.Type.ToString(),
-                            fromNodeId = message.FromNodeId,
-                            toNodeId = message.ToNodeId ?? "null",
-                            messageId = message.MessageId,
-                            currentNodeId = _nodeId,
-                            isToNodeIdEmpty = string.IsNullOrEmpty(message.ToNodeId),
-                            isToNodeIdMatch = message.ToNodeId == _nodeId,
-                            willIgnore = !string.IsNullOrEmpty(message.ToNodeId) && message.ToNodeId != _nodeId
-                        },
-                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                        sessionId = "debug-session",
-                        runId = "run1",
-                        hypothesisId = "B"
-                    };
-                    var logJson = JsonSerializer.Serialize(logData);
-                    System.IO.File.AppendAllText(@"e:\OneDrive\Work\WorkSpaces\.cursor\debug.log", logJson + Environment.NewLine);
-                }
-                catch { }
-                // #endregion
-
                 if (!string.IsNullOrEmpty(message.ToNodeId) && message.ToNodeId != _nodeId)
                 {
                     // This message is for another node, ignore it / 此消息是发送给其他节点的，忽略它
@@ -844,9 +814,6 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     _logger.LogWarning($"[HybridClusterTransport] 忽略消息（目标节点不匹配）- MessageId: {message.MessageId}, MessageType: {message.Type}, TargetNodeId: {message.ToNodeId}, CurrentNodeId: {_nodeId}");
                     return true; // Ack to remove from queue / 确认以从队列中移除
                 }
-
-                // 消息去重逻辑已移除 - 按用户要求移除过滤相同消息ID的逻辑
-                // Message deduplication logic removed - removed filtering of messages with same ID as per user request
 
                 // Trigger message received event / 触发消息接收事件
                 _logger.LogWarning($"[HybridClusterTransport] 触发消息接收事件 - MessageType: {message.Type}, FromNodeId: {message.FromNodeId}, ToNodeId: {message.ToNodeId}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}");
