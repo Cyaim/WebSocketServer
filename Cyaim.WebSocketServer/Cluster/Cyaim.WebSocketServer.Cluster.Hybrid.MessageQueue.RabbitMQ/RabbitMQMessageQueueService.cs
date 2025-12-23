@@ -103,9 +103,13 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
             try
             {
                 // 如果已连接且正常，直接返回
-                if (IsConnected())
+                var isConnected = IsConnected();
+                _logger.LogDebug("[RabbitMQMessageQueueService] ConnectAsync 调用 - IsConnected: {IsConnected}, ConnectionIsNull: {ConnectionIsNull}, ConnectionIsOpen: {ConnectionIsOpen}, ChannelIsNull: {ChannelIsNull}, ChannelIsOpen: {ChannelIsOpen}, ConsumerCount: {ConsumerCount}",
+                    isConnected, _connection == null, _connection?.IsOpen ?? false, _channel == null, _channel?.IsOpen ?? false, _consumers.Count);
+
+                if (isConnected)
                 {
-                    _logger.LogDebug("[RabbitMQMessageQueueService] 已连接，跳过重连");
+                    _logger.LogDebug("[RabbitMQMessageQueueService] 已连接，跳过重连 - ConsumerCount: {ConsumerCount}", _consumers.Count);
                     return;
                 }
 
@@ -148,7 +152,47 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         {
             try
             {
-                // 清理旧连接
+                // 双重检查：再次验证连接状态，确保不会误清理
+                // Double-check: verify connection status again to ensure we don't accidentally cleanup
+                var isConnectedCheck = IsConnected();
+                _logger.LogDebug("[RabbitMQMessageQueueService] InternalConnectAsync 内部检查 - IsConnected: {IsConnected}, ConnectionIsNull: {ConnectionIsNull}, ConnectionIsOpen: {ConnectionIsOpen}, ChannelIsNull: {ChannelIsNull}, ChannelIsOpen: {ChannelIsOpen}, ConsumerCount: {ConsumerCount}",
+                    isConnectedCheck, _connection == null, _connection?.IsOpen ?? false, _channel == null, _channel?.IsOpen ?? false, _consumers.Count);
+
+                if (isConnectedCheck)
+                {
+                    _logger.LogDebug("[RabbitMQMessageQueueService] 内部检查：连接和 channel 都正常，跳过清理和重连 - ConsumerCount: {ConsumerCount}", _consumers.Count);
+                    return;
+                }
+
+                // 只有在连接或 channel 真正关闭时才清理
+                // Only cleanup when connection or channel is truly closed
+                bool connectionClosed = _connection == null || !_connection.IsOpen;
+                bool channelClosed = _channel == null || !_channel.IsOpen;
+
+                // 如果 connection 和 channel 都正常，但 IsConnected() 返回 false，可能是检查时机问题
+                // 这种情况下，我们不应该清理，而是直接返回
+                if (!connectionClosed && !channelClosed)
+                {
+                    _logger.LogWarning("[RabbitMQMessageQueueService] 连接和 channel 都正常，但 IsConnected() 返回 false，可能是检查时机问题，跳过清理和重连 - ConsumerCount: {ConsumerCount}", _consumers.Count);
+                    return;
+                }
+
+                // 记录需要清理的原因
+                if (connectionClosed)
+                {
+                    _logger.LogInformation("[RabbitMQMessageQueueService] Connection 为 null 或已关闭，需要清理 - ConnectionIsNull: {ConnectionIsNull}, ConnectionIsOpen: {ConnectionIsOpen}, ConsumerCount: {ConsumerCount}",
+                        _connection == null, _connection?.IsOpen ?? false, _consumers.Count);
+                }
+                else if (channelClosed)
+                {
+                    _logger.LogInformation("[RabbitMQMessageQueueService] Channel 为 null 或已关闭，需要清理 - ChannelIsNull: {ChannelIsNull}, ChannelIsOpen: {ChannelIsOpen}, ConsumerCount: {ConsumerCount}",
+                        _channel == null, _channel?.IsOpen ?? false, _consumers.Count);
+                }
+
+                // 只有在真正需要时才清理旧连接
+                // Only cleanup old connection when truly needed
+                _logger.LogInformation("[RabbitMQMessageQueueService] 开始清理旧连接 - ConnectionClosed: {ConnectionClosed}, ChannelClosed: {ChannelClosed}, ConsumerCount: {ConsumerCount}",
+                    connectionClosed, channelClosed, _consumers.Count);
                 await CleanupConnectionAsync().ConfigureAwait(false);
 
                 _logger.LogInformation("[RabbitMQMessageQueueService] 开始连接 RabbitMQ");
@@ -182,12 +226,36 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         {
             try
             {
-                // 取消所有消费者
-                await CancelAllConsumersAsync().ConfigureAwait(false);
+                // 记录清理前的状态
+                var consumerCountBefore = _consumers.Count;
+                var consumerTagCountBefore = _consumerTags.Count;
+                var consumerInfoCountBefore = _consumerInfos.Count;
 
-                // 清理字典
+                _logger.LogInformation("[RabbitMQMessageQueueService] 开始清理连接 - ConsumerCount: {ConsumerCount}, ConsumerTagCount: {ConsumerTagCount}, ConsumerInfoCount: {ConsumerInfoCount}",
+                    consumerCountBefore, consumerTagCountBefore, consumerInfoCountBefore);
+
+                // 只有在 channel 可用时才取消消费者
+                // Only cancel consumers if channel is available
+                if (_channel != null && _channel.IsOpen)
+                {
+                    _logger.LogInformation("[RabbitMQMessageQueueService] Channel 可用，取消所有消费者");
+                    await CancelAllConsumersAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    _logger.LogInformation("[RabbitMQMessageQueueService] Channel 不可用，跳过取消消费者 - ChannelIsNull: {ChannelIsNull}, ChannelIsOpen: {ChannelIsOpen}",
+                        _channel == null, _channel?.IsOpen ?? false);
+                }
+
+                // 清理字典（但保留 _consumerInfos 以便重连后恢复）
+                // Clear dictionaries (but keep _consumerInfos for reconnection recovery)
                 _consumers.Clear();
                 _consumerTags.Clear();
+                // 注意：不清理 _consumerInfos，以便重连后恢复消费者
+                // Note: Don't clear _consumerInfos, so consumers can be restored after reconnection
+
+                _logger.LogInformation("[RabbitMQMessageQueueService] 清理完成 - ConsumerCountBefore: {ConsumerCountBefore}, ConsumerInfoCount: {ConsumerInfoCount}",
+                    consumerCountBefore, _consumerInfos.Count);
 
                 // 关闭 channel
                 if (_channel != null)
@@ -244,8 +312,29 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
         {
             try
             {
-                return _connection != null && _connection.IsOpen &&
-                       _channel != null && _channel.IsOpen;
+                // 双重检查：不仅检查 IsOpen，还尝试访问属性以确保真正可用
+                // Double-check: not only check IsOpen, but also try to access properties to ensure truly available
+                if (_connection == null || _channel == null)
+                {
+                    return false;
+                }
+
+                if (!_connection.IsOpen || !_channel.IsOpen)
+                {
+                    return false;
+                }
+
+                // 额外验证：尝试访问 channel 属性，确保 channel 真正可用
+                // Additional verification: try to access channel property to ensure channel is truly usable
+                try
+                {
+                    var _ = _channel.ChannelNumber; // 如果 channel 已关闭，访问属性会抛出异常
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
             }
             catch
             {
