@@ -276,7 +276,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 {
                     totalBytesRead += bytesRead;
                 }
-                
+
                 if (totalBytesRead > 0)
                 {
                     await webSocket.SendAsync(new ArraySegment<byte>(buffer, 0, totalBytesRead), messageType, endOfMessage: true, cancellationToken);
@@ -661,7 +661,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 // Use cluster routing / 使用集群路由
                 var connectionIdsList = connectionIds.ToList();
                 var connectionIdsArray = connectionIdsList.ToArray();
-                
+
                 var results = await clusterManager.RouteMessagesAsync(connectionIdsArray, data, (int)messageType);
                 return results;
             }
@@ -676,32 +676,22 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     {
                         continue;
                     }
-
-                    var task = Task.Run(async () =>
+                    var webSocket = GetLocalWebSocket(connectionId);
+                    if (webSocket != null && webSocket.State == WebSocketState.Open)
                     {
-                        var webSocket = GetLocalWebSocket(connectionId);
-                        if (webSocket != null && webSocket.State == WebSocketState.Open)
-                        {
-                            try
-                            {
-                                await webSocket.SendAsync(
-                                    new ArraySegment<byte>(data),
-                                    messageType,
-                                    true,
-                                    CancellationToken.None);
-                                results[connectionId] = true;
-                            }
-                            catch
-                            {
-                                results[connectionId] = false;
-                            }
-                        }
-                        else
-                        {
-                            results[connectionId] = false;
-                        }
-                    });
-                    tasks.Add(task);
+                        Task task = webSocket.SendAsync(
+                             new ArraySegment<byte>(data),
+                             messageType,
+                             true,
+                             CancellationToken.None);
+                        tasks.Add(task);
+
+                        results[connectionId] = true;
+                    }
+                    else
+                    {
+                        results[connectionId] = false;
+                    }
                 }
 
                 await Task.WhenAll(tasks);
@@ -978,7 +968,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 // Use local WebSocket / 使用本地 WebSocket
                 var results = new Dictionary<string, bool>();
                 var connectionIdList = connectionIds.Where(id => !string.IsNullOrEmpty(id)).ToList();
-                
+
                 if (connectionIdList.Count == 0)
                 {
                     return results;
