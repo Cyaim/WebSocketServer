@@ -335,11 +335,36 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         _ = await InvokePipeline(RequestPipelineStage.BeforeReceivingData, PipelineContext.CreateReceive(context, webSocket, null, null, webSocketOption));
 
                         #region 接收数据
+                        // 接收数据的缓冲区
                         byte[] buffer = ArrayPool<byte>.Shared.Rent(ReceiveTextBufferSize);
-                        while ((result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None)).Count > 0)
+                        bool messageComplete = false;
+
+                        try
                         {
-                            try
+                            while (!messageComplete)
                             {
+                                // 接收数据帧
+                                result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+
+                                // 如果接收到Close消息，直接退出
+                                if (result.MessageType == WebSocketMessageType.Close)
+                                {
+                                    break;
+                                }
+
+                                // 如果Count为0，检查是否消息已完成
+                                // 正常情况下，Count应该大于0，但如果EndOfMessage为true，说明消息接收完成
+                                if (result.Count == 0)
+                                {
+                                    if (result.EndOfMessage)
+                                    {
+                                        messageComplete = true;
+                                        break;
+                                    }
+                                    // Count为0但EndOfMessage为false的情况不应该发生，但为了安全继续等待
+                                    continue;
+                                }
+
                                 // 请求大小限制
                                 if (wsReceiveReader.Length > webSocketOption.MaxRequestReceiveDataLimit)
                                 {
@@ -374,7 +399,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                         CancellationToken.None);
                                 }
 
-                                //await wsReceiveReader.WriteAsync(buffer, 0, result.Count);
+                                // 将接收到的数据写入MemoryStream
                                 await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
 
                                 // 记录消息接收指标
@@ -387,27 +412,37 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 // 执行ReceivingData管道
                                 _ = await InvokePipeline(RequestPipelineStage.ReceivingData, PipelineContext.CreateReceive(context, webSocket, result, buffer, webSocketOption));
 
-                                // 已经接受完数据了
+                                // 检查消息是否接收完成
+                                // 只有当EndOfMessage为true时，才认为消息接收完成
                                 if (result.EndOfMessage || result.CloseStatus.HasValue)
                                 {
+                                    messageComplete = true;
                                     break;
                                 }
+
+                                // 如果EndOfMessage为false，说明还有更多帧需要接收，继续循环
                             }
-                            catch (Exception ex)
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogDebug(
+                                string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE,
+                                        context.Connection.RemoteIpAddress,
+                                        context.Connection.RemotePort,
+                                        context.Connection.Id,
+                                        I18nText.ConnectionEntry_ReceivingClientDataException + Environment.NewLine + ex.Message + Environment.NewLine + ex.StackTrace
+                                    )
+                                );
+                            // 发生异常时，如果已经接收到部分数据且EndOfMessage为true，认为消息接收完成
+                            if (result != null && result.EndOfMessage)
                             {
-                                logger.LogDebug(
-                                    string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE,
-                                            context.Connection.RemoteIpAddress,
-                                            context.Connection.RemotePort,
-                                            context.Connection.Id,
-                                            I18nText.ConnectionEntry_ReceivingClientDataException + Environment.NewLine + ex.Message + Environment.NewLine + ex.StackTrace
-                                        )
-                                    );
+                                messageComplete = true;
                             }
-                            finally
-                            {
-                                ArrayPool<byte>.Shared.Return(buffer);
-                            }
+                        }
+                        finally
+                        {
+                            // 归还buffer
+                            ArrayPool<byte>.Shared.Return(buffer);
                         }
                         // 如果接收到的消息是Close时，断开连接
                         if (result.MessageType == WebSocketMessageType.Close)
