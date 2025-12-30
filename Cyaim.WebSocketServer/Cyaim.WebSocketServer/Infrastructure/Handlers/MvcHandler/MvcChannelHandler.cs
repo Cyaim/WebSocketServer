@@ -1062,23 +1062,44 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 invokeResult = methodInvoker.Invoke(inst, args);
 
                 // Async api support
-                if (invokeResult is Task)
+                if (invokeResult is Task task)
                 {
-                    dynamic invokeResultTask = invokeResult;
-                    //await invokeResultTask;
-                    await Task.WhenAny(invokeResultTask, Task.Delay(Timeout.Infinite, appLifetime.ApplicationStopping));
+                    // 检查是否是 Task<T> 类型
+                    var taskType = task.GetType();
+                    if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
+                    {
+                        // 这是 Task<T>，需要获取返回值
+                        // 先 await 任务完成，避免同步阻塞
+                        await task.ConfigureAwait(false);
 
-                    if (invokeResultTask.Exception != null)
-                    {
-                        throw invokeResultTask.Exception;
-                    }
+                        // 检查任务是否有异常
+                        if (task.IsFaulted && task.Exception != null)
+                        {
+                            // 抛出内部异常（AggregateException 的第一个内部异常）
+                            var innerException = task.Exception.InnerException ?? task.Exception;
+                            throw innerException;
+                        }
 
-                    try
-                    {
-                        invokeResult = invokeResultTask.Result;
+                        // 使用反射获取 Result 属性值（此时任务已完成，不会阻塞）
+                        var resultProperty = taskType.GetProperty("Result");
+                        if (resultProperty != null)
+                        {
+                            invokeResult = resultProperty.GetValue(task);
+                        }
                     }
-                    catch (RuntimeBinderException)
+                    else
                     {
+                        // 这是 Task（无返回值），直接 await
+                        await task.ConfigureAwait(false);
+
+                        // 检查任务是否有异常
+                        if (task.IsFaulted && task.Exception != null)
+                        {
+                            // 抛出内部异常（AggregateException 的第一个内部异常）
+                            var innerException = task.Exception.InnerException ?? task.Exception;
+                            throw innerException;
+                        }
+
                         invokeResult = null;
                     }
                 }
