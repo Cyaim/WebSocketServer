@@ -160,13 +160,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public virtual Task<bool> OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        public virtual async Task<bool> OnBeforeConnection(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
             if (BeforeConnectionEvent != null)
             {
-                return BeforeConnectionEvent(context, webSocketOptions, channel, logger);
+                return await BeforeConnectionEvent(context, webSocketOptions, channel, logger).ConfigureAwait(false);
             }
-            return Task.FromResult(true);
+            return true;
         }
 
         /// <summary>
@@ -192,13 +192,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// <param name="channel"></param>
         /// <param name="logger"></param>
         /// <returns></returns>
-        public virtual Task OnDisconnected(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
+        public virtual async Task OnDisconnected(HttpContext context, WebSocketRouteOption webSocketOptions, string channel, ILogger<WebSocketRouteMiddleware> logger)
         {
             if (DisconnectedEvent != null)
             {
-                return DisconnectedEvent(context, webSocketOptions, channel, logger);
+                await DisconnectedEvent(context, webSocketOptions, channel, logger).ConfigureAwait(false);
             }
-            return Task.CompletedTask;
         }
 
         /// <summary>
