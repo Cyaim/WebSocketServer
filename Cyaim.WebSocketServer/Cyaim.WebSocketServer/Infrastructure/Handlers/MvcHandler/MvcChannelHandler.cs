@@ -1064,42 +1064,49 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 // Async api support
                 if (invokeResult is Task task)
                 {
-                    // 检查是否是 Task<T> 类型
                     var taskType = task.GetType();
-                    if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
+                    bool isGenericTask = taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>);
+
+                    // 预先准备好反射所需的 PropertyInfo（如果是 Task<T>）
+                    PropertyInfo resultProperty = null;
+                    if (isGenericTask) resultProperty = taskType.GetProperty("Result");
+
+                    try
                     {
-                        // 这是 Task<T>，需要获取返回值
-                        // 先 await 任务完成，避免同步阻塞
+                        // 等待任务完成（异步操作，不阻塞线程）
                         await task.ConfigureAwait(false);
-
-                        // 检查任务是否有异常
-                        if (task.IsFaulted && task.Exception != null)
+                    }
+                    catch (Exception ex)
+                    {
+                        // await 会抛出 AggregateException，提取内部异常
+                        if (ex is AggregateException aggEx && aggEx.InnerException != null)
                         {
-                            // 抛出内部异常（AggregateException 的第一个内部异常）
-                            var innerException = task.Exception.InnerException ?? task.Exception;
-                            throw innerException;
+                            throw aggEx.InnerException;
                         }
+                        throw;
+                    }
 
-                        // 使用反射获取 Result 属性值（此时任务已完成，不会阻塞）
-                        var resultProperty = taskType.GetProperty("Result");
-                        if (resultProperty != null)
-                        {
-                            invokeResult = resultProperty.GetValue(task);
-                        }
+                    // 检查任务状态（await 后任务已完成，但需要检查是否有异常或取消）
+                    if (task.IsFaulted && task.Exception != null)
+                    {
+                        // 抛出内部异常（AggregateException 的第一个内部异常）
+                        var innerException = task.Exception.InnerException ?? task.Exception;
+                        throw innerException;
+                    }
+
+                    if (task.IsCanceled)
+                    {
+                        throw new TaskCanceledException(task);
+                    }
+
+                    // 检查是否是 Task<T> 类型，需要获取返回值
+                    if (isGenericTask && resultProperty != null)
+                    {
+                        // 使用预先准备好的 PropertyInfo 获取结果（此时任务已完成，不会阻塞）
+                        invokeResult = resultProperty.GetValue(task);
                     }
                     else
                     {
-                        // 这是 Task（无返回值），直接 await
-                        await task.ConfigureAwait(false);
-
-                        // 检查任务是否有异常
-                        if (task.IsFaulted && task.Exception != null)
-                        {
-                            // 抛出内部异常（AggregateException 的第一个内部异常）
-                            var innerException = task.Exception.InnerException ?? task.Exception;
-                            throw innerException;
-                        }
-
                         invokeResult = null;
                     }
                 }
@@ -1126,9 +1133,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 logger.LogInformation(resp.Msg);
 
                 MvcResponseScheme customResp = await webSocketOptions.OnException(ex, request, resp, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
-
-                //if (!webSocketOptions.IsDevelopment)
-                //    resp.Msg = null;
 
                 return customResp;
             }
