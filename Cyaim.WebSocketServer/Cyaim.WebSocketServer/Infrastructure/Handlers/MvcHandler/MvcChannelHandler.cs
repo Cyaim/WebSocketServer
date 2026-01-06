@@ -592,6 +592,18 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         {
                             await forwardTask;
                         }
+                        else
+                        {
+                            // 无论是否串行，都处理 Task 异常（关键）
+                            forwardTask = forwardTask.ContinueWith(t =>
+                            {
+                                if (t.IsFaulted)
+                                {
+                                    // 记录异常日志，避免未观察到的异常
+                                    logger.LogInformation(t.Exception, t.Exception.Message, Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
+                                }
+                            }, TaskContinuationOptions.OnlyOnFaulted);
+                        }
 
                         // 执行管道 AfterForwardingData
                         _ = await InvokePipeline(RequestPipelineStage.AfterForwardingData, PipelineContext.CreateForward(context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody, webSocketOption));
