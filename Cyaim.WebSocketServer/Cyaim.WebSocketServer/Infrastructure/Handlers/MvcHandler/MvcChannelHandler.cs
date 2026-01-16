@@ -592,6 +592,18 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         {
                             await forwardTask;
                         }
+                        else
+                        {
+                            // 无论是否串行，都处理 Task 异常（关键）
+                            forwardTask = forwardTask.ContinueWith(t =>
+                            {
+                                if (t.IsFaulted)
+                                {
+                                    // 记录异常日志，避免未观察到的异常
+                                    logger.LogInformation(t.Exception, t.Exception.Message, Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
+                                }
+                            }, TaskContinuationOptions.OnlyOnFaulted);
+                        }
 
                         // 执行管道 AfterForwardingData
                         _ = await InvokePipeline(RequestPipelineStage.AfterForwardingData, PipelineContext.CreateForward(context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody, webSocketOption));
@@ -839,7 +851,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             long requestTime = DateTime.Now.Ticks;
             string requestPath = request.Target.ToLower();
-
+            IServiceScope serviceScope = null;
             try
             {
                 // 从键值对中获取对应的执行函数 
@@ -849,20 +861,20 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     goto NotFound;
                 }
-                Type clss = webSocketOptions.WatchAssemblyContext.WatchEndPoint.FirstOrDefault(x => x.MethodPath == requestPath)?.Class;
-                if (clss == null)
+                Type targetClass = webSocketOptions.WatchAssemblyContext.WatchEndPoint.FirstOrDefault(x => x.MethodPath == requestPath)?.Class;
+                if (targetClass == null)
                 {
                     //找不到访问目标
                     goto NotFound;
                 }
 
                 #region 注入Socket的HttpContext和WebSocket客户端
-                webSocketOptions.WatchAssemblyContext.MaxConstructorParameters.TryGetValue(clss, out ConstructorParameter constructorParameter);
+                webSocketOptions.WatchAssemblyContext.MaxConstructorParameters.TryGetValue(targetClass, out ConstructorParameter constructorParameter);
 
                 object[] instanceParmas = new object[constructorParameter.ParameterInfos.Length];
                 // 从Scope DI容器提取目标类构造函数所需的对象 
                 var serviceScopeFactory = WebSocketRouteOption.ApplicationServices.GetService<IServiceScopeFactory>();
-                var serviceScope = serviceScopeFactory.CreateScope();
+                serviceScope = serviceScopeFactory.CreateScope();
                 var scopeIocProvider = serviceScope.ServiceProvider;
                 for (int i = 0; i < constructorParameter.ParameterInfos.Length; i++)
                 {
@@ -885,11 +897,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     }
                 }
 
-                object inst = Activator.CreateInstance(clss, instanceParmas);
+                object inst = Activator.CreateInstance(targetClass, instanceParmas);
 
                 // 使用注入器工厂注入 HttpContext 和 WebSocket（支持源代码生成和反射两种方式）
                 var injectorFactory = webSocketOptions.InjectorFactory ?? new EndpointInjectorFactory(webSocketOptions);
-                var injector = injectorFactory.GetOrCreateInjector(clss);
+                var injector = injectorFactory.GetOrCreateInjector(targetClass);
                 injector.Inject(inst, context, webSocket);
                 #endregion
 
@@ -1064,51 +1076,55 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 // Async api support
                 if (invokeResult is Task task)
                 {
-                    // 检查是否是 Task<T> 类型
                     var taskType = task.GetType();
-                    if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
+                    bool isGenericTask = taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>);
+
+                    // 预先准备好反射所需的 PropertyInfo（如果是 Task<T>）
+                    PropertyInfo resultProperty = null;
+                    if (isGenericTask) resultProperty = taskType.GetProperty("Result");
+
+                    try
                     {
-                        // 这是 Task<T>，需要获取返回值
-                        // 先 await 任务完成，避免同步阻塞
+                        // 等待任务完成（异步操作，不阻塞线程）
                         await task.ConfigureAwait(false);
-
-                        // 检查任务是否有异常
-                        if (task.IsFaulted && task.Exception != null)
+                    }
+                    catch (Exception ex)
+                    {
+                        // await 会抛出 AggregateException，提取内部异常
+                        if (ex is AggregateException aggEx && aggEx.InnerException != null)
                         {
-                            // 抛出内部异常（AggregateException 的第一个内部异常）
-                            var innerException = task.Exception.InnerException ?? task.Exception;
-                            throw innerException;
+                            ex = aggEx.InnerException;
                         }
+                        mvcResponse = await webSocketOptions.OnException(ex, request, mvcResponse, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
+                    }
 
-                        // 使用反射获取 Result 属性值（此时任务已完成，不会阻塞）
-                        var resultProperty = taskType.GetProperty("Result");
-                        if (resultProperty != null)
-                        {
-                            invokeResult = resultProperty.GetValue(task);
-                        }
+                    // 检查任务状态（await 后任务已完成，但需要检查是否有异常或取消）
+                    if (task.IsFaulted && task.Exception != null)
+                    {
+                        // 抛出内部异常（AggregateException 的第一个内部异常）
+                        var innerException = task.Exception.InnerException ?? task.Exception;
+                        mvcResponse = await webSocketOptions.OnException(innerException, request, mvcResponse, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
+                    }
+
+                    if (task.IsCanceled)
+                    {
+                        mvcResponse = await webSocketOptions.OnException(new TaskCanceledException(task), request, mvcResponse, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
+                    }
+
+                    // 检查是否是 Task<T> 类型，需要获取返回值
+                    if (isGenericTask && resultProperty != null)
+                    {
+                        // 使用预先准备好的 PropertyInfo 获取结果（此时任务已完成，不会阻塞）
+                        invokeResult = resultProperty.GetValue(task);
                     }
                     else
                     {
-                        // 这是 Task（无返回值），直接 await
-                        await task.ConfigureAwait(false);
-
-                        // 检查任务是否有异常
-                        if (task.IsFaulted && task.Exception != null)
-                        {
-                            // 抛出内部异常（AggregateException 的第一个内部异常）
-                            var innerException = task.Exception.InnerException ?? task.Exception;
-                            throw innerException;
-                        }
-
                         invokeResult = null;
                     }
                 }
 
                 #endregion
 
-                // Dispose ioc scope
-                serviceScope?.Dispose();
-                serviceScope = null;
 
                 mvcResponse.Id = request.Id;
                 mvcResponse.Target = request.Target;
@@ -1127,10 +1143,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                 MvcResponseScheme customResp = await webSocketOptions.OnException(ex, request, resp, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
 
-                //if (!webSocketOptions.IsDevelopment)
-                //    resp.Msg = null;
-
                 return customResp;
+            }
+            finally
+            {
+                // Dispose ioc scope
+                serviceScope?.Dispose();
+                serviceScope = null;
             }
 
         NotFound:
