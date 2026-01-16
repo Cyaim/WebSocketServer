@@ -102,6 +102,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
 
                 while (sendChannel.Reader.TryRead(out SendItem item))
                 {
+                    if (item == null || item.Sockets == null || item.Sockets.Count < 1) continue;
                     try
                     {
                         await SendItemInBatchesAsync(item);
