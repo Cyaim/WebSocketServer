@@ -144,6 +144,16 @@ namespace Cyaim.WebSocketServer.Infrastructure
 
         public static readonly string MvcForwardSendData_RequestIdRequired = "Request must contain an Id property. The client cannot distinguish the response source without an Id." + Environment.NewLine;
 
+        public static readonly string ConnectionEntry_ClusterManagerRegistered = "Registered connection with cluster manager.";
+        public static readonly string ConnectionEntry_ClusterManagerRegisterFailed = "Failed to register connection with cluster manager.";
+        public static readonly string ConnectionEntry_ClusterManagerUnregistered = "Unregistered connection from cluster manager.";
+        public static readonly string ConnectionEntry_ClusterManagerUnregisterFailed = "Failed to unregister connection from cluster manager.";
+        public static readonly string ConnectionEntry_CloseResponseFailed = "Failed to send Close response.";
+        public static readonly string ConnectionEntry_CloseConnectionError = "Error closing WebSocket connection.";
+        public static readonly string ConnectionEntry_AccessDenied = "Access denied for IP {0} from {1}.";
+        public static readonly string ConnectionEntry_AccessDeniedWithMessage = "Access denied for IP {0} from {1}: {2}";
+        public static readonly string ConnectionEntry_AccessControlError = "Error checking access control.";
+
 
     }
 }

@@ -232,11 +232,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                     context.Request.Path,
                                     remoteIpAddress,
                                     remotePort);
-                                logger.LogDebug($"Registered connection {context.Connection.Id} with cluster manager");
+                                logger.LogDebug(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_ClusterManagerRegistered));
                             }
                             catch (Exception ex)
                             {
-                                logger.LogWarning(ex, $"Failed to register connection {context.Connection.Id} with cluster manager");
+                                logger.LogWarning(ex, string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_ClusterManagerRegisterFailed));
                             }
                         }
 
@@ -255,7 +255,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     {
                         if (webSocket.CloseStatus == null && webSocket.State == WebSocketState.Open)
                         {
-                            await webSocket.CloseAsync(WebSocketCloseStatus.PolicyViolation, string.Empty, CancellationToken.None).ConfigureAwait(false);
+                            //await webSocket.CloseAsync(WebSocketCloseStatus.PolicyViolation, string.Empty, CancellationToken.None).ConfigureAwait(false);
                             webSocket.Abort();
                         }
                         webSocketCloseStatus = webSocket.CloseStatus;
@@ -303,11 +303,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 string wsCloseDesc = string.Empty;
                 using MemoryStream wsReceiveReader = new MemoryStream(ReceiveTextBufferSize);
+                bool connectionClosed = false;
                 do
                 {
                     long requestTime = DateTime.Now.Ticks;
                     WebSocketReceiveResult result = null;
                     SemaphoreSlim endPointSlim = null;
+                    bool receivedClose = false;
                     try
                     {
                         // Connection level restrictions
@@ -320,7 +322,8 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         {
                             if (webSocket.State == WebSocketState.Aborted || webSocket.State == WebSocketState.CloseReceived || webSocket.State == WebSocketState.Closed)
                             {
-                                // exit
+                                // 连接已关闭，设置标志并退出
+                                connectionClosed = true;
                                 break;
                             }
                             else
@@ -335,11 +338,54 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         _ = await InvokePipeline(RequestPipelineStage.BeforeReceivingData, PipelineContext.CreateReceive(context, webSocket, null, null, webSocketOption));
 
                         #region 接收数据
+                        // 接收数据的缓冲区
                         byte[] buffer = ArrayPool<byte>.Shared.Rent(ReceiveTextBufferSize);
-                        while ((result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None)).Count > 0)
+                        bool messageComplete = false;
+
+                        try
                         {
-                            try
+                            while (!messageComplete && !receivedClose)
                             {
+                                // 接收数据帧
+                                result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+
+                                // 如果接收到Close消息，保存状态并退出接收循环
+                                if (result.MessageType == WebSocketMessageType.Close)
+                                {
+                                    receivedClose = true;
+                                    connectionClosed = true;
+                                    wsCloseDesc = result.CloseStatusDescription;
+                                    // 响应Close帧（如果连接状态允许）
+                                    if (webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseReceived)
+                                    {
+                                        try
+                                        {
+                                            await webSocket.CloseAsync(
+                                                result.CloseStatus ?? WebSocketCloseStatus.NormalClosure,
+                                                result.CloseStatusDescription ?? string.Empty,
+                                                CancellationToken.None);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            logger.LogDebug(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_CloseResponseFailed + Environment.NewLine + ex.Message));
+                                        }
+                                    }
+                                    break;
+                                }
+
+                                // 如果Count为0，检查是否消息已完成
+                                // 正常情况下，Count应该大于0，但如果EndOfMessage为true，说明消息接收完成
+                                if (result.Count == 0)
+                                {
+                                    if (result.EndOfMessage)
+                                    {
+                                        messageComplete = true;
+                                        break;
+                                    }
+                                    // Count为0但EndOfMessage为false的情况不应该发生，但为了安全继续等待
+                                    continue;
+                                }
+
                                 // 请求大小限制
                                 if (wsReceiveReader.Length > webSocketOption.MaxRequestReceiveDataLimit)
                                 {
@@ -374,7 +420,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                         CancellationToken.None);
                                 }
 
-                                //await wsReceiveReader.WriteAsync(buffer, 0, result.Count);
+                                // 将接收到的数据写入MemoryStream
                                 await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
 
                                 // 记录消息接收指标
@@ -387,33 +433,47 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 // 执行ReceivingData管道
                                 _ = await InvokePipeline(RequestPipelineStage.ReceivingData, PipelineContext.CreateReceive(context, webSocket, result, buffer, webSocketOption));
 
-                                // 已经接受完数据了
+                                // 检查消息是否接收完成
+                                // 只有当EndOfMessage为true时，才认为消息接收完成
                                 if (result.EndOfMessage || result.CloseStatus.HasValue)
                                 {
+                                    messageComplete = true;
                                     break;
                                 }
-                            }
-                            catch (Exception ex)
-                            {
-                                logger.LogDebug(
-                                    string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE,
-                                            context.Connection.RemoteIpAddress,
-                                            context.Connection.RemotePort,
-                                            context.Connection.Id,
-                                            I18nText.ConnectionEntry_ReceivingClientDataException + Environment.NewLine + ex.Message + Environment.NewLine + ex.StackTrace
-                                        )
-                                    );
-                            }
-                            finally
-                            {
-                                ArrayPool<byte>.Shared.Return(buffer);
+
+                                // 如果EndOfMessage为false，说明还有更多帧需要接收，继续循环
                             }
                         }
-                        // 如果接收到的消息是Close时，断开连接
-                        if (result.MessageType == WebSocketMessageType.Close)
+                        catch (Exception ex)
                         {
+                            logger.LogDebug(
+                                string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE,
+                                        context.Connection.RemoteIpAddress,
+                                        context.Connection.RemotePort,
+                                        context.Connection.Id,
+                                        I18nText.ConnectionEntry_ReceivingClientDataException + Environment.NewLine + ex.Message + Environment.NewLine + ex.StackTrace
+                                    )
+                                );
+                            // 发生异常时，如果已经接收到部分数据且EndOfMessage为true，认为消息接收完成
+                            if (result != null && result.EndOfMessage)
+                            {
+                                messageComplete = true;
+                            }
+                        }
+                        finally
+                        {
+                            // 归还buffer
+                            ArrayPool<byte>.Shared.Return(buffer);
+                        }
+
+                        // 如果接收到Close消息，直接退出当前循环，不再处理数据
+                        if (receivedClose)
+                        {
+                            // 设置连接关闭标志，退出外层循环
+                            connectionClosed = true;
                             break;
                         }
+
                         // 缩小Capacity避免Getbuffer出现0x00
                         if (wsReceiveReader.Capacity > wsReceiveReader.Length)
                         {
@@ -421,13 +481,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
                         #endregion
 
-                        // 执行AfterReceivingData管道
-                        _ = await InvokePipeline(RequestPipelineStage.AfterReceivingData, PipelineContext.CreateReceive(context, webSocket, result, wsReceiveReader.GetBuffer(), webSocketOption));
-
-                        if (result == null)
+                        // 如果result为null或接收到Close消息，跳过后续处理
+                        if (result == null || receivedClose)
                         {
                             continue;
                         }
+
+                        // 执行AfterReceivingData管道
+                        _ = await InvokePipeline(RequestPipelineStage.AfterReceivingData, PipelineContext.CreateReceive(context, webSocket, result, wsReceiveReader.GetBuffer(), webSocketOption));
 
                         // 在接收完数据后，应用端点级别的限速策略
                         string endpoint = null;
@@ -531,6 +592,18 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         {
                             await forwardTask;
                         }
+                        else
+                        {
+                            // 无论是否串行，都处理 Task 异常（关键）
+                            forwardTask = forwardTask.ContinueWith(t =>
+                            {
+                                if (t.IsFaulted)
+                                {
+                                    // 记录异常日志，避免未观察到的异常
+                                    logger.LogInformation(t.Exception, t.Exception.Message, Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
+                                }
+                            }, TaskContinuationOptions.OnlyOnFaulted);
+                        }
 
                         // 执行管道 AfterForwardingData
                         _ = await InvokePipeline(RequestPipelineStage.AfterForwardingData, PipelineContext.CreateForward(context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody, webSocketOption));
@@ -543,13 +616,19 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     }
                     finally
                     {
-                        wsCloseDesc = result?.CloseStatusDescription;
+                        // 保存Close状态信息（如果还没有保存）
+                        if (result != null && !string.IsNullOrEmpty(result.CloseStatusDescription) && string.IsNullOrEmpty(wsCloseDesc))
+                        {
+                            wsCloseDesc = result.CloseStatusDescription;
+                        }
 
+                        // 重置接收缓冲区
                         wsReceiveReader.Flush();
                         wsReceiveReader.SetLength(0);
                         wsReceiveReader.Seek(0, SeekOrigin.Begin);
                         wsReceiveReader.Position = 0;
 
+                        // 释放信号量
                         if (ParallelForwardLimitSlim != null)
                         {
                             ParallelForwardLimitSlim.Release();
@@ -560,15 +639,34 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
                     }
 
-                } while (!appLifetime.ApplicationStopping.IsCancellationRequested);
+                } while (!appLifetime.ApplicationStopping.IsCancellationRequested && !connectionClosed);
 
-                // 连接断开
-                if (webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseSent)
+                // 连接断开处理
+                // 如果连接仍然打开，需要关闭它
+                if (webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseReceived)
                 {
-                    await webSocket.CloseAsync(webSocket.CloseStatus == null ?
-                        webSocket.State == WebSocketState.Aborted ?
-                        WebSocketCloseStatus.InternalServerError : WebSocketCloseStatus.NormalClosure
-                        : webSocket.CloseStatus.Value, wsCloseDesc, CancellationToken.None);
+                    try
+                    {
+                        // 如果已经收到了Close消息，使用接收到的Close状态
+                        // 否则使用默认的关闭状态
+                        WebSocketCloseStatus closeStatus = webSocket.CloseStatus ??
+                            (webSocket.State == WebSocketState.Aborted ?
+                                WebSocketCloseStatus.InternalServerError :
+                                WebSocketCloseStatus.NormalClosure);
+
+                        string closeDescription = wsCloseDesc ?? string.Empty;
+
+                        await webSocket.CloseAsync(closeStatus, closeDescription, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogDebug(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_CloseConnectionError + Environment.NewLine + ex.Message));
+                    }
+                }
+                // 如果已经发送了Close消息，等待对方关闭
+                else if (webSocket.State == WebSocketState.CloseSent)
+                {
+                    // 连接正在关闭中，不需要额外操作
                 }
             }
             catch (Exception ex)
@@ -753,7 +851,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             long requestTime = DateTime.Now.Ticks;
             string requestPath = request.Target.ToLower();
-
+            IServiceScope serviceScope = null;
             try
             {
                 // 从键值对中获取对应的执行函数 
@@ -763,20 +861,20 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     goto NotFound;
                 }
-                Type clss = webSocketOptions.WatchAssemblyContext.WatchEndPoint.FirstOrDefault(x => x.MethodPath == requestPath)?.Class;
-                if (clss == null)
+                Type targetClass = webSocketOptions.WatchAssemblyContext.WatchEndPoint.FirstOrDefault(x => x.MethodPath == requestPath)?.Class;
+                if (targetClass == null)
                 {
                     //找不到访问目标
                     goto NotFound;
                 }
 
                 #region 注入Socket的HttpContext和WebSocket客户端
-                webSocketOptions.WatchAssemblyContext.MaxConstructorParameters.TryGetValue(clss, out ConstructorParameter constructorParameter);
+                webSocketOptions.WatchAssemblyContext.MaxConstructorParameters.TryGetValue(targetClass, out ConstructorParameter constructorParameter);
 
                 object[] instanceParmas = new object[constructorParameter.ParameterInfos.Length];
                 // 从Scope DI容器提取目标类构造函数所需的对象 
                 var serviceScopeFactory = WebSocketRouteOption.ApplicationServices.GetService<IServiceScopeFactory>();
-                var serviceScope = serviceScopeFactory.CreateScope();
+                serviceScope = serviceScopeFactory.CreateScope();
                 var scopeIocProvider = serviceScope.ServiceProvider;
                 for (int i = 0; i < constructorParameter.ParameterInfos.Length; i++)
                 {
@@ -799,11 +897,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     }
                 }
 
-                object inst = Activator.CreateInstance(clss, instanceParmas);
+                object inst = Activator.CreateInstance(targetClass, instanceParmas);
 
                 // 使用注入器工厂注入 HttpContext 和 WebSocket（支持源代码生成和反射两种方式）
                 var injectorFactory = webSocketOptions.InjectorFactory ?? new EndpointInjectorFactory(webSocketOptions);
-                var injector = injectorFactory.GetOrCreateInjector(clss);
+                var injector = injectorFactory.GetOrCreateInjector(targetClass);
                 injector.Inject(inst, context, webSocket);
                 #endregion
 
@@ -913,7 +1011,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             catch (FormatException ex)
                             {
                                 // ConvertTo 抛出 类型转换失败
-                                logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, $"{requestPath}.{item.Name}" + I18nText.MvcForwardSendData_RequestBodyParameterFormatError + ex.Message + Environment.NewLine + ex.StackTrace));
+                                logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, string.Concat(requestPath, ".", item.Name, I18nText.MvcForwardSendData_RequestBodyParameterFormatError, ex.Message, Environment.NewLine, ex.StackTrace)));
                             }
                             args[i] = parmVal;
                         }
@@ -976,22 +1074,50 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 invokeResult = methodInvoker.Invoke(inst, args);
 
                 // Async api support
-                if (invokeResult is Task)
+                if (invokeResult is Task task)
                 {
-                    dynamic invokeResultTask = invokeResult;
-                    //await invokeResultTask;
-                    await Task.WhenAny(invokeResultTask, Task.Delay(Timeout.Infinite, appLifetime.ApplicationStopping));
+                    var taskType = task.GetType();
+                    bool isGenericTask = taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>);
 
-                    if (invokeResultTask.Exception != null)
-                    {
-                        throw invokeResultTask.Exception;
-                    }
+                    // 预先准备好反射所需的 PropertyInfo（如果是 Task<T>）
+                    PropertyInfo resultProperty = null;
+                    if (isGenericTask) resultProperty = taskType.GetProperty("Result");
 
                     try
                     {
-                        invokeResult = invokeResultTask.Result;
+                        // 等待任务完成（异步操作，不阻塞线程）
+                        await task.ConfigureAwait(false);
                     }
-                    catch (RuntimeBinderException)
+                    catch (Exception ex)
+                    {
+                        // await 会抛出 AggregateException，提取内部异常
+                        if (ex is AggregateException aggEx && aggEx.InnerException != null)
+                        {
+                            ex = aggEx.InnerException;
+                        }
+                        mvcResponse = await webSocketOptions.OnException(ex, request, mvcResponse, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
+                    }
+
+                    // 检查任务状态（await 后任务已完成，但需要检查是否有异常或取消）
+                    if (task.IsFaulted && task.Exception != null)
+                    {
+                        // 抛出内部异常（AggregateException 的第一个内部异常）
+                        var innerException = task.Exception.InnerException ?? task.Exception;
+                        mvcResponse = await webSocketOptions.OnException(innerException, request, mvcResponse, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
+                    }
+
+                    if (task.IsCanceled)
+                    {
+                        mvcResponse = await webSocketOptions.OnException(new TaskCanceledException(task), request, mvcResponse, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
+                    }
+
+                    // 检查是否是 Task<T> 类型，需要获取返回值
+                    if (isGenericTask && resultProperty != null)
+                    {
+                        // 使用预先准备好的 PropertyInfo 获取结果（此时任务已完成，不会阻塞）
+                        invokeResult = resultProperty.GetValue(task);
+                    }
+                    else
                     {
                         invokeResult = null;
                     }
@@ -999,9 +1125,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                 #endregion
 
-                // Dispose ioc scope
-                serviceScope?.Dispose();
-                serviceScope = null;
 
                 mvcResponse.Id = request.Id;
                 mvcResponse.Target = request.Target;
@@ -1020,10 +1143,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                 MvcResponseScheme customResp = await webSocketOptions.OnException(ex, request, resp, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
 
-                //if (!webSocketOptions.IsDevelopment)
-                //    resp.Msg = null;
-
                 return customResp;
+            }
+            finally
+            {
+                // Dispose ioc scope
+                serviceScope?.Dispose();
+                serviceScope = null;
             }
 
         NotFound:
@@ -1086,7 +1212,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 msg = I18nText.WebSocketCloseStatus_ConnectionShutdown;
             }
 
-            logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.OnDisconnected_Disconnected + msg + Environment.NewLine + $"Status:{webSocketCloseStatus.ToString() ?? "NoHandshakeSucceeded"}"));
+            logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, string.Concat(I18nText.OnDisconnected_Disconnected, msg, Environment.NewLine, "Status:", webSocketCloseStatus?.ToString() ?? "NoHandshakeSucceeded")));
 
             try
             {
@@ -1113,11 +1239,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         try
                         {
                             await clusterManager.UnregisterConnectionAsync(context.Connection.Id);
-                            logger.LogDebug($"Unregistered connection {context.Connection.Id} from cluster manager");
+                            logger.LogDebug(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_ClusterManagerUnregistered));
                         }
                         catch (Exception ex)
                         {
-                            logger.LogWarning(ex, $"Failed to unregister connection {context.Connection.Id} from cluster manager");
+                            logger.LogWarning(ex, string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_ClusterManagerUnregisterFailed));
                         }
                     }
                 }
@@ -1158,22 +1284,22 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                     case AccessDeniedAction.ReturnForbidden:
                                         context.Response.StatusCode = 403;
                                         await context.Response.WriteAsync(policy.DenialMessage ?? "Access denied");
-                                        logger.LogWarning($"Access denied for IP {ipAddress} from {context.Request.Path}: {policy.DenialMessage}");
+                                        logger.LogWarning(string.Format(I18nText.ConnectionEntry_AccessDeniedWithMessage, ipAddress, context.Request.Path, policy.DenialMessage ?? string.Empty));
                                         break;
                                     case AccessDeniedAction.ReturnUnauthorized:
                                         context.Response.StatusCode = 401;
                                         await context.Response.WriteAsync(policy.DenialMessage ?? "Unauthorized");
-                                        logger.LogWarning($"Access denied for IP {ipAddress} from {context.Request.Path}: {policy.DenialMessage}");
+                                        logger.LogWarning(string.Format(I18nText.ConnectionEntry_AccessDeniedWithMessage, ipAddress, context.Request.Path, policy.DenialMessage ?? string.Empty));
                                         break;
                                     case AccessDeniedAction.CloseConnection:
                                     default:
-                                        logger.LogWarning($"Access denied for IP {ipAddress} from {context.Request.Path}: {policy.DenialMessage}");
+                                        logger.LogWarning(string.Format(I18nText.ConnectionEntry_AccessDeniedWithMessage, ipAddress, context.Request.Path, policy.DenialMessage ?? string.Empty));
                                         break;
                                 }
                             }
                             else
                             {
-                                logger.LogWarning($"Access denied for IP {ipAddress} from {context.Request.Path}");
+                                logger.LogWarning(string.Format(I18nText.ConnectionEntry_AccessDenied, ipAddress, context.Request.Path));
                             }
 
                             return false;
@@ -1182,7 +1308,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Error checking access control");
+                    logger.LogError(ex, I18nText.ConnectionEntry_AccessControlError);
                     // Allow connection on error to avoid blocking legitimate users / 出错时允许连接，避免阻止合法用户
                 }
             }

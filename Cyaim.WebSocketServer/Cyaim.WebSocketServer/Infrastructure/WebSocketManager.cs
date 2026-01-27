@@ -102,6 +102,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
 
                 while (sendChannel.Reader.TryRead(out SendItem item))
                 {
+                    if (item == null || item.Sockets == null || item.Sockets.Count < 1) continue;
                     try
                     {
                         await SendItemInBatchesAsync(item);
@@ -676,32 +677,22 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     {
                         continue;
                     }
-
-                    var task = Task.Run(async () =>
+                    var webSocket = GetLocalWebSocket(connectionId);
+                    if (webSocket != null && webSocket.State == WebSocketState.Open)
                     {
-                        var webSocket = GetLocalWebSocket(connectionId);
-                        if (webSocket != null && webSocket.State == WebSocketState.Open)
-                        {
-                            try
-                            {
-                                await webSocket.SendAsync(
-                                    new ArraySegment<byte>(data),
-                                    messageType,
-                                    true,
-                                    CancellationToken.None);
-                                results[connectionId] = true;
-                            }
-                            catch
-                            {
-                                results[connectionId] = false;
-                            }
-                        }
-                        else
-                        {
-                            results[connectionId] = false;
-                        }
-                    });
-                    tasks.Add(task);
+                        Task task = webSocket.SendAsync(
+                             new ArraySegment<byte>(data),
+                             messageType,
+                             true,
+                             CancellationToken.None);
+                        tasks.Add(task);
+
+                        results[connectionId] = true;
+                    }
+                    else
+                    {
+                        results[connectionId] = false;
+                    }
                 }
 
                 await Task.WhenAll(tasks);
