@@ -31,11 +31,11 @@
 	<!-- .NET Standard 2.1 需要显式引用，使用最新稳定版本 -->
 	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
-		<PackageReference Include="System.Text.Json" Version="9.0.0" />
+		<PackageReference Include="System.Text.Json" Version="10.0.2" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="FreeRedis" Version="1.2.0" />
+		<PackageReference Include="FreeRedis" Version="1.5.5" />
 		<ProjectReference Include="..\Cyaim.WebSocketServer.Cluster.Hybrid\Cyaim.WebSocketServer.Cluster.Hybrid.csproj" />
 	</ItemGroup>
 

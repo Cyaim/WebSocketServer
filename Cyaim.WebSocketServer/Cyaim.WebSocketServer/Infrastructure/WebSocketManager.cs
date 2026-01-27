@@ -276,7 +276,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 {
                     totalBytesRead += bytesRead;
                 }
-                
+
                 if (totalBytesRead > 0)
                 {
                     await webSocket.SendAsync(new ArraySegment<byte>(buffer, 0, totalBytesRead), messageType, endOfMessage: true, cancellationToken);
@@ -661,7 +661,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 // Use cluster routing / 使用集群路由
                 var connectionIdsList = connectionIds.ToList();
                 var connectionIdsArray = connectionIdsList.ToArray();
-                
+
                 var results = await clusterManager.RouteMessagesAsync(connectionIdsArray, data, (int)messageType);
                 return results;
             }
@@ -978,7 +978,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 // Use local WebSocket / 使用本地 WebSocket
                 var results = new Dictionary<string, bool>();
                 var connectionIdList = connectionIds.Where(id => !string.IsNullOrEmpty(id)).ToList();
-                
+
                 if (connectionIdList.Count == 0)
                 {
                     return results;
