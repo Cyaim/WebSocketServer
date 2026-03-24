@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading.Tasks;
 
 namespace Cyaim.WebSocketServer.Infrastructure.Configures
 {
@@ -52,5 +53,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// K MethodInfo,V ParameterInfo
         /// </summary>
         public Dictionary<MethodInfo, ParameterInfo[]> MethodParameters { get; set; }
+
+        /// <summary>
+        /// Task result getter cache in endpoint method
+        /// K endpoint MethodInfo,V Task result getter
+        /// </summary>
+        public Dictionary<MethodInfo, Func<Task, object>> MethodTaskResultGetters { get; set; }
     }
 }

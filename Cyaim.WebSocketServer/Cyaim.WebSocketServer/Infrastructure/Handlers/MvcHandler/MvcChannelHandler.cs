@@ -1,4 +1,4 @@
-﻿using Cyaim.WebSocketServer.Infrastructure.AccessControl;
+using Cyaim.WebSocketServer.Infrastructure.AccessControl;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Infrastructure.Injectors;
 using Cyaim.WebSocketServer.Infrastructure.Metrics;
@@ -1076,52 +1076,32 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 // Async api support
                 if (invokeResult is Task task)
                 {
-                    var taskType = task.GetType();
-                    bool isGenericTask = taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>);
+                    await Task.WhenAny(task, Task.Delay(Timeout.Infinite, appLifetime.ApplicationStopping));
 
-                    // 预先准备好反射所需的 PropertyInfo（如果是 Task<T>）
-                    PropertyInfo resultProperty = null;
-                    if (isGenericTask) resultProperty = taskType.GetProperty("Result");
-
-                    try
+                    if (task.IsCanceled || task.IsFaulted)
                     {
-                        // 等待任务完成（异步操作，不阻塞线程）
-                        await task.ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        // await 会抛出 AggregateException，提取内部异常
-                        if (ex is AggregateException aggEx && aggEx.InnerException != null)
-                        {
-                            ex = aggEx.InnerException;
-                        }
-                        mvcResponse = await webSocketOptions.OnException(ex, request, mvcResponse, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
+                        await task;
                     }
 
-                    // 检查任务状态（await 后任务已完成，但需要检查是否有异常或取消）
-                    if (task.IsFaulted && task.Exception != null)
+                    if (task.Exception != null)
                     {
-                        // 抛出内部异常（AggregateException 的第一个内部异常）
-                        var innerException = task.Exception.InnerException ?? task.Exception;
-                        mvcResponse = await webSocketOptions.OnException(innerException, request, mvcResponse, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
+                        throw task.Exception;
                     }
 
-                    if (task.IsCanceled)
-                    {
-                        mvcResponse = await webSocketOptions.OnException(new TaskCanceledException(task), request, mvcResponse, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
-                    }
-
-                    // 检查是否是 Task<T> 类型，需要获取返回值
-                    if (isGenericTask && resultProperty != null)
-                    {
-                        // 使用预先准备好的 PropertyInfo 获取结果（此时任务已完成，不会阻塞）
-                        invokeResult = resultProperty.GetValue(task);
-                    }
-                    else
+                    if (method.ReturnType == typeof(Task))
                     {
                         invokeResult = null;
                     }
+                    else
+                    {
+                        Func<Task, object> taskResultGetter = null;
+                        webSocketOptions.WatchAssemblyContext.MethodTaskResultGetters?.TryGetValue(method, out taskResultGetter);
+                        invokeResult = taskResultGetter != null
+                            ? taskResultGetter(task)
+                            : null;
+                    }
                 }
+
 
                 #endregion
 
@@ -1137,7 +1117,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             {
                 MvcResponseScheme resp = new MvcResponseScheme() { Id = request.Id, Status = 1, Target = request.Target, RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
 
-                ex = (ex.InnerException ?? ex);
+                if (ex is AggregateException aggEx && aggEx.InnerException != null)
+                {
+                    ex = aggEx.InnerException;
+                }
+
                 resp.Msg = string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcDistributeAsync_Target + requestPath + Environment.NewLine + ex.Message + Environment.NewLine + ex.StackTrace);
                 logger.LogInformation(resp.Msg);
 
