@@ -1,4 +1,4 @@
-﻿using Cyaim.WebSocketServer.Infrastructure.AccessControl;
+using Cyaim.WebSocketServer.Infrastructure.AccessControl;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Infrastructure.Injectors;
 using Cyaim.WebSocketServer.Infrastructure.Metrics;
@@ -976,24 +976,26 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 invokeResult = methodInvoker.Invoke(inst, args);
 
                 // Async api support
-                if (invokeResult is Task)
+                if (invokeResult is Task task)
                 {
-                    dynamic invokeResultTask = invokeResult;
-                    //await invokeResultTask;
-                    await Task.WhenAny(invokeResultTask, Task.Delay(Timeout.Infinite, appLifetime.ApplicationStopping));
+                    await Task.WhenAny(task, Task.Delay(Timeout.Infinite, appLifetime.ApplicationStopping));
 
-                    if (invokeResultTask.Exception != null)
+                    if (task.Exception != null)
                     {
-                        throw invokeResultTask.Exception;
+                        throw task.Exception;
                     }
 
-                    try
-                    {
-                        invokeResult = invokeResultTask.Result;
-                    }
-                    catch (RuntimeBinderException)
+                    if (method.ReturnType == typeof(Task))
                     {
                         invokeResult = null;
+                    }
+                    else
+                    {
+                        Func<Task, object> taskResultGetter = null;
+                        webSocketOptions.WatchAssemblyContext.MethodTaskResultGetters?.TryGetValue(method, out taskResultGetter);
+                        invokeResult = taskResultGetter != null
+                            ? taskResultGetter(task)
+                            : null;
                     }
                 }
 

@@ -1,4 +1,4 @@
-﻿using Cyaim.WebSocketServer.Infrastructure.Attributes;
+using Cyaim.WebSocketServer.Infrastructure.Attributes;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,7 +10,9 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
+using System.Threading.Tasks;
 
 namespace Cyaim.WebSocketServer.Infrastructure
 {
@@ -182,6 +184,20 @@ namespace Cyaim.WebSocketServer.Infrastructure
 
             #endregion
 
+            #region 计算终结点返回值Task<TResult>结果读取器缓存
+
+            var methodTaskResultGetters = new Dictionary<MethodInfo, Func<Task, object>>();
+            foreach (var item in points.Select(x => x.MethodInfo))
+            {
+                if (TryBuildTaskResultGetter(item.ReturnType, out var taskResultGetter))
+                {
+                    methodTaskResultGetters[item] = taskResultGetter;
+                }
+            }
+            wsrOptions.WatchAssemblyContext.MethodTaskResultGetters = methodTaskResultGetters;
+
+            #endregion
+
             services.AddSingleton(x => wsrOptions);
 
             //services.TryAddSingleton<IHttpContextAccessor, HttpContextAccessor>();
@@ -192,6 +208,41 @@ namespace Cyaim.WebSocketServer.Infrastructure
 
             // 获取当前线程的默认文化
             var defaultCultureInfo = CultureInfo.CurrentCulture;
+        }
+
+        /// <summary>
+        /// 编译表达式树以获取 Task<TResult> 的结果，避免每次通过反射访问 Result 属性的性能开销。
+        /// </summary>
+        /// <param name="returnType"></param>
+        /// <param name="getter"></param>
+        /// <returns></returns>
+        private static bool TryBuildTaskResultGetter(Type returnType, out Func<Task, object> getter)
+        {
+            getter = null;
+            if (returnType == null || !returnType.IsGenericType)
+            {
+                return false;
+            }
+
+            var genericTypeDef = returnType.GetGenericTypeDefinition();
+            if (genericTypeDef != typeof(Task<>))
+            {
+                return false;
+            }
+
+            var resultType = returnType.GenericTypeArguments[0];
+            if (resultType.Name == "VoidTaskResult" && resultType.Namespace == "System.Threading.Tasks")
+            {
+                return false;
+            }
+
+            var taskParam = Expression.Parameter(typeof(Task), "task");
+            var castTask = Expression.Convert(taskParam, returnType);
+            var resultProperty = Expression.Property(castTask, "Result");
+            var castResult = Expression.Convert(resultProperty, typeof(object));
+
+            getter = Expression.Lambda<Func<Task, object>>(castResult, taskParam).Compile();
+            return true;
         }
 
         /// <summary>
