@@ -36,7 +36,7 @@
         <PackageReference Include="Microsoft.AspNetCore.Mvc.Core" Version="2.3.0" />
         <PackageReference Include="Microsoft.AspNetCore.Routing" Version="2.3.0" />
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
-        <PackageReference Include="System.Text.Json" Version="9.0.0" />
+        <PackageReference Include="System.Text.Json" Version="10.0.2" />
         <!-- 显式引用 Newtonsoft.Json 安全版本，覆盖 Microsoft.Extensions.DependencyModel 间接引用的漏洞版本 -->
         <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     </ItemGroup>
