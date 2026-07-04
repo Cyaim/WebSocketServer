@@ -1,5 +1,6 @@
 using Cyaim.WebSocketServer.Infrastructure.Attributes;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -22,6 +23,104 @@ namespace Cyaim.WebSocketServer.Infrastructure
     public static class WebSocketRouteServiceCollectionExtensions
     {
         /// <summary>
+        /// Default WebSocket channel path used by <see cref="AddWebSocketServer(IServiceCollection)"/> when no channel is configured.
+        /// <see cref="AddWebSocketServer(IServiceCollection)"/> 在未配置任何通道时使用的默认 WebSocket 通道路径。
+        /// </summary>
+        public const string DefaultWebSocketChannel = "/ws";
+
+        #region AddWebSocketServer
+
+        /// <summary>
+        /// Add Cyaim WebSocketServer with default settings:
+        /// an <see cref="MvcChannelHandler"/> is wired on channel "/ws" and endpoints are discovered
+        /// from the entry assembly's "*.Controllers" namespace (methods marked with [WebSocket]).
+        /// Then call app.UseWebSockets() and app.UseWebSocketServer() in the request pipeline.
+        ///
+        /// 使用默认配置添加 Cyaim WebSocketServer：
+        /// 自动在 "/ws" 通道上挂载 <see cref="MvcChannelHandler"/>，并从入口程序集的 "*.Controllers" 命名空间发现标记了 [WebSocket] 的终结点。
+        /// 之后请在请求管道中调用 app.UseWebSockets() 和 app.UseWebSocketServer()。
+        /// </summary>
+        /// <param name="services">The service collection / 服务容器</param>
+        /// <returns>A builder that can be used to add more channels / 可用于继续添加通道的构建器</returns>
+        public static IWebSocketServerBuilder AddWebSocketServer(this IServiceCollection services)
+        {
+            return AddWebSocketServer(services, null, null);
+        }
+
+        /// <summary>
+        /// Add Cyaim WebSocketServer with custom configuration.
+        /// Defaults are applied first (ApplicationServiceCollection = services, empty channel table),
+        /// then <paramref name="configure"/> runs so it can override them.
+        /// If no channel was configured, an <see cref="MvcChannelHandler"/> is wired on channel "/ws" automatically.
+        ///
+        /// 使用自定义配置添加 Cyaim WebSocketServer。
+        /// 先应用默认值（ApplicationServiceCollection = services、空通道表），随后执行 <paramref name="configure"/>，因此用户配置可以覆盖默认值。
+        /// 如果最终没有配置任何通道，将自动在 "/ws" 通道上挂载 <see cref="MvcChannelHandler"/>。
+        /// </summary>
+        /// <param name="services">The service collection / 服务容器</param>
+        /// <param name="configure">Configuration action for <see cref="WebSocketRouteOption"/> / <see cref="WebSocketRouteOption"/> 的配置委托</param>
+        /// <returns>A builder that can be used to add more channels / 可用于继续添加通道的构建器</returns>
+        public static IWebSocketServerBuilder AddWebSocketServer(this IServiceCollection services, Action<WebSocketRouteOption> configure)
+        {
+            return AddWebSocketServer(services, null, configure);
+        }
+
+        /// <summary>
+        /// Add Cyaim WebSocketServer with custom configuration and IConfiguration support
+        /// (used for loading BandwidthLimitPolicy from configuration, same as ConfigureWebSocketRoute).
+        ///
+        /// 使用自定义配置添加 Cyaim WebSocketServer，并支持传入 IConfiguration
+        /// （用于从配置文件加载 BandwidthLimitPolicy，与 ConfigureWebSocketRoute 行为一致）。
+        /// </summary>
+        /// <param name="services">The service collection / 服务容器</param>
+        /// <param name="configuration">Configuration object for loading BandwidthLimitPolicy / 用于加载 BandwidthLimitPolicy 的配置对象</param>
+        /// <param name="configure">Configuration action for <see cref="WebSocketRouteOption"/> / <see cref="WebSocketRouteOption"/> 的配置委托</param>
+        /// <returns>A builder that can be used to add more channels / 可用于继续添加通道的构建器</returns>
+        public static IWebSocketServerBuilder AddWebSocketServer(this IServiceCollection services, IConfiguration configuration, Action<WebSocketRouteOption> configure)
+        {
+            if (services == null)
+            {
+                throw new ArgumentNullException(nameof(services));
+            }
+
+            var defaultChannelAdded = false;
+            var option = ConfigureWebSocketRouteCore(services, configuration, x =>
+            {
+                // Apply defaults first / 先应用默认值
+                x.ApplicationServiceCollection = services;
+                if (x.WebSocketChannels == null)
+                {
+                    x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>();
+                }
+
+                // User configuration runs last so it can override the defaults / 用户配置最后执行，可覆盖默认值
+                configure?.Invoke(x);
+
+                // Safety net: never leave required members null / 兜底：确保必需成员不为空
+                if (x.ApplicationServiceCollection == null)
+                {
+                    x.ApplicationServiceCollection = services;
+                }
+                if (x.WebSocketChannels == null)
+                {
+                    x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>();
+                }
+
+                // Default-wire an MvcChannelHandler on "/ws" if the user didn't specify any channel
+                // 如果用户没有指定任何通道，默认在 "/ws" 上挂载 MvcChannelHandler
+                if (x.WebSocketChannels.Count == 0)
+                {
+                    x.WebSocketChannels.Add(DefaultWebSocketChannel, new MvcChannelHandler().ConnectionEntry);
+                    defaultChannelAdded = true;
+                }
+            });
+
+            return new WebSocketServerBuilder(services, option, defaultChannelAdded);
+        }
+
+        #endregion
+
+        /// <summary>
         /// Configure WebSocketRoute Middleware
         /// </summary>
         /// <param name="services"></param>
@@ -39,6 +138,22 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// <param name="setupAction"></param>
         public static void ConfigureWebSocketRoute(this IServiceCollection services, IConfiguration configuration, Action<WebSocketRouteOption> setupAction)
         {
+            _ = ConfigureWebSocketRouteCore(services, configuration, setupAction);
+        }
+
+        /// <summary>
+        /// Core logic shared by ConfigureWebSocketRoute and AddWebSocketServer.
+        /// Builds the <see cref="WebSocketRouteOption"/>, discovers endpoints and registers the option singleton.
+        ///
+        /// ConfigureWebSocketRoute 与 AddWebSocketServer 共享的核心逻辑。
+        /// 构建 <see cref="WebSocketRouteOption"/>、发现终结点并注册配置单例。
+        /// </summary>
+        /// <param name="services"></param>
+        /// <param name="configuration"></param>
+        /// <param name="setupAction"></param>
+        /// <returns>The configured <see cref="WebSocketRouteOption"/> instance / 配置完成的 <see cref="WebSocketRouteOption"/> 实例</returns>
+        internal static WebSocketRouteOption ConfigureWebSocketRouteCore(IServiceCollection services, IConfiguration configuration, Action<WebSocketRouteOption> setupAction)
+        {
             if (services == null)
             {
                 throw new ArgumentNullException(nameof(services));
@@ -47,7 +162,10 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 throw new ArgumentNullException(nameof(setupAction));
             }
-            services.TryAddSingleton<IHostApplicationLifetime>();
+            // 注意：不要 TryAddSingleton<IHostApplicationLifetime>() —— 把接口注册为自身实现会在
+            // BuildServiceProvider 时抛异常。Generic Host 总会注册真正的 ApplicationLifetime。
+            // Do NOT TryAddSingleton<IHostApplicationLifetime>() — registering the interface as its own
+            // implementation throws at BuildServiceProvider. Generic Host always provides the real one.
 
             // 如果提供了 IConfiguration，自动配置 IOptions<BandwidthLimitPolicy>
             // 用户也可以手动调用 services.Configure<BandwidthLimitPolicy>(...) 来配置
@@ -133,9 +251,20 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 }
                 points.AddRange(accessParam);
             }
+
+            // 终结点发现结果为空时给出明确警告，避免静默失败
+            // Warn loudly when endpoint discovery finds nothing, instead of failing silently
+            if (points.Count == 0)
+            {
+                Console.WriteLine($"WebSocket -> Warning: no WebSocket endpoint was discovered. Scanned namespace prefix: \"{assemblyName}\" (assembly: {assembly.GetName().Name}). Make sure your controller classes are under this namespace and their methods are marked with [WebSocket], or set WebSocketRouteOption.WatchAssemblyNamespacePrefix to the correct namespace prefix.");
+                Console.WriteLine($"WebSocket -> 警告：未发现任何 WebSocket 终结点。已扫描的命名空间前缀：\"{assemblyName}\"（程序集：{assembly.GetName().Name}）。请确认控制器类位于该命名空间下且方法标记了 [WebSocket] 特性，或将 WebSocketRouteOption.WatchAssemblyNamespacePrefix 设置为正确的命名空间前缀。");
+            }
+
             wsrOptions.WatchAssemblyContext.WatchEndPoint = points.ToArray();
+            // 忽略大小写查找，热路径无需再对每条请求的 Target 做 ToLower 分配
+            // Case-insensitive lookup so the hot path no longer allocates a lowercased Target per request
             wsrOptions.WatchAssemblyContext.WatchMethods =
-                new ConcurrentDictionary<string, MethodInfo>(wsrOptions.WatchAssemblyContext.WatchEndPoint.ToDictionary(x => x.MethodPath, x => x.MethodInfo));
+                new ConcurrentDictionary<string, MethodInfo>(wsrOptions.WatchAssemblyContext.WatchEndPoint.ToDictionary(x => x.MethodPath, x => x.MethodInfo), StringComparer.OrdinalIgnoreCase);
 
             #endregion
 
@@ -208,6 +337,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
 
             // 获取当前线程的默认文化
             var defaultCultureInfo = CultureInfo.CurrentCulture;
+
+            return wsrOptions;
         }
 
         /// <summary>
