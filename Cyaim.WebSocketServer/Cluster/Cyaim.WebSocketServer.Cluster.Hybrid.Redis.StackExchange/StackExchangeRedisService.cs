@@ -107,6 +107,45 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Redis.StackExchange
             return value.HasValue ? value.ToString() : null;
         }
 
+        /// <inheritdoc />
+        public async Task HashSetAsync(string key, string field, string value)
+        {
+            var db = _redis?.GetDatabase();
+            if (db == null) throw new InvalidOperationException("Redis is not connected");
+            await db.HashSetAsync(key, field, value);
+        }
+
+        /// <inheritdoc />
+        public async Task<string> HashGetAsync(string key, string field)
+        {
+            var db = _redis?.GetDatabase();
+            if (db == null) throw new InvalidOperationException("Redis is not connected");
+            var v = await db.HashGetAsync(key, field);
+            return v.HasValue ? v.ToString() : null;
+        }
+
+        /// <inheritdoc />
+        public async Task<Dictionary<string, string>> HashGetAllAsync(string key)
+        {
+            var db = _redis?.GetDatabase();
+            if (db == null) throw new InvalidOperationException("Redis is not connected");
+            var entries = await db.HashGetAllAsync(key);
+            var result = new Dictionary<string, string>();
+            foreach (var e in entries)
+            {
+                result[e.Name.ToString()] = e.Value.ToString();
+            }
+            return result;
+        }
+
+        /// <inheritdoc />
+        public async Task HashDeleteAsync(string key, string field)
+        {
+            var db = _redis?.GetDatabase();
+            if (db == null) throw new InvalidOperationException("Redis is not connected");
+            await db.HashDeleteAsync(key, field);
+        }
+
         /// <summary>
         /// Delete a key / 删除键
         /// </summary>

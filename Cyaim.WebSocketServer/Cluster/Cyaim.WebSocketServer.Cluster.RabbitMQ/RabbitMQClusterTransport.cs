@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -26,6 +27,21 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
         private readonly ConcurrentDictionary<string, ClusterNode> _nodes;
         private readonly CancellationTokenSource _cancellationTokenSource;
         private bool _disposed = false;
+
+        /// <summary>
+        /// Node liveness tracker based on last-seen message timestamps (Raft heartbeats arrive ~every second)
+        /// 基于最后一次收到消息时间戳的节点存活跟踪器（Raft 心跳约每秒到达一次）
+        /// </summary>
+        private readonly NodeLivenessTracker _liveness;
+
+        /// <summary>
+        /// Idle expiration for the node queue in milliseconds (x-expires).
+        /// The queue survives brief consumer disconnects (no message loss), while abandoned
+        /// queues are still cleaned up by the broker after this period of inactivity.
+        /// 节点队列的空闲过期时间（毫秒，x-expires）。
+        /// 队列可以在消费者短暂断开时保留（不丢消息），而废弃的队列在此不活跃时长后仍会被代理清理。
+        /// </summary>
+        private const int QueueExpiresMilliseconds = 5 * 60 * 1000;
 
         /// <summary>
         /// RabbitMQ connection / RabbitMQ 连接
@@ -59,11 +75,10 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
         /// </summary>
         public event EventHandler<ClusterNodeEventArgs> NodeConnected;
         /// <summary>
-        /// Event triggered when node disconnected / 节点断开连接时触发的事件
+        /// Event triggered when node disconnected (raised when a node has not been seen within the liveness timeout)
+        /// 节点断开连接时触发的事件（当节点在存活超时时间内未被观察到时触发）
         /// </summary>
-#pragma warning disable CS0067 // 事件从未使用，但可能是接口要求的一部分
         public event EventHandler<ClusterNodeEventArgs> NodeDisconnected;
-#pragma warning restore CS0067
 
         /// <summary>
         /// Constructor / 构造函数
@@ -78,6 +93,22 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
             _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
             _nodes = new ConcurrentDictionary<string, ClusterNode>();
             _cancellationTokenSource = new CancellationTokenSource();
+
+            // Node liveness: consider a node disconnected when no message (incl. Raft heartbeat ~1s)
+            // has been seen within the timeout window (default 15s, checked every 5s)
+            // 节点存活：当在超时窗口（默认 15 秒，每 5 秒检查一次）内未收到任何消息
+            // （包括约每秒一次的 Raft 心跳）时，认为节点已断开
+            _liveness = new NodeLivenessTracker();
+            _liveness.NodeTimedOut += (sender, e) =>
+            {
+                _logger.LogWarning($"Node {e.NodeId} has not been seen within the liveness timeout, raising NodeDisconnected");
+                NodeDisconnected?.Invoke(this, e);
+            };
+            _liveness.NodeRecovered += (sender, e) =>
+            {
+                _logger.LogInformation($"Node {e.NodeId} is reachable again, raising NodeConnected");
+                NodeConnected?.Invoke(this, e);
+            };
         }
 
         /// <summary>
@@ -86,23 +117,51 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
         public async Task StartAsync()
         {
             _logger.LogInformation($"Starting RabbitMQ cluster transport for node {_nodeId}");
-            
+
             try
             {
-                var factory = new ConnectionFactory { Uri = new Uri(_connectionString) };
+                // Enable automatic connection and topology recovery so the consumer, queue and
+                // bindings are restored after a broker/network outage without manual handling
+                // 启用自动连接和拓扑恢复，使消费者、队列和绑定在代理/网络故障后自动恢复，无需手动处理
+                var factory = new ConnectionFactory
+                {
+                    Uri = new Uri(_connectionString),
+                    AutomaticRecoveryEnabled = true,
+                    TopologyRecoveryEnabled = true,
+                    NetworkRecoveryInterval = TimeSpan.FromSeconds(5)
+                };
                 _connection = await factory.CreateConnectionAsync();
+                _connection.ConnectionShutdownAsync += (sender, e) =>
+                {
+                    _logger.LogWarning($"RabbitMQ connection shutdown (reason: {e.ReplyText}), automatic recovery will reconnect");
+                    return Task.CompletedTask;
+                };
+                _connection.RecoverySucceededAsync += (sender, e) =>
+                {
+                    _logger.LogInformation("RabbitMQ connection recovery succeeded, consumer and topology restored");
+                    return Task.CompletedTask;
+                };
+
                 _channel = await _connection.CreateChannelAsync();
-                
+
                 // Declare exchange / 声明交换机
                 await _channel.ExchangeDeclareAsync(ExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
-                
+
                 // Declare queue for this node / 为此节点声明队列
+                // autoDelete must be false: an auto-delete queue is removed the moment the consumer
+                // briefly disconnects, losing all queued messages. Instead, use x-expires so the
+                // broker cleans up the queue only after it has been unused for a while.
+                // autoDelete 必须为 false：自动删除队列会在消费者短暂断开的瞬间被删除，丢失所有排队的消息。
+                // 改用 x-expires，让代理仅在队列长时间未被使用后才清理它。
                 var queueDeclareResult = await _channel.QueueDeclareAsync(
                     queue: $"cluster:node:{_nodeId}",
                     durable: false,
                     exclusive: false,
-                    autoDelete: true,
-                    arguments: null);
+                    autoDelete: false,
+                    arguments: new Dictionary<string, object>
+                    {
+                        ["x-expires"] = QueueExpiresMilliseconds
+                    });
                 _queueName = queueDeclareResult.QueueName;
                 
                 // Bind queue to node-specific routing key / 将队列绑定到节点特定的路由键
@@ -136,7 +195,13 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
                             await _channel.BasicAckAsync(ea.DeliveryTag, false);
                             return;
                         }
-                        
+
+                        // Update node liveness on every received message / 每收到一条消息更新节点存活状态
+                        if (!string.IsNullOrEmpty(clusterMessage.FromNodeId))
+                        {
+                            _liveness.Touch(clusterMessage.FromNodeId);
+                        }
+
                         MessageReceived?.Invoke(this, new ClusterMessageEventArgs
                         {
                             FromNodeId = clusterMessage.FromNodeId,
@@ -295,10 +360,18 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
         /// <returns>True if connected, false otherwise / 已连接返回 true，否则返回 false</returns>
         public bool IsNodeConnected(string nodeId)
         {
-            // With RabbitMQ, we consider a node connected if it's registered
-            // 对于 RabbitMQ，如果节点已注册，我们认为它已连接
-            // In practice, you might want to track node health separately
-            // 在实践中，您可能需要单独跟踪节点健康状况
+            // Liveness-based check: a node is connected if a message from it (incl. Raft heartbeats)
+            // was seen within the liveness timeout.
+            // If the node has never been seen (e.g. right after startup, before the first heartbeat),
+            // fall back to configuration presence to avoid false negatives during the startup grace period.
+            // 基于存活状态的检查：如果在存活超时时间内观察到来自该节点的消息（包括 Raft 心跳），则认为节点已连接。
+            // 如果从未观察到该节点（例如刚启动、尚未收到第一个心跳），则回退到配置存在性检查，
+            // 以避免启动宽限期内的误报。
+            if (_liveness.HasBeenSeen(nodeId))
+            {
+                return _liveness.IsAlive(nodeId);
+            }
+
             return _nodes.ContainsKey(nodeId);
         }
 
@@ -368,6 +441,7 @@ namespace Cyaim.WebSocketServer.Cluster.RabbitMQ
             if (!_disposed)
             {
                 StopAsync().GetAwaiter().GetResult();
+                _liveness.Dispose();
                 _cancellationTokenSource.Dispose();
                 _disposed = true;
             }

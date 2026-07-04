@@ -148,6 +148,45 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Redis.FreeRedis
             return await Task.FromResult(value);
         }
 
+        /// <inheritdoc />
+        public async Task HashSetAsync(string key, string field, string value)
+        {
+            if (_redis == null) throw new InvalidOperationException("Redis is not connected");
+            _redis.HSet(key, field, value);
+            await Task.CompletedTask;
+        }
+
+        /// <inheritdoc />
+        public async Task<string> HashGetAsync(string key, string field)
+        {
+            if (_redis == null) throw new InvalidOperationException("Redis is not connected");
+            return await Task.FromResult(_redis.HGet(key, field));
+        }
+
+        /// <inheritdoc />
+        public async Task<Dictionary<string, string>> HashGetAllAsync(string key)
+        {
+            if (_redis == null) throw new InvalidOperationException("Redis is not connected");
+            var all = _redis.HGetAll(key);
+            var result = new Dictionary<string, string>();
+            if (all != null)
+            {
+                foreach (var kv in all)
+                {
+                    result[kv.Key] = kv.Value;
+                }
+            }
+            return await Task.FromResult(result);
+        }
+
+        /// <inheritdoc />
+        public async Task HashDeleteAsync(string key, string field)
+        {
+            if (_redis == null) throw new InvalidOperationException("Redis is not connected");
+            _redis.HDel(key, field);
+            await Task.CompletedTask;
+        }
+
         /// <summary>
         /// Delete a key / 删除键
         /// </summary>
