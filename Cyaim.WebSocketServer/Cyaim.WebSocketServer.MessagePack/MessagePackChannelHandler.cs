@@ -79,11 +79,6 @@ namespace Cyaim.WebSocketServer.MessagePack
         /// SubProtocol
         /// </summary>
         public string SubProtocol { get; }
-
-        /// <summary>
-        /// Request handler pipeline
-        /// </summary>
-        public ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> RequestPipeline { get; } = new ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>>();
         #endregion
 
         /// <summary>
@@ -216,9 +211,6 @@ namespace Cyaim.WebSocketServer.MessagePack
                             }
                         }
 
-                        // 执行Connected管道
-                        _ = await InvokePipeline(RequestPipelineStage.Connected, PipelineContext.CreateReceive(context, webSocket, null, null, webSocketOptions));
-
                         IHostApplicationLifetime appLifetime = WebSocketRouteOption.ApplicationServices.GetService<IHostApplicationLifetime>();
                         if (appLifetime == null)
                         {
@@ -265,9 +257,6 @@ namespace Cyaim.WebSocketServer.MessagePack
                 _metricsCollector?.RecordConnectionClosed(currentNodeId, context.Request.Path, closeStatusStr);
 
                 await MessagePackChannel_OnDisconnected(context, webSocketCloseStatus, webSocketOptions, logger);
-
-                // 执行管道 Disconnected
-                _ = await InvokePipeline(RequestPipelineStage.Disconnected, PipelineContext.CreateBasic(context, webSocketOptions));
             }
         }
 
@@ -426,42 +415,6 @@ namespace Cyaim.WebSocketServer.MessagePack
             }
         }
 
-        /// <summary>
-        /// 统一的管道调用方法
-        /// </summary>
-        private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, PipelineContext context)
-        {
-            try
-            {
-                if (!RequestPipeline.TryGetValue(requestStage, out ConcurrentQueue<PipelineItem> invokes) || invokes == null)
-                {
-                    return null;
-                }
-
-                var ordered = invokes.OrderBy(x => x.Order);
-                foreach (PipelineItem item in ordered)
-                {
-                    try
-                    {
-                        if (item.Item != null)
-                        {
-                            await item.Item.InvokeAsync(context);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        item.Exception = ex;
-                        item.ExceptionItem = item;
-                    }
-                }
-
-                return invokes;
-            }
-            finally
-            {
-                context?.Return();
-            }
-        }
 
         /// <summary>
         /// Forward by WebSocket transfer type using MessagePack
@@ -497,9 +450,6 @@ namespace Cyaim.WebSocketServer.MessagePack
                                 continue;
                             }
                         }
-
-                        // 执行BeforeReceivingData管道
-                        _ = await InvokePipeline(RequestPipelineStage.BeforeReceivingData, PipelineContext.CreateReceive(context, webSocket, null, null, webSocketOption));
 
                         #region 接收数据
                         byte[] buffer = ArrayPool<byte>.Shared.Rent(ReceiveBinaryBufferSize);
@@ -548,9 +498,6 @@ namespace Cyaim.WebSocketServer.MessagePack
                                 // 记录统计信息
                                 Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesReceived(context.Connection.Id, result.Count);
 
-                                // 执行ReceivingData管道
-                                _ = await InvokePipeline(RequestPipelineStage.ReceivingData, PipelineContext.CreateReceive(context, webSocket, result, buffer, webSocketOption));
-
                                 if (result.EndOfMessage || result.CloseStatus.HasValue)
                                 {
                                     break;
@@ -583,9 +530,6 @@ namespace Cyaim.WebSocketServer.MessagePack
                             wsReceiveReader.Capacity = (int)wsReceiveReader.Length;
                         }
                         #endregion
-
-                        // 执行AfterReceivingData管道
-                        _ = await InvokePipeline(RequestPipelineStage.AfterReceivingData, PipelineContext.CreateReceive(context, webSocket, result, wsReceiveReader.GetBuffer(), webSocketOption));
 
                         if (result == null)
                         {
@@ -690,19 +634,32 @@ namespace Cyaim.WebSocketServer.MessagePack
                             Body = requestScheme.Body
                         };
 
-                        // 执行管道 BeforeForwardingData
-                        _ = await InvokePipeline(RequestPipelineStage.BeforeForwardingData, PipelineContext.CreateForward(context, webSocket, result, wsReceiveReader.GetBuffer(), mvcRequestScheme, requestBody, webSocketOption));
+                        // 构建每消息上下文并经编译好的中间件链处理（终结点=端点分发，链返回后以 MessagePack 序列化并发送）。
+                        // 仅在注册了中间件时才复制原始字节；异步模式下接收缓冲区会被复用。
+                        var messageContext = new WebSocketMessageContext
+                        {
+                            HttpContext = context,
+                            WebSocket = webSocket,
+                            Options = webSocketOption,
+                            MessageType = result.MessageType,
+                            RequestTimeTicks = requestTime,
+                            ReceivedData = webSocketOption.MiddlewareCount > 0 ? wsReceiveReader.GetBuffer().AsMemory(0, (int)wsReceiveReader.Length).ToArray() : default,
+                            Request = mvcRequestScheme,
+                            RequestBody = requestBody,
+                        };
 
-                        // 改异步转发
-                        Task forwardTask = MessagePackForwardSendData(webSocket, context, result, mvcRequestScheme, requestBody, requestTime, appLifetime);
-                        // 是否串行
+                        Task processTask = ProcessMessageAsync(GetCompiledPipeline(webSocketOption, appLifetime), messageContext);
                         if (webSocketOption.EnableForwardTaskSyncProcessingMode)
                         {
-                            await forwardTask;
+                            await processTask;
                         }
-
-                        // 执行管道 AfterForwardingData
-                        _ = await InvokePipeline(RequestPipelineStage.AfterForwardingData, PipelineContext.CreateForward(context, webSocket, result, wsReceiveReader.GetBuffer(), mvcRequestScheme, requestBody, webSocketOption));
+                        else
+                        {
+                            _ = processTask.ContinueWith(static (t, state) =>
+                            {
+                                ((ILogger)state).LogInformation(t.Exception, I18nText.ConnectionEntry_DisconnectedInternalExceptions);
+                            }, logger, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+                        }
 
                     CONTINUE_RECEIVE:;
                     }
@@ -747,63 +704,82 @@ namespace Cyaim.WebSocketServer.MessagePack
         }
 
         /// <summary>
-        /// MessagePackChannel forward data
+        /// Compiled per-connection middleware pipeline (built once, reused for every message).
+        /// 编译好的中间件管道（一次构建，每消息复用）。
         /// </summary>
-        private async Task MessagePackForwardSendData(WebSocket webSocket, HttpContext context, WebSocketReceiveResult result, MvcRequestScheme request, JsonObject requestBody, long requsetTicks, IHostApplicationLifetime appLifetime)
+        private WebSocketRequestDelegate _compiledPipeline;
+
+        /// <summary>
+        /// Build (once) the middleware pipeline whose terminal dispatches to the endpoint (reusing the
+        /// shared MvcDistributeAsync) and stores the result on the context.
+        /// 构建（仅一次）中间件管道：终结点复用共享的 MvcDistributeAsync 分发到端点并把结果存到上下文。
+        /// </summary>
+        private WebSocketRequestDelegate GetCompiledPipeline(WebSocketRouteOption options, IHostApplicationLifetime appLifetime)
+        {
+            var pipeline = _compiledPipeline;
+            if (pipeline == null)
+            {
+                var lifetime = appLifetime;
+                var log = logger;
+                pipeline = _compiledPipeline = options.BuildPipeline(async ctx =>
+                {
+                    ctx.Response = await MvcChannelHandler.MvcDistributeAsync(ctx.Options, ctx.HttpContext, ctx.WebSocket, ctx.Request, ctx.RequestBody, log, lifetime);
+                });
+            }
+            return pipeline;
+        }
+
+        /// <summary>
+        /// Run one message through the middleware pipeline, then convert the MVC response to a
+        /// MessagePack response, serialize and send it (unless a middleware suppressed it).
+        /// 让一条消息经过中间件管道，然后把 MVC 响应转换为 MessagePack 响应并序列化发送（除非中间件已抑制）。
+        /// </summary>
+        private async Task ProcessMessageAsync(WebSocketRequestDelegate pipeline, WebSocketMessageContext ctx)
         {
             try
             {
-                if (result.MessageType == WebSocketMessageType.Close)
+                await pipeline(ctx).ConfigureAwait(false);
+
+                if (ctx.SuppressResponse || ctx.Response is not MvcResponseScheme mvcResponse)
                 {
                     return;
                 }
 
-                // 按节点请求转发 - 复用现有的 MvcDistributeAsync
-                object invokeResult = await MvcChannelHandler.MvcDistributeAsync(webSocketOption, context, webSocket, request, requestBody, logger, appLifetime);
-
-                // 将 MvcResponseScheme 转换为 MessagePackResponseScheme
-                if (invokeResult is MvcResponseScheme mvcResponse)
+                var messagePackResponse = new MessagePackResponseScheme
                 {
-                    var messagePackResponse = new MessagePackResponseScheme
-                    {
-                        Status = mvcResponse.Status,
-                        Msg = mvcResponse.Msg,
-                        RequestTime = mvcResponse.RequestTime,
-                        CompleteTime = mvcResponse.CompleteTime,
-                        Id = mvcResponse.Id,
-                        Target = mvcResponse.Target,
-                        Body = mvcResponse.Body
-                    };
+                    Status = mvcResponse.Status,
+                    Msg = mvcResponse.Msg,
+                    RequestTime = mvcResponse.RequestTime,
+                    CompleteTime = mvcResponse.CompleteTime,
+                    Id = mvcResponse.Id,
+                    Target = mvcResponse.Target,
+                    Body = mvcResponse.Body
+                };
 
-                    // 使用 MessagePack 序列化并发送
-                    var responseBytes = MessagePackSerializer.Serialize(messagePackResponse);
-                    await webSocket.SendAsync(new ArraySegment<byte>(responseBytes), WebSocketMessageType.Binary, true, CancellationToken.None);
+                var responseBytes = MessagePackSerializer.Serialize(messagePackResponse);
+                await ctx.WebSocket.SendAsync(new ArraySegment<byte>(responseBytes), WebSocketMessageType.Binary, true, CancellationToken.None);
 
-                    // 记录消息发送指标
-                    var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
-                    _metricsCollector?.RecordMessageSent(responseBytes.Length, currentNodeId, context.Request.Path);
-
-                    // 记录统计信息
-                    Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesSent(context.Connection.Id, responseBytes.Length);
-                }
+                var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
+                _metricsCollector?.RecordMessageSent(responseBytes.Length, currentNodeId, ctx.HttpContext.Request.Path);
+                Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesSent(ctx.HttpContext.Connection.Id, responseBytes.Length);
             }
             catch (Exception ex)
             {
                 var errorResponse = new MessagePackResponseScheme
                 {
                     Status = 1,
-                    RequestTime = requsetTicks,
+                    RequestTime = ctx.RequestTimeTicks,
                     CompleteTime = DateTime.Now.Ticks,
-                    Target = request?.Target,
-                    Id = request?.Id,
-                    Msg = string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestParsingError + ex.Message + Environment.NewLine + ex.StackTrace)
+                    Target = ctx.Request?.Target,
+                    Id = ctx.Request?.Id,
+                    Msg = string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, ctx.HttpContext.Connection.RemoteIpAddress, ctx.HttpContext.Connection.RemotePort, ctx.HttpContext.Connection.Id, I18nText.MvcForwardSendData_RequestParsingError + ex.Message + Environment.NewLine + ex.StackTrace)
                 };
                 logger.LogInformation(errorResponse.Msg);
 
                 try
                 {
                     var responseBytes = MessagePackSerializer.Serialize(errorResponse);
-                    await webSocket.SendAsync(new ArraySegment<byte>(responseBytes), WebSocketMessageType.Binary, true, CancellationToken.None);
+                    await ctx.WebSocket.SendAsync(new ArraySegment<byte>(responseBytes), WebSocketMessageType.Binary, true, CancellationToken.None);
                 }
                 catch
                 {
@@ -833,77 +809,6 @@ namespace Cyaim.WebSocketServer.MessagePack
             }
         }
 
-        #region Add request middleware to RequestPipeline
-
-        /// <summary>
-        /// Add request middleware to RequestPipeline
-        /// </summary>
-        /// <param name="requestPipelineStage">Pipeline processing stage</param>
-        /// <param name="handler">Processing program.The Stage in the handler will be overwritten by the requestPipeStage parameter.</param>
-        /// <returns></returns>
-        public ConcurrentQueue<PipelineItem> AddRequestMiddleware(RequestPipelineStage requestPipelineStage, PipelineItem handler)
-        {
-            if (!RequestPipeline.TryGetValue(requestPipelineStage, out ConcurrentQueue<PipelineItem> value))
-            {
-                value = new ConcurrentQueue<PipelineItem>();
-                RequestPipeline.TryAdd(requestPipelineStage, value);
-            }
-
-            handler.Stage = requestPipelineStage;
-            value.Enqueue(handler);
-
-            return value;
-        }
-
-        /// <summary>
-        /// Add request middleware to RequestPipeline
-        /// </summary>
-        /// <param name="handler">processing program</param>
-        /// <returns></returns>
-        public ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> AddRequestMiddleware(PipelineItem handler)
-        {
-            if (!RequestPipeline.TryGetValue(handler.Stage, out ConcurrentQueue<PipelineItem> value))
-            {
-                value = new ConcurrentQueue<PipelineItem>();
-                RequestPipeline.TryAdd(handler.Stage, value);
-            }
-
-            value.Enqueue(handler);
-
-            return RequestPipeline;
-        }
-
-        /// <summary>
-        /// Add request middleware to RequestPipeline
-        /// </summary>
-        /// <param name="stage">Pipeline processing stage</param>
-        /// <param name="invoke"></param>
-        /// <param name="order">If it is null, add 1 on the largest order in the current stage queue. If there is no data in the current queue, the order is 0.</param>
-        /// <returns></returns>
-        public ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> AddRequestMiddleware(RequestPipelineStage stage, RequestPipeline invoke, float? order = null)
-        {
-            if (!RequestPipeline.TryGetValue(stage, out ConcurrentQueue<PipelineItem> value))
-            {
-                value = new ConcurrentQueue<PipelineItem>();
-                RequestPipeline.TryAdd(stage, value);
-            }
-
-            if (order == null)
-            {
-                order = value.IsEmpty ? 0 : value.Max(x => x.Order) + 1;
-            }
-
-            value.Enqueue(new PipelineItem()
-            {
-                Item = invoke,
-                Order = order.Value,
-                Stage = stage
-            });
-
-            return RequestPipeline;
-        }
-
-        #endregion
     }
 }
 

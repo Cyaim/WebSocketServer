@@ -4,8 +4,11 @@ using System.Net;
 using System.Reflection;
 using Cyaim.WebSocketServer.Infrastructure;
 using Cyaim.WebSocketServer.Infrastructure.AccessControl;
+using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Infrastructure.Handlers;
+using Microsoft.AspNetCore.Http;
 using Cyaim.WebSocketServer.Infrastructure.Metrics;
+using Cyaim.WebSocketServer.OpenTelemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using OpenTelemetry.Metrics;
@@ -125,30 +128,22 @@ namespace Cyaim.WebSocketServer.Tests
 
         #endregion
 
-        #region RequestPipelineMiddlewareExtensions
+        #region Middleware pipeline
 
         [Fact]
-        public void AddRequestMiddleware_PipelineItemOverload_AddsToNewAndExistingQueues()
+        public async Task Middleware_Use_WrapsAndShortCircuits()
         {
-            var pipeline = new ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>>();
-            var first = new PipelineItem
-            {
-                Stage = RequestPipelineStage.Connected,
-                Order = 1,
-                Item = new DelegateRequestPipeline(_ => Task.CompletedTask)
-            };
-            var second = new PipelineItem
-            {
-                Stage = RequestPipelineStage.Connected,
-                Order = 2,
-                Item = new DelegateRequestPipeline(_ => Task.CompletedTask)
-            };
+            var options = new WebSocketRouteOption();
+            var order = new System.Collections.Generic.List<string>();
 
-            var returned = pipeline.AddRequestMiddleware(first).AddRequestMiddleware(second);
+            options.Use(async (ctx, next) => { order.Add("before"); await next(ctx); order.Add("after"); });
 
-            Assert.Same(pipeline, returned);
-            Assert.True(pipeline.TryGetValue(RequestPipelineStage.Connected, out var queue));
-            Assert.Equal(2, queue.Count);
+            bool terminalRan = false;
+            var pipeline = options.BuildPipeline(ctx => { terminalRan = true; return Task.CompletedTask; });
+            await pipeline(new WebSocketMessageContext { HttpContext = new DefaultHttpContext(), Options = options });
+
+            Assert.True(terminalRan);
+            Assert.Equal(new[] { "before", "after" }, order.ToArray());
         }
 
         #endregion
@@ -181,7 +176,7 @@ namespace Cyaim.WebSocketServer.Tests
         {
             bool configured = false;
 
-            var builder = OpenTelemetry.Sdk.CreateMeterProviderBuilder()
+            var builder = global::OpenTelemetry.Sdk.CreateMeterProviderBuilder()
                 .AddWebSocketMetricsExporter(options =>
                 {
                     configured = true;

@@ -141,52 +141,64 @@ namespace Cyaim.WebSocketServer.Tests
 
         #endregion
 
-        #region Main MvcForwardSendData(request, requestBody) overload
+        #region ProcessMessageAsync (middleware pipeline + response send)
 
-        private static readonly Type[] MainSig =
-        {
-            typeof(WebSocket), typeof(HttpContext), typeof(WebSocketReceiveResult),
-            typeof(MvcRequestScheme), typeof(JsonObject), typeof(long), typeof(IHostApplicationLifetime)
-        };
+        private MethodInfo ProcessMethod()
+            => typeof(MvcChannelHandler).GetMethod("ProcessMessageAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        private static WebSocketMessageContext ProcessCtx(WebSocketRouteOption options, WebSocket socket)
+            => new WebSocketMessageContext
+            {
+                HttpContext = CtxWithId(),
+                WebSocket = socket,
+                Options = options,
+                MessageType = WebSocketMessageType.Text,
+                Request = new MvcRequestScheme { Id = "1", Target = "wstest.echo" },
+            };
 
         [Fact]
-        public async Task MainForward_CloseMessage_ReturnsEarly()
+        public async Task Process_NullResponse_SkipsSend_NoThrow()
         {
-            var handler = NewHandler(Options());
-            var m = ForwardOverload(MainSig);
-            await InvokeForward(m, handler, new object[]
-            {
-                new TestWebSocket(), new DefaultHttpContext(), CloseResult(),
-                new MvcRequestScheme { Target = "wstest.echo" }, null, 0L, _lifetime
-            });
+            var options = Options();
+            var handler = NewHandler(options);
+            var m = ProcessMethod();
+            // Terminal leaves Response null -> send is skipped, so a closed socket never throws.
+            WebSocketRequestDelegate terminal = ctx => Task.CompletedTask;
+            await (Task)m.Invoke(handler, new object[] { terminal, ProcessCtx(options, new TestWebSocket(WebSocketState.Closed)) });
         }
 
         [Fact]
-        public async Task MainForward_CyclicResult_JsonException_IsCaught()
+        public async Task Process_SuppressResponse_SkipsSend_NoThrow()
         {
-            var handler = NewHandler(Options());
-            var m = ForwardOverload(MainSig);
-            // Cyclic endpoint result makes SerializeToUtf8Bytes throw JsonException -> caught.
-            await InvokeForward(m, handler, new object[]
-            {
-                new TestWebSocket(), new DefaultHttpContext(), TextResult(),
-                new MvcRequestScheme { Id = "1", Target = "cyclic.cycle" }, null, 0L, _lifetime
-            });
+            var options = Options();
+            var handler = NewHandler(options);
+            var m = ProcessMethod();
+            WebSocketRequestDelegate terminal = ctx => { ctx.Response = new MvcResponseScheme { Id = "1" }; ctx.SuppressResponse = true; return Task.CompletedTask; };
+            await (Task)m.Invoke(handler, new object[] { terminal, ProcessCtx(options, new TestWebSocket(WebSocketState.Closed)) });
         }
 
         [Fact]
-        public async Task MainForward_ClosedSocketSend_GeneralCatch_Rethrows()
+        public async Task Process_CyclicResult_JsonException_IsCaught()
         {
-            var handler = NewHandler(Options());
-            var m = ForwardOverload(MainSig);
-            // Serialization succeeds but sending to a non-open socket throws ArgumentNullException,
-            // which the non-Json catch rethrows.
-            await Assert.ThrowsAnyAsync<Exception>(() => InvokeForward(m, handler, new object[]
-            {
-                new TestWebSocket(WebSocketState.Closed), new DefaultHttpContext(), TextResult(),
-                new MvcRequestScheme { Id = "1", Target = "wstest.echo" },
-                JsonNode.Parse("{\"text\":\"x\"}").AsObject(), 0L, _lifetime
-            }));
+            var options = Options();
+            var handler = NewHandler(options);
+            var m = ProcessMethod();
+            // A self-referencing response makes SerializeToUtf8Bytes throw JsonException -> caught internally.
+            var cyclic = new Dictionary<string, object>();
+            cyclic["self"] = cyclic;
+            WebSocketRequestDelegate terminal = ctx => { ctx.Response = cyclic; return Task.CompletedTask; };
+            await (Task)m.Invoke(handler, new object[] { terminal, ProcessCtx(options, new TestWebSocket()) });
+        }
+
+        [Fact]
+        public async Task Process_ClosedSocketSend_Throws()
+        {
+            var options = Options();
+            var handler = NewHandler(options);
+            var m = ProcessMethod();
+            // Serialization succeeds but sending to a closed socket throws (non-Json) -> propagates.
+            WebSocketRequestDelegate terminal = ctx => { ctx.Response = new MvcResponseScheme { Status = 0, Id = "1", Body = "x" }; return Task.CompletedTask; };
+            await Assert.ThrowsAnyAsync<Exception>(() => (Task)m.Invoke(handler, new object[] { terminal, ProcessCtx(options, new TestWebSocket(WebSocketState.Closed)) }));
         }
 
         #endregion
@@ -374,33 +386,21 @@ namespace Cyaim.WebSocketServer.Tests
 
         #endregion
 
-        #region InvokePipeline
+        #region Middleware pipeline
 
         [Fact]
-        public async Task InvokePipeline_UnknownStage_ReturnsNull()
+        public async Task Middleware_ShortCircuit_SkipsTerminalDispatch()
         {
-            var handler = NewHandler(Options());
-            var m = typeof(MvcChannelHandler).GetMethod("InvokePipeline", BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.NotNull(m);
-            // No queue registered for this stage -> returns null (context is unused on that path).
-            var task = (Task)m.Invoke(handler, new object[] { RequestPipelineStage.Connected, null });
-            await task;
-        }
+            var options = Options();
+            options.Use((ctx, next) => { ctx.Response = "sc"; return Task.CompletedTask; });
 
-        [Fact]
-        public async Task InvokePipeline_HandlerThrows_ExceptionCapturedOnItem()
-        {
-            var handler = NewHandler(Options());
-            handler.RequestPipeline.AddRequestMiddleware(RequestPipelineStage.Connected, _ =>
-                throw new InvalidOperationException("pipeline-throws"));
+            bool terminalRan = false;
+            var pipeline = options.BuildPipeline(ctx => { terminalRan = true; return Task.CompletedTask; });
+            var context = new WebSocketMessageContext { HttpContext = new DefaultHttpContext(), Options = options };
+            await pipeline(context);
 
-            var m = typeof(MvcChannelHandler).GetMethod("InvokePipeline", BindingFlags.NonPublic | BindingFlags.Instance);
-            var ctx = PipelineContext.CreateBasic(new DefaultHttpContext(), Options());
-            var task = (Task)m.Invoke(handler, new object[] { RequestPipelineStage.Connected, ctx });
-            await task;
-
-            var queue = handler.RequestPipeline[RequestPipelineStage.Connected];
-            Assert.Contains(queue, item => item.Exception != null);
+            Assert.False(terminalRan);
+            Assert.Equal("sc", context.Response);
         }
 
         #endregion

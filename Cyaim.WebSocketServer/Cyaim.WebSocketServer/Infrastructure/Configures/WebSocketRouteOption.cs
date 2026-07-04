@@ -1,4 +1,5 @@
-﻿using Cyaim.WebSocketServer.Infrastructure.Injectors;
+﻿using Cyaim.WebSocketServer.Infrastructure.Handlers;
+using Cyaim.WebSocketServer.Infrastructure.Injectors;
 using Cyaim.WebSocketServer.Middlewares;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +34,47 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         /// Dependency injection container
         /// </summary>
         public IServiceCollection ApplicationServiceCollection { get; set; }
+
+        #region Middleware pipeline / 中间件管道
+
+        /// <summary>
+        /// Registered middleware components (outermost first). Each wraps the next delegate.
+        /// 已注册的中间件组件（最外层在前），每个包裹下一个委托。
+        /// </summary>
+        private readonly List<Func<WebSocketRequestDelegate, WebSocketRequestDelegate>> _middleware
+            = new List<Func<WebSocketRequestDelegate, WebSocketRequestDelegate>>();
+
+        /// <summary>
+        /// Register a middleware component. Called by <c>WebSocketMiddlewareExtensions.Use(...)</c>.
+        /// 注册一个中间件组件（由 <c>WebSocketMiddlewareExtensions.Use(...)</c> 调用）。
+        /// </summary>
+        internal void AddMiddleware(Func<WebSocketRequestDelegate, WebSocketRequestDelegate> component)
+        {
+            _middleware.Add(component);
+        }
+
+        /// <summary>Number of registered middleware / 已注册的中间件数量</summary>
+        public int MiddlewareCount => _middleware.Count;
+
+        /// <summary>
+        /// Fold the registered middleware around a terminal delegate into a single compiled delegate.
+        /// The result is cached by the caller and reused for every message (compile once, zero per-message overhead).
+        /// 将已注册的中间件围绕终结点委托折叠成单个编译好的委托；调用方缓存并对每条消息复用（一次编译、每消息零开销）。
+        /// </summary>
+        /// <param name="terminal">The terminal step (the actual endpoint dispatch) / 终结点步骤（实际的端点分发）</param>
+        public WebSocketRequestDelegate BuildPipeline(WebSocketRequestDelegate terminal)
+        {
+            if (terminal == null) throw new ArgumentNullException(nameof(terminal));
+            var app = terminal;
+            // Apply in reverse so the first-registered middleware ends up outermost.
+            for (int i = _middleware.Count - 1; i >= 0; i--)
+            {
+                app = _middleware[i](app) ?? throw new InvalidOperationException("A middleware component returned null.");
+            }
+            return app;
+        }
+
+        #endregion
 
         /// <summary>
         /// Injection HttpContext property name.

@@ -280,43 +280,57 @@ namespace Cyaim.WebSocketServer.Tests
         }
 
         [Fact]
-        public async Task RequestPipelineStages_FireDuringRoundTrip()
+        public async Task Middleware_WrapsRequest_DuringRoundTrip()
         {
-            var stages = new System.Collections.Concurrent.ConcurrentQueue<Infrastructure.Handlers.RequestPipelineStage>();
-            var handler = new MvcChannelHandler();
-            foreach (var stage in Enum.GetValues<Infrastructure.Handlers.RequestPipelineStage>())
+            var events = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            string observedTarget = null;
+
+            using var host = await StartHostAsync(CreateOption(o =>
             {
-                var captured = stage;
-                handler.RequestPipeline.AddRequestMiddleware(captured, _ =>
+                o.EnableForwardTaskSyncProcessingMode = true;
+                o.Use(async (ctx, next) =>
                 {
-                    stages.Enqueue(captured);
-                    return Task.CompletedTask;
+                    events.Enqueue("before");
+                    observedTarget = ctx.Request?.Target;   // middleware sees the parsed request
+                    await next(ctx);                        // run the endpoint
+                    events.Enqueue("after");                // ...then wrap the response
                 });
-            }
-            using var host = await StartHostAsync(CreateOption(o => o.EnableForwardTaskSyncProcessingMode = true, handler));
+            }));
             var socket = await ConnectAsync(host);
 
             string response = await SendAndReceiveAsync(socket, "{\"id\":\"1\",\"target\":\"wstest.echo\",\"body\":{\"text\":\"p\"}}");
             await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
-
-            // The Disconnected stage runs asynchronously after the client close; poll for it.
-            var deadline = DateTime.UtcNow + TestTimeout;
-            while (!stages.Contains(Infrastructure.Handlers.RequestPipelineStage.Disconnected) && DateTime.UtcNow < deadline)
-            {
-                await Task.Delay(25);
-            }
             await host.StopAsync();
 
             using var doc = JsonDocument.Parse(response);
             Assert.Equal(0, doc.RootElement.GetProperty("Status").GetInt32());
-            var observed = stages.Distinct().ToHashSet();
-            Assert.Contains(Infrastructure.Handlers.RequestPipelineStage.Connected, observed);
-            Assert.Contains(Infrastructure.Handlers.RequestPipelineStage.BeforeReceivingData, observed);
-            Assert.Contains(Infrastructure.Handlers.RequestPipelineStage.ReceivingData, observed);
-            Assert.Contains(Infrastructure.Handlers.RequestPipelineStage.AfterReceivingData, observed);
-            Assert.Contains(Infrastructure.Handlers.RequestPipelineStage.BeforeForwardingData, observed);
-            Assert.Contains(Infrastructure.Handlers.RequestPipelineStage.AfterForwardingData, observed);
-            Assert.Contains(Infrastructure.Handlers.RequestPipelineStage.Disconnected, observed);
+            // The endpoint still ran (correct response) and the middleware wrapped it before + after.
+            Assert.Equal("wstest.echo", observedTarget);
+            Assert.Equal(new[] { "before", "after" }, events.ToArray());
+        }
+
+        [Fact]
+        public async Task Middleware_ShortCircuit_ReplacesResponse_DuringRoundTrip()
+        {
+            using var host = await StartHostAsync(CreateOption(o =>
+            {
+                o.EnableForwardTaskSyncProcessingMode = true;
+                o.Use((ctx, next) =>
+                {
+                    // Do not call next -> the endpoint never runs; respond directly.
+                    ctx.Response = new MvcResponseScheme { Status = 7, Id = ctx.Request?.Id, Target = ctx.Request?.Target, Body = "blocked" };
+                    return Task.CompletedTask;
+                });
+            }));
+            var socket = await ConnectAsync(host);
+
+            string response = await SendAndReceiveAsync(socket, "{\"id\":\"9\",\"target\":\"wstest.echo\",\"body\":{\"text\":\"p\"}}");
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+            await host.StopAsync();
+
+            using var doc = JsonDocument.Parse(response);
+            Assert.Equal(7, doc.RootElement.GetProperty("Status").GetInt32());
+            Assert.Equal("blocked", doc.RootElement.GetProperty("Body").GetString());
         }
 
         [Fact]

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Infrastructure.Handlers;
 using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
@@ -5,212 +6,150 @@ using Microsoft.AspNetCore.Http;
 
 namespace Cyaim.WebSocketServer.Tests
 {
+    /// <summary>
+    /// Tests for the compiled middleware chain (Option A) that replaced the stage-keyed pipeline.
+    /// 编译式中间件责任链（Option A，替代原阶段管道）的测试。
+    /// </summary>
     public class RequestPipelineTests
     {
-        #region PipelineContext pooling
+        private static WebSocketMessageContext NewContext(WebSocketRouteOption options)
+            => new WebSocketMessageContext
+            {
+                HttpContext = new DefaultHttpContext(),
+                Options = options,
+                Request = new MvcRequestScheme { Id = "1", Target = "t" },
+            };
 
         [Fact]
-        public void PipelineContext_CreateBasic_SetsFields()
+        public void MiddlewareCount_ReflectsRegistrations()
         {
-            var httpContext = new DefaultHttpContext();
+            var options = new WebSocketRouteOption();
+            Assert.Equal(0, options.MiddlewareCount);
+
+            options.Use((ctx, next) => next(ctx));
+            options.Use((ctx, next) => next(ctx));
+
+            Assert.Equal(2, options.MiddlewareCount);
+        }
+
+        [Fact]
+        public void Use_NullMiddleware_Throws()
+        {
+            var options = new WebSocketRouteOption();
+            Assert.Throws<System.ArgumentNullException>(() => options.Use((System.Func<WebSocketMessageContext, WebSocketRequestDelegate, System.Threading.Tasks.Task>)null));
+        }
+
+        [Fact]
+        public async Task BuildPipeline_NoMiddleware_RunsTerminalDirectly()
+        {
+            var options = new WebSocketRouteOption();
+            bool terminalRan = false;
+            var pipeline = options.BuildPipeline(ctx => { terminalRan = true; ctx.Response = "done"; return Task.CompletedTask; });
+
+            var context = NewContext(options);
+            await pipeline(context);
+
+            Assert.True(terminalRan);
+            Assert.Equal("done", context.Response);
+        }
+
+        [Fact]
+        public async Task Middleware_RunOuterToInner_InRegistrationOrder()
+        {
+            var options = new WebSocketRouteOption();
+            var log = new List<string>();
+
+            options.Use(async (ctx, next) => { log.Add("A-before"); await next(ctx); log.Add("A-after"); });
+            options.Use(async (ctx, next) => { log.Add("B-before"); await next(ctx); log.Add("B-after"); });
+
+            var pipeline = options.BuildPipeline(ctx => { log.Add("terminal"); return Task.CompletedTask; });
+            await pipeline(NewContext(options));
+
+            // First-registered (A) is outermost; wraps B; B wraps terminal.
+            Assert.Equal(new[] { "A-before", "B-before", "terminal", "B-after", "A-after" }, log.ToArray());
+        }
+
+        [Fact]
+        public async Task Middleware_ShortCircuit_SkipsTerminal()
+        {
+            var options = new WebSocketRouteOption();
+            bool terminalRan = false;
+
+            options.Use((ctx, next) =>
+            {
+                // Do not call next -> the endpoint (terminal) must not run.
+                ctx.Response = "short-circuited";
+                return Task.CompletedTask;
+            });
+
+            var pipeline = options.BuildPipeline(ctx => { terminalRan = true; ctx.Response = "terminal"; return Task.CompletedTask; });
+            var context = NewContext(options);
+            await pipeline(context);
+
+            Assert.False(terminalRan);
+            Assert.Equal("short-circuited", context.Response);
+        }
+
+        [Fact]
+        public async Task Middleware_CanModifyResponse_AfterTerminal()
+        {
             var options = new WebSocketRouteOption();
 
-            var ctx = PipelineContext.CreateBasic(httpContext, options);
-            try
+            options.Use(async (ctx, next) =>
             {
-                Assert.Same(httpContext, ctx.HttpContext);
-                Assert.Same(options, ctx.WebSocketOptions);
-                Assert.Null(ctx.WebSocket);
-                Assert.Null(ctx.Data);
-            }
-            finally
-            {
-                ctx.Return();
-            }
+                await next(ctx);
+                ctx.Response = ctx.Response + "+wrapped";
+            });
+
+            var pipeline = options.BuildPipeline(ctx => { ctx.Response = "endpoint"; return Task.CompletedTask; });
+            var context = NewContext(options);
+            await pipeline(context);
+
+            Assert.Equal("endpoint+wrapped", context.Response);
         }
 
         [Fact]
-        public void PipelineContext_ReturnAndCreate_ReusesPooledInstance_AndClearsState()
+        public async Task Middleware_CanShareStateViaItems()
         {
-            var httpContext = new DefaultHttpContext();
             var options = new WebSocketRouteOption();
-            var ws = new TestWebSocket();
-            var data = new byte[] { 1, 2, 3 };
-            var request = new MvcRequestScheme { Id = "1", Target = "t" };
 
-            var first = PipelineContext.CreateForward(httpContext, ws, null, data, request, null, options);
-            first.Return();
+            options.Use(async (ctx, next) => { ctx.Items["k"] = 42; await next(ctx); });
 
-            // DefaultObjectPool returns the most recently returned instance on the same thread
-            var second = PipelineContext.CreateBasic(httpContext, options);
-            try
+            object seen = null;
+            var pipeline = options.BuildPipeline(ctx => { ctx.Items.TryGetValue("k", out seen); return Task.CompletedTask; });
+            await pipeline(NewContext(options));
+
+            Assert.Equal(42, seen);
+        }
+
+        private sealed class CountingMiddleware : IWebSocketMiddleware
+        {
+            public int Calls;
+            public Task InvokeAsync(WebSocketMessageContext context, WebSocketRequestDelegate next)
             {
-                Assert.Same(first, second);
-                // The pool policy must have cleared all references on Return
-                Assert.Null(second.WebSocket);
-                Assert.Null(second.Data);
-                Assert.Null(second.Request);
-                Assert.Null(second.RequestBody);
-                Assert.Null(second.ReceiveResult);
-                Assert.Same(httpContext, second.HttpContext);
-            }
-            finally
-            {
-                second.Return();
+                Calls++;
+                return next(context);
             }
         }
 
         [Fact]
-        public void PipelineContext_CreateReceive_SetsReceiveFields()
+        public async Task Use_IWebSocketMiddlewareInstance_IsInvoked()
         {
-            var httpContext = new DefaultHttpContext();
-            var ws = new TestWebSocket();
-            var data = new byte[] { 9, 8 };
-
-            var ctx = PipelineContext.CreateReceive(httpContext, ws, null, data);
-            try
-            {
-                Assert.Same(httpContext, ctx.HttpContext);
-                Assert.Same(ws, ctx.WebSocket);
-                Assert.Same(data, ctx.Data);
-                Assert.Null(ctx.WebSocketOptions);
-            }
-            finally
-            {
-                ctx.Return();
-            }
-        }
-
-        [Fact]
-        public void PipelineContext_CreateForward_SetsAllFields()
-        {
-            var httpContext = new DefaultHttpContext();
             var options = new WebSocketRouteOption();
-            var ws = new TestWebSocket();
-            var request = new MvcRequestScheme { Target = "x.y" };
-            var body = new System.Text.Json.Nodes.JsonObject { ["k"] = 1 };
+            var mw = new CountingMiddleware();
+            options.Use(mw);
 
-            var ctx = PipelineContext.CreateForward(httpContext, ws, null, new byte[] { 1 }, request, body, options);
-            try
-            {
-                Assert.Same(request, ctx.Request);
-                Assert.Same(body, ctx.RequestBody);
-                Assert.Same(options, ctx.WebSocketOptions);
-            }
-            finally
-            {
-                ctx.Return();
-            }
-        }
+            var pipeline = options.BuildPipeline(ctx => Task.CompletedTask);
+            await pipeline(NewContext(options));
 
-        #endregion
-
-        #region DelegateRequestPipeline
-
-        [Fact]
-        public void DelegateRequestPipeline_NullHandler_Throws()
-        {
-            Assert.Throws<ArgumentNullException>(() => new DelegateRequestPipeline(null));
+            Assert.Equal(1, mw.Calls);
         }
 
         [Fact]
-        public async Task DelegateRequestPipeline_InvokesHandler()
+        public void BuildPipeline_NullTerminal_Throws()
         {
-            PipelineContext observed = null;
-            var pipeline = new DelegateRequestPipeline(ctx => { observed = ctx; return Task.CompletedTask; });
-            var context = PipelineContext.CreateBasic(new DefaultHttpContext(), null);
-            try
-            {
-                await pipeline.InvokeAsync(context);
-                Assert.Same(context, observed);
-            }
-            finally
-            {
-                context.Return();
-            }
+            var options = new WebSocketRouteOption();
+            Assert.Throws<System.ArgumentNullException>(() => options.BuildPipeline(null));
         }
-
-        #endregion
-
-        #region MvcChannelHandler.AddRequestMiddleware ordering
-
-        private static DelegateRequestPipeline Noop() => new DelegateRequestPipeline(_ => Task.CompletedTask);
-
-        [Fact]
-        public void AddRequestMiddleware_OrderAutoIncrements_FromZero()
-        {
-            var handler = new MvcChannelHandler();
-
-            handler.AddRequestMiddleware(RequestPipelineStage.BeforeForwardingData, Noop());
-            handler.AddRequestMiddleware(RequestPipelineStage.BeforeForwardingData, Noop());
-            handler.AddRequestMiddleware(RequestPipelineStage.BeforeForwardingData, Noop());
-
-            var queue = handler.RequestPipeline[RequestPipelineStage.BeforeForwardingData];
-            var orders = queue.Select(x => x.Order).ToArray();
-            Assert.Equal(new float[] { 0, 1, 2 }, orders);
-        }
-
-        [Fact]
-        public void AddRequestMiddleware_ExplicitOrder_IsHonored_AndAutoIncrementContinuesFromMax()
-        {
-            var handler = new MvcChannelHandler();
-
-            handler.AddRequestMiddleware(RequestPipelineStage.ReceivingData, Noop(), 10f);
-            handler.AddRequestMiddleware(RequestPipelineStage.ReceivingData, Noop());
-
-            var orders = handler.RequestPipeline[RequestPipelineStage.ReceivingData].Select(x => x.Order).ToArray();
-            Assert.Equal(new float[] { 10, 11 }, orders);
-        }
-
-        [Fact]
-        public void AddRequestMiddleware_StagesAreIndependent()
-        {
-            var handler = new MvcChannelHandler();
-
-            handler.AddRequestMiddleware(RequestPipelineStage.Connected, Noop());
-            handler.AddRequestMiddleware(RequestPipelineStage.Disconnected, Noop());
-
-            Assert.Equal(0f, handler.RequestPipeline[RequestPipelineStage.Connected].Single().Order);
-            Assert.Equal(0f, handler.RequestPipeline[RequestPipelineStage.Disconnected].Single().Order);
-        }
-
-        [Fact]
-        public void AddRequestMiddleware_WithPipelineItem_StageOverriddenByParameter()
-        {
-            var handler = new MvcChannelHandler();
-            var item = new PipelineItem { Item = Noop(), Stage = RequestPipelineStage.Connected, Order = 5 };
-
-            var queue = handler.AddRequestMiddleware(RequestPipelineStage.AfterForwardingData, item);
-
-            Assert.Equal(RequestPipelineStage.AfterForwardingData, item.Stage);
-            Assert.Same(item, queue.Single());
-            Assert.True(handler.RequestPipeline.ContainsKey(RequestPipelineStage.AfterForwardingData));
-        }
-
-        [Fact]
-        public void AddRequestMiddleware_WithPipelineItem_UsesItemStage()
-        {
-            var handler = new MvcChannelHandler();
-            var item = new PipelineItem { Item = Noop(), Stage = RequestPipelineStage.Connected };
-
-            var pipeline = handler.AddRequestMiddleware(item);
-
-            Assert.Same(handler.RequestPipeline, pipeline);
-            Assert.Same(item, handler.RequestPipeline[RequestPipelineStage.Connected].Single());
-        }
-
-        [Fact]
-        public void DictionaryExtension_AddRequestMiddleware_DelegateOverload()
-        {
-            var handler = new MvcChannelHandler();
-
-            handler.RequestPipeline.AddRequestMiddleware(RequestPipelineStage.BeforeReceivingData, _ => Task.CompletedTask, 3.5f);
-
-            var item = handler.RequestPipeline[RequestPipelineStage.BeforeReceivingData].Single();
-            Assert.Equal(3.5f, item.Order);
-            Assert.IsType<DelegateRequestPipeline>(item.Item);
-        }
-
-        #endregion
     }
 }

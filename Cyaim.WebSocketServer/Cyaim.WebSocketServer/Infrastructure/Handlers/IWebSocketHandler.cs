@@ -45,11 +45,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         string SubProtocol { get; }
 
         /// <summary>
-        /// Request pipeline
-        /// </summary>
-        public ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> RequestPipeline { get; }
-
-        /// <summary>
         /// Connection request entry
         /// </summary>
         /// <param name="context"></param>

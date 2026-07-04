@@ -1,9 +1,8 @@
-﻿using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Cyaim.WebSocketServer.Infrastructure.Configures;
 using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.ObjectPool;
 using System;
-using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
@@ -11,319 +10,107 @@ using System.Threading.Tasks;
 namespace Cyaim.WebSocketServer.Infrastructure.Handlers
 {
     /// <summary>
-    /// PipelineContext 对象池策略
-    /// </summary>
-    internal class PipelineContextPooledObjectPolicy : IPooledObjectPolicy<PipelineContext>
-    {
-        public PipelineContext Create()
-        {
-            return new PipelineContext();
-        }
-
-        public bool Return(PipelineContext obj)
-        {
-            // 清理引用，避免内存泄漏
-            obj.HttpContext = null;
-            obj.WebSocketOptions = null;
-            obj.WebSocket = null;
-            obj.ReceiveResult = null;
-            obj.Data = null;
-            obj.Request = null;
-            obj.RequestBody = null;
-            return true;
-        }
-    }
-
-    /// <summary>
-    /// 统一的管道上下文，包含所有管道可能需要的参数
-    /// Unified pipeline context containing all parameters that pipelines may need
+    /// Per-message context that flows through the WebSocket middleware chain.
+    /// 流经 WebSocket 中间件链的每消息上下文。
     /// </summary>
     /// <remarks>
-    /// <para>此类型使用对象池管理，以减少内存分配和 GC 压力。</para>
-    /// <para>⚠️ 重要：不要在异步操作中保存此对象的引用，因为对象会在 InvokeAsync 方法返回后自动归还到池中并被清理。</para>
-    /// <para>✅ 如果需要长时间持有上下文数据，请复制所需的数据（如 Request、Data 等）而不是持有整个 context 对象。</para>
+    /// 与旧的池化上下文不同，本类型是每条消息新建的普通对象，可以安全地在异步续体中捕获与保存。
+    /// Unlike the old pooled context, this is a fresh per-message object and is safe to capture in
+    /// async continuations.
     /// </remarks>
-    public class PipelineContext
+    public sealed class WebSocketMessageContext
     {
-        private static readonly ObjectPool<PipelineContext> _pool = new DefaultObjectPool<PipelineContext>(new PipelineContextPooledObjectPolicy());
+        /// <summary>HTTP context of the connection / 连接的 HTTP 上下文</summary>
+        public HttpContext HttpContext { get; init; }
+
+        /// <summary>The WebSocket instance / WebSocket 实例</summary>
+        public WebSocket WebSocket { get; init; }
+
+        /// <summary>Route options / 路由选项</summary>
+        public WebSocketRouteOption Options { get; init; }
+
+        /// <summary>WebSocket message type of the inbound message / 入站消息的 WebSocket 消息类型</summary>
+        public WebSocketMessageType MessageType { get; init; }
+
+        /// <summary>Ticks when the message started being processed / 开始处理该消息的时间戳</summary>
+        public long RequestTimeTicks { get; init; }
 
         /// <summary>
-        /// HTTP 上下文
+        /// Raw inbound message bytes (valid length only). Do not retain past the middleware chain.
+        /// 入站消息的原始字节（仅有效长度）。不要在中间件链之外保留其引用。
         /// </summary>
-        public HttpContext HttpContext { get; set; }
+        public ReadOnlyMemory<byte> ReceivedData { get; init; }
 
-        /// <summary>
-        /// WebSocket 路由选项
-        /// </summary>
-        public WebSocketRouteOption WebSocketOptions { get; set; }
-
-        /// <summary>
-        /// WebSocket 实例
-        /// </summary>
-        public WebSocket WebSocket { get; set; }
-
-        /// <summary>
-        /// WebSocket 接收结果
-        /// </summary>
-        public WebSocketReceiveResult ReceiveResult { get; set; }
-
-        /// <summary>
-        /// 接收到的数据缓冲区
-        /// </summary>
-        public byte[] Data { get; set; }
-
-        /// <summary>
-        /// MVC 请求方案
-        /// </summary>
+        /// <summary>Parsed request scheme (Id/Target/Body) / 解析后的请求（Id/Target/Body）</summary>
         public MvcRequestScheme Request { get; set; }
 
-        /// <summary>
-        /// 请求体（JSON 对象）
-        /// </summary>
+        /// <summary>Parsed request body as a JSON object / 解析后的请求体（JSON 对象）</summary>
         public JsonObject RequestBody { get; set; }
 
         /// <summary>
-        /// 创建基础上下文（仅包含 HttpContext 和 WebSocketOptions）
+        /// The response object produced by the terminal endpoint (or a short-circuiting middleware).
+        /// After the chain returns it is serialized and sent, unless <see cref="SuppressResponse"/> is true.
+        /// 由终结点（或短路中间件）产生的响应对象；链返回后会被序列化并发送，除非 <see cref="SuppressResponse"/> 为 true。
         /// </summary>
-        /// <remarks>
-        /// 注意：返回的对象来自对象池，使用完毕后会自动归还，无需手动管理。
-        /// </remarks>
-        public static PipelineContext CreateBasic(HttpContext context, WebSocketRouteOption options)
-        {
-            var ctx = _pool.Get();
-            ctx.HttpContext = context;
-            ctx.WebSocketOptions = options;
-            return ctx;
-        }
+        public object Response { get; set; }
 
         /// <summary>
-        /// 创建接收数据上下文
+        /// Set true so the framework does not send a response for this message (e.g. a middleware
+        /// already wrote to the socket itself). / 设为 true 则框架不再为本消息发送响应。
         /// </summary>
-        /// <remarks>
-        /// 注意：返回的对象来自对象池，使用完毕后会自动归还，无需手动管理。
-        /// </remarks>
-        public static PipelineContext CreateReceive(HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] data, WebSocketRouteOption options = null)
-        {
-            var ctx = _pool.Get();
-            ctx.HttpContext = context;
-            ctx.WebSocket = webSocket;
-            ctx.ReceiveResult = result;
-            ctx.Data = data;
-            ctx.WebSocketOptions = options;
-            return ctx;
-        }
+        public bool SuppressResponse { get; set; }
+
+        private IDictionary<object, object> _items;
 
         /// <summary>
-        /// 创建转发数据上下文
+        /// Scratch state shared across middleware for this message (lazily created).
+        /// 本消息内各中间件共享的临时状态（惰性创建）。
         /// </summary>
-        /// <remarks>
-        /// 注意：返回的对象来自对象池，使用完毕后会自动归还，无需手动管理。
-        /// </remarks>
-        public static PipelineContext CreateForward(HttpContext context, WebSocket webSocket, WebSocketReceiveResult result, byte[] data, MvcRequestScheme request, JsonObject requestBody, WebSocketRouteOption options = null)
-        {
-            var ctx = _pool.Get();
-            ctx.HttpContext = context;
-            ctx.WebSocket = webSocket;
-            ctx.ReceiveResult = result;
-            ctx.Data = data;
-            ctx.Request = request;
-            ctx.RequestBody = requestBody;
-            ctx.WebSocketOptions = options;
-            return ctx;
-        }
-
-        /// <summary>
-        /// 归还对象到池中（使用完上下文后调用）
-        /// </summary>
-        /// <remarks>
-        /// 注意：此方法通常由框架自动调用，无需手动调用。
-        /// 对象归还后会被清理并重用，因此不应在异步操作中保存此对象的引用。
-        /// 如果需要长时间持有上下文数据，请复制所需的数据而不是持有整个 context 对象。
-        /// </remarks>
-        public void Return()
-        {
-            _pool.Return(this);
-        }
+        public IDictionary<object, object> Items => _items ??= new Dictionary<object, object>();
     }
 
     /// <summary>
-    /// 请求管道处理器基类
+    /// A terminal or composed step of the WebSocket request pipeline.
+    /// WebSocket 请求管道的终结点或组合步骤。
     /// </summary>
-    public abstract class RequestPipeline
+    public delegate Task WebSocketRequestDelegate(WebSocketMessageContext context);
+
+    /// <summary>
+    /// A WebSocket middleware. Call <paramref name="next"/> to invoke the rest of the pipeline
+    /// (including the endpoint); skip it to short-circuit. Run code before and/or after <c>next</c>
+    /// to wrap the request.
+    /// WebSocket 中间件。调用 <paramref name="next"/> 执行下游（含终结点）；不调用则短路。
+    /// 在 <c>next</c> 前后执行代码即可环绕请求。
+    /// </summary>
+    public interface IWebSocketMiddleware
     {
-        /// <summary>
-        /// 统一的管道调用方法
-        /// </summary>
-        /// <param name="context">管道上下文</param>
-        /// <remarks>
-        /// <para>重要提示：PipelineContext 使用对象池管理，会在 InvokeAsync 方法返回后自动归还到池中。</para>
-        /// <para>⚠️ 不要在异步操作中保存 context 的引用，因为方法返回后对象会被清理和重用。</para>
-        /// <para>✅ 如果需要长时间持有上下文数据，请复制所需的数据（如 context.Request、context.Data 等）而不是持有整个 context 对象。</para>
-        /// <para>✅ 示例：var requestCopy = context.Request; var dataCopy = context.Data?.ToArray();</para>
-        /// </remarks>
-        public abstract Task InvokeAsync(PipelineContext context);
+        /// <summary>Process the message, optionally invoking the rest of the pipeline via <paramref name="next"/>.</summary>
+        Task InvokeAsync(WebSocketMessageContext context, WebSocketRequestDelegate next);
     }
 
     /// <summary>
-    /// 基于委托的管道处理器实现，方便快速创建管道
+    /// Extension helpers for registering WebSocket middleware on a <see cref="WebSocketRouteOption"/>.
+    /// 在 <see cref="WebSocketRouteOption"/> 上注册 WebSocket 中间件的扩展方法。
     /// </summary>
-    public class DelegateRequestPipeline : RequestPipeline
-    {
-        private readonly Func<PipelineContext, Task> _handler;
-
-        /// <summary>
-        /// 创建基于委托的管道处理器
-        /// </summary>
-        /// <param name="handler">管道处理委托</param>
-        public DelegateRequestPipeline(Func<PipelineContext, Task> handler)
-        {
-            _handler = handler ?? throw new ArgumentNullException(nameof(handler));
-        }
-
-        /// <summary>
-        /// 执行管道处理
-        /// </summary>
-        /// <remarks>
-        /// 注意：context 对象会在方法返回后自动归还到对象池，不要在委托中保存 context 的引用。
-        /// 如需长时间持有数据，请复制所需的数据。
-        /// </remarks>
-        public override Task InvokeAsync(PipelineContext context)
-        {
-            return _handler(context);
-        }
-    }
-
-    /// <summary>
-    /// Pipeline item
-    /// </summary>
-    public class PipelineItem
+    public static class WebSocketMiddlewareExtensions
     {
         /// <summary>
-        /// Pipeline delegation
+        /// Register an inline middleware. Call <c>next(ctx)</c> to continue the pipeline.
+        /// 注册一个内联中间件。调用 <c>next(ctx)</c> 继续管道。
         /// </summary>
-        public RequestPipeline Item { get; set; }
-
-        /// <summary>
-        /// Request pipeline stage
-        /// </summary>
-        public RequestPipelineStage Stage { get; set; }
-
-        /// <summary>
-        /// The order in the pipeline, from small to large
-        /// </summary>
-        public float Order { get; set; }
-
-        /// <summary>
-        /// Exception occurred when calling the pipeline
-        /// </summary>
-        public Exception Exception { get; set; }
-
-        /// <summary>
-        /// Exception pipeline objects that occurred
-        /// </summary>
-        public PipelineItem ExceptionItem { get; set; }
-    }
-
-    /// <summary>
-    /// Request stage
-    /// </summary>
-    public enum RequestPipelineStage
-    {
-        /// <summary>
-        /// Before receiving data
-        /// 接收数据前
-        /// </summary>
-        BeforeReceivingData,
-        /// <summary>
-        /// Receiving data
-        /// 接收数据中
-        /// </summary>
-        ReceivingData,
-        /// <summary>
-        /// After receiving data
-        /// 接收数据后
-        /// </summary>
-        AfterReceivingData,
-        /// <summary>
-        /// Before forwarding data
-        /// 转发数据前
-        /// </summary>
-        BeforeForwardingData,
-        /// <summary>
-        /// After forwarding data
-        /// 转发数据后
-        /// </summary>
-        AfterForwardingData,
-        /// <summary>
-        /// Connected
-        /// 客户端已连接
-        /// </summary>
-        Connected,
-        /// <summary>
-        /// Disconnected
-        /// 客户端断开连接
-        /// </summary>
-        Disconnected
-    }
-
-
-    public static class RequestPipelineMiddlewareExtensions
-    {
-        /// <summary>
-        /// Add request middleware to RequestPipeline
-        /// </summary>
-        /// <param name="pipeline">Pipeline</param>
-        /// <param name="handler">Processing program</param>
-        /// <returns></returns>
-        public static ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> AddRequestMiddleware(this ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> pipeline, PipelineItem handler)
+        public static WebSocketRouteOption Use(this WebSocketRouteOption options, Func<WebSocketMessageContext, WebSocketRequestDelegate, Task> middleware)
         {
-            if (!pipeline.TryGetValue(handler.Stage, out ConcurrentQueue<PipelineItem> value))
-            {
-                value = new ConcurrentQueue<PipelineItem>();
-                pipeline.TryAdd(handler.Stage, value);
-            }
-            value.Enqueue(handler);
-
-            return pipeline;
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            if (middleware == null) throw new ArgumentNullException(nameof(middleware));
+            options.AddMiddleware(next => context => middleware(context, next));
+            return options;
         }
 
-        /// <summary>
-        /// Add request middleware to RequestPipeline
-        /// </summary>
-        /// <param name="pipeline"></param>
-        /// <param name="stage"></param>
-        /// <param name="invoke"></param>
-        /// <param name="order">If it is null, add 1 on the largest order in the current stage queue. If there is no data in the current queue, the order is 0.</param>
-        /// <returns></returns>
-        public static ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> AddRequestMiddleware(this ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> pipeline, RequestPipelineStage stage, RequestPipeline invoke, float? order = null)
+        /// <summary>Register a middleware instance. / 注册一个中间件实例。</summary>
+        public static WebSocketRouteOption Use(this WebSocketRouteOption options, IWebSocketMiddleware middleware)
         {
-            if (!pipeline.TryGetValue(stage, out ConcurrentQueue<PipelineItem> value))
-            {
-                value = new ConcurrentQueue<PipelineItem>();
-                pipeline.TryAdd(stage, value);
-            }
-            value.Enqueue(new PipelineItem()
-            {
-                Item = invoke,
-                Order = order ?? 0,
-                Stage = stage
-            });
-
-            return pipeline;
-        }
-
-        /// <summary>
-        /// 添加基于委托的管道处理器（便捷方法）
-        /// </summary>
-        /// <param name="pipeline">管道字典</param>
-        /// <param name="stage">管道阶段</param>
-        /// <param name="handler">处理委托</param>
-        /// <param name="order">执行顺序，如果为 null，则自动递增</param>
-        /// <returns></returns>
-        public static ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> AddRequestMiddleware(this ConcurrentDictionary<RequestPipelineStage, ConcurrentQueue<PipelineItem>> pipeline, RequestPipelineStage stage, Func<PipelineContext, Task> handler, float? order = null)
-        {
-            var delegatePipeline = new DelegateRequestPipeline(handler);
-            return pipeline.AddRequestMiddleware(stage, delegatePipeline, order);
+            if (middleware == null) throw new ArgumentNullException(nameof(middleware));
+            return options.Use(middleware.InvokeAsync);
         }
     }
 }

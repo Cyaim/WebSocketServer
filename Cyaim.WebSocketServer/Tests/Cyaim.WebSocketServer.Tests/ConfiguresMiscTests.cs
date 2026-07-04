@@ -507,26 +507,5 @@ namespace Cyaim.WebSocketServer.Tests
             Assert.Equal("t", scheme.Target);
             Assert.Equal(42, scheme.Body);
         }
-
-        [Fact]
-        public void PipelineItem_Properties_RoundTrip()
-        {
-            var pipeline = new DelegateRequestPipeline(_ => Task.CompletedTask);
-            var exception = new Exception("x");
-            var item = new PipelineItem
-            {
-                Item = pipeline,
-                Order = 1.5f,
-                Stage = RequestPipelineStage.Connected,
-                Exception = exception
-            };
-            item.ExceptionItem = item;
-
-            Assert.Same(pipeline, item.Item);
-            Assert.Equal(1.5f, item.Order);
-            Assert.Equal(RequestPipelineStage.Connected, item.Stage);
-            Assert.Same(exception, item.Exception);
-            Assert.Same(item, item.ExceptionItem);
-        }
     }
 }
