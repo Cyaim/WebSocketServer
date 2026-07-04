@@ -17,6 +17,7 @@ Welcome to the Cyaim.WebSocketServer documentation center. This documentation pr
 - **[Cluster Transports](./CLUSTER_TRANSPORTS.md)** - Redis, RabbitMQ transport implementations
 - **[Hybrid Cluster Transport](./HYBRID_CLUSTER.md)** - Redis + RabbitMQ hybrid transport solution
 - **[Cluster Validation (real middleware)](./CLUSTER_VALIDATION.md)** - Every transport verified against a real Redis cluster + RabbitMQ, plus production compatibility notes
+- **[Hybrid Deployment Checklist](./HYBRID_DEPLOYMENT_CHECKLIST.md)** - Item-by-item pre-production checklist for the Hybrid transport
 - **[Metrics](./METRICS.md)** - OpenTelemetry integration, performance monitoring
 - **[Dashboard](./DASHBOARD.md)** - Monitoring panel, API interfaces, frontend UI
 
