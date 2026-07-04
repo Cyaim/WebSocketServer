@@ -59,6 +59,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         public IReadOnlyDictionary<string, string> ConnectionRoutes => _router.ConnectionRoutes;
 
         /// <summary>
+        /// Cluster transport instance (for internal infrastructure use, e.g. the inbound /cluster endpoint)
+        /// 集群传输实例（供内部基础设施使用，例如入站 /cluster 端点）
+        /// </summary>
+        internal IClusterTransport Transport => _transport;
+
+        /// <summary>
         /// Set WebSocket connection provider
         /// 设置 WebSocket 连接提供者
         /// </summary>
@@ -66,6 +72,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         public void SetConnectionProvider(IWebSocketConnectionProvider provider)
         {
             _connectionProvider = provider;
+            // 同步传递给路由器，否则本地路由静默失败（与 SetMetricsCollector 行为一致）
+            // Forward to the router as well, otherwise local routing silently fails (consistent with SetMetricsCollector)
+            _router?.SetConnectionProvider(provider);
         }
 
         /// <summary>
@@ -742,16 +751,17 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             {
                 wsTransport.RegisterNode(node);
             }
-            // Note: Redis and RabbitMQ transports are in separate packages
-            // 注意：Redis 和 RabbitMQ 传输在单独的包中
-            // They should implement a common interface or pattern for RegisterNode
-            // 它们应该实现一个通用的接口或模式用于 RegisterNode
-            // For now, we'll use reflection or check if the transport has RegisterNode method
-            // 目前，我们将使用反射或检查传输是否有 RegisterNode 方法
-            var registerMethod = _transport.GetType().GetMethod("RegisterNode");
-            if (registerMethod != null)
+            else
             {
-                registerMethod.Invoke(_transport, new object[] { node });
+                // Note: Redis and RabbitMQ transports are in separate packages
+                // 注意：Redis 和 RabbitMQ 传输在单独的包中
+                // Fall back to reflection when the transport exposes a RegisterNode method
+                // 传输若提供 RegisterNode 方法则通过反射调用
+                var registerMethod = _transport.GetType().GetMethod("RegisterNode");
+                if (registerMethod != null)
+                {
+                    registerMethod.Invoke(_transport, new object[] { node });
+                }
             }
         }
     }

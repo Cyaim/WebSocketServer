@@ -75,9 +75,13 @@ namespace Cyaim.WebSocketServer.Infrastructure
                         {
                             continue;
                         }
-                        textKV.TryGetValue(field.Name, out string val);
-                        // 设置字段的值
-                        field.SetValue(null, val);
+                        // 仅在资源文件包含该键时才覆盖，缺失的键保留默认文本（旧实现会把缺失键置为 null）
+                        // Only overwrite when the resource file contains the key; missing keys keep
+                        // the default text (the old implementation nulled them out)
+                        if (textKV.TryGetValue(field.Name, out string val) && val != null)
+                        {
+                            field.SetValue(null, val);
+                        }
                     }
                 }
 
@@ -106,53 +110,53 @@ namespace Cyaim.WebSocketServer.Infrastructure
         [JsonIgnore]
         public const string WS_INTERACTIVE_TEXT_TEMPALTE = @"{0}:{1} ({2})-> {3}";
 
-        public static readonly string WebSocketCloseStatus_Empty = "No error specified.";
-        public static readonly string WebSocketCloseStatus_EndpointUnavailable = "Indicates an endpoint is being removed. Either the server or client will become unavailable.";
-        public static readonly string WebSocketCloseStatus_InternalServerError = "The connection will be closed by the server because of an error on the server.";
-        public static readonly string WebSocketCloseStatus_InvalidMessageType = "The client or server is terminating the connection because it cannot accept the data type it received.";
-        public static readonly string WebSocketCloseStatus_InvalidPayloadData = "The client or server is terminating the connection because it has received data inconsistent with the message type.";
-        public static readonly string WebSocketCloseStatus_MandatoryExtension = "The client is terminating the connection because it expected the server to negotiate an extension.";
-        public static readonly string WebSocketCloseStatus_MessageTooBig = "Reserved for future use.";
-        public static readonly string WebSocketCloseStatus_NormalClosure = "The connection has closed after the request was fulfilled.";
-        public static readonly string WebSocketCloseStatus_PolicyViolation = "The connection will be closed because an endpoint has received a messagethat violates its policy.";
-        public static readonly string WebSocketCloseStatus_ProtocolError = "The client or server is terminating the connection because of a protocol error.";
-        public static readonly string WebSocketCloseStatus_ConnectionShutdown = "The client or server is terminating the connection because of a protocol error.";
+        public static string WebSocketCloseStatus_Empty = "No error specified.";
+        public static string WebSocketCloseStatus_EndpointUnavailable = "Indicates an endpoint is being removed. Either the server or client will become unavailable.";
+        public static string WebSocketCloseStatus_InternalServerError = "The connection will be closed by the server because of an error on the server.";
+        public static string WebSocketCloseStatus_InvalidMessageType = "The client or server is terminating the connection because it cannot accept the data type it received.";
+        public static string WebSocketCloseStatus_InvalidPayloadData = "The client or server is terminating the connection because it has received data inconsistent with the message type.";
+        public static string WebSocketCloseStatus_MandatoryExtension = "The client is terminating the connection because it expected the server to negotiate an extension.";
+        public static string WebSocketCloseStatus_MessageTooBig = "Reserved for future use.";
+        public static string WebSocketCloseStatus_NormalClosure = "The connection has closed after the request was fulfilled.";
+        public static string WebSocketCloseStatus_PolicyViolation = "The connection will be closed because an endpoint has received a messagethat violates its policy.";
+        public static string WebSocketCloseStatus_ProtocolError = "The client or server is terminating the connection because of a protocol error.";
+        public static string WebSocketCloseStatus_ConnectionShutdown = "The client or server is terminating the connection because of a protocol error.";
 
 
-        public static readonly string ConnectionEntry_Connected = "Connected.";
-        public static readonly string ConnectionEntry_ConnectionAlreadyExists = "Connection already exists.";
-        public static readonly string ConnectionEntry_DisconnectedInternalExceptions = "Connection disconnected due to one or more internal exceptions." + Environment.NewLine;
-        public static readonly string ConnectionEntry_ConnectionDenied = "Connection denied:request header error.";
-        public static readonly string ConnectionEntry_RequestSizeMaximumLimit = "Request size exceeds maximum limit.";
-        public static readonly string ConnectionEntry_ReceivingClientDataException = "An exception occurred while receiving client data.";
-        public static readonly string ConnectionEntry_AbortedReceivingData = "Aborted receiving data." + Environment.NewLine;
-        public static readonly string MvcForwardSendData_RequestParsingError = "Request parsing error." + Environment.NewLine;
-        public static readonly string MvcForwardSendData_RequestBodyFormatError = "Request body format error." + Environment.NewLine;
-        public static readonly string MvcForwardSendData_RequestBodyParameterFormatError = "Parameter data formatting exception in the request body." + Environment.NewLine;
-        public static readonly string MvcDistributeAsync_EmptyDI = "Cannot inject target constructor parameter because DI container WebSocketRouteOption.ApplicationServiceCollection is null.";
-        public static readonly string MvcDistributeAsync_Target = "Target:";
-        public static readonly string OnDisconnected_Disconnected = "Disconnected." + Environment.NewLine;
+        public static string ConnectionEntry_Connected = "Connected.";
+        public static string ConnectionEntry_ConnectionAlreadyExists = "Connection already exists.";
+        public static string ConnectionEntry_DisconnectedInternalExceptions = "Connection disconnected due to one or more internal exceptions." + Environment.NewLine;
+        public static string ConnectionEntry_ConnectionDenied = "Connection denied:request header error.";
+        public static string ConnectionEntry_RequestSizeMaximumLimit = "Request size exceeds maximum limit.";
+        public static string ConnectionEntry_ReceivingClientDataException = "An exception occurred while receiving client data.";
+        public static string ConnectionEntry_AbortedReceivingData = "Aborted receiving data." + Environment.NewLine;
+        public static string MvcForwardSendData_RequestParsingError = "Request parsing error." + Environment.NewLine;
+        public static string MvcForwardSendData_RequestBodyFormatError = "Request body format error." + Environment.NewLine;
+        public static string MvcForwardSendData_RequestBodyParameterFormatError = "Parameter data formatting exception in the request body." + Environment.NewLine;
+        public static string MvcDistributeAsync_EmptyDI = "Cannot inject target constructor parameter because DI container WebSocketRouteOption.ApplicationServiceCollection is null.";
+        public static string MvcDistributeAsync_Target = "Target:";
+        public static string OnDisconnected_Disconnected = "Disconnected." + Environment.NewLine;
 
 
-        public static readonly string NowWebSocketOn = "Now websocket on: ";
-        public static readonly string DefineWebSocketChannelOn = "Define websocket channel on: ";
+        public static string NowWebSocketOn = "Now websocket on: ";
+        public static string DefineWebSocketChannelOn = "Define websocket channel on: ";
 
 
-        public static readonly string AtThisStagePipelineNotSupport = "This pipeline type is not supported at this stage and cannot be null. It should be: ";
+        public static string AtThisStagePipelineNotSupport = "This pipeline type is not supported at this stage and cannot be null. It should be: ";
 
-        public static readonly string MvcDistributeAsync_EndPointNotFound = "Endpoint not found: ";
+        public static string MvcDistributeAsync_EndPointNotFound = "Endpoint not found: ";
 
-        public static readonly string MvcForwardSendData_RequestIdRequired = "Request must contain an Id property. The client cannot distinguish the response source without an Id." + Environment.NewLine;
+        public static string MvcForwardSendData_RequestIdRequired = "Request must contain an Id property. The client cannot distinguish the response source without an Id." + Environment.NewLine;
 
-        public static readonly string ConnectionEntry_ClusterManagerRegistered = "Registered connection with cluster manager.";
-        public static readonly string ConnectionEntry_ClusterManagerRegisterFailed = "Failed to register connection with cluster manager.";
-        public static readonly string ConnectionEntry_ClusterManagerUnregistered = "Unregistered connection from cluster manager.";
-        public static readonly string ConnectionEntry_ClusterManagerUnregisterFailed = "Failed to unregister connection from cluster manager.";
-        public static readonly string ConnectionEntry_CloseResponseFailed = "Failed to send Close response.";
-        public static readonly string ConnectionEntry_CloseConnectionError = "Error closing WebSocket connection.";
-        public static readonly string ConnectionEntry_AccessDenied = "Access denied for IP {0} from {1}.";
-        public static readonly string ConnectionEntry_AccessDeniedWithMessage = "Access denied for IP {0} from {1}: {2}";
-        public static readonly string ConnectionEntry_AccessControlError = "Error checking access control.";
+        public static string ConnectionEntry_ClusterManagerRegistered = "Registered connection with cluster manager.";
+        public static string ConnectionEntry_ClusterManagerRegisterFailed = "Failed to register connection with cluster manager.";
+        public static string ConnectionEntry_ClusterManagerUnregistered = "Unregistered connection from cluster manager.";
+        public static string ConnectionEntry_ClusterManagerUnregisterFailed = "Failed to unregister connection from cluster manager.";
+        public static string ConnectionEntry_CloseResponseFailed = "Failed to send Close response.";
+        public static string ConnectionEntry_CloseConnectionError = "Error closing WebSocket connection.";
+        public static string ConnectionEntry_AccessDenied = "Access denied for IP {0} from {1}.";
+        public static string ConnectionEntry_AccessDeniedWithMessage = "Access denied for IP {0} from {1}: {2}";
+        public static string ConnectionEntry_AccessControlError = "Error checking access control.";
 
 
     }

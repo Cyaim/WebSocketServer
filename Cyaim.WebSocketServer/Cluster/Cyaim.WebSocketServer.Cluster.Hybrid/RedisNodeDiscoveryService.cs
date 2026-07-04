@@ -20,6 +20,14 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         private readonly string _nodeId;
         private NodeInfo _nodeInfo;
         private readonly string _clusterPrefix;
+
+        /// <summary>
+        /// Single Redis hash key holding every node's registration (field = nodeId, value = NodeInfo JSON).
+        /// One key ⇒ one cluster shard ⇒ HGETALL reliably returns all nodes even on Redis Cluster.
+        /// 存放所有节点注册的单个 Redis Hash 键（field=节点ID，value=NodeInfo JSON）。
+        /// 单键=单分片，即使在 Redis 集群下 HGETALL 也能可靠返回全部节点。
+        /// </summary>
+        private string NodesHashKey => $"{_clusterPrefix}:nodes";
         private readonly Timer _heartbeatTimer;
         private readonly Timer _discoveryTimer;
         private readonly CancellationTokenSource _cancellationTokenSource;
@@ -61,11 +69,12 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             _nodeInfoProvider = nodeInfoProvider;
             _cancellationTokenSource = new CancellationTokenSource();
 
-            // Heartbeat every 5 seconds / 每 5 秒发送一次心跳
-            _heartbeatTimer = new Timer(SendHeartbeat, null, TimeSpan.Zero, TimeSpan.FromSeconds(5));
-
-            // Discover nodes every 5 seconds (more frequent to catch nodes faster) / 每 5 秒发现一次节点（更频繁以更快捕获节点）
-            _discoveryTimer = new Timer(DiscoverNodes, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5));
+            // 定时器先创建但不触发，等 StartAsync 里 Redis 连接就绪、节点已注册后再启用，
+            // 避免在 ConnectAsync 之前触发导致 "Redis is not connected" 错误日志刷屏。
+            // Timers are created disabled and enabled in StartAsync after Redis is connected and the
+            // node is registered, avoiding "Redis is not connected" error spam before ConnectAsync.
+            _heartbeatTimer = new Timer(SendHeartbeat, null, Timeout.Infinite, Timeout.Infinite);
+            _discoveryTimer = new Timer(DiscoverNodes, null, Timeout.Infinite, Timeout.Infinite);
         }
 
         /// <summary>
@@ -117,6 +126,11 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
             // Initial discovery / 初始发现
             await DiscoverNodesAsync();
             _logger.LogWarning($"[RedisNodeDiscoveryService] 初始节点发现完成 - NodeId: _nodeId: {_nodeId}");
+
+            // Redis 已连接且本节点已注册，现在启用周期性心跳与发现定时器
+            // Redis is connected and this node is registered; now enable the periodic timers.
+            _heartbeatTimer.Change(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+            _discoveryTimer.Change(TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5));
         }
 
         /// <summary>
@@ -143,11 +157,12 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         {
             try
             {
-                var key = $"{_clusterPrefix}:nodes:{_nodeId}";
+                // 集群安全：所有节点写入同一个 Hash 键的不同字段（单键=单分片），
+                // 避免 KEYS/SCAN 在 Redis 集群下只扫描单个分片导致发现不到其他分片上的节点键。
+                // Cluster-safe: every node writes a field into the SAME hash key (one key = one shard),
+                // avoiding KEYS/SCAN missing node keys sharded onto other cluster nodes.
                 var value = JsonSerializer.Serialize(_nodeInfo);
-
-                // Set node info with 30 seconds expiration, will be refreshed by heartbeat / 设置节点信息，30 秒过期，由心跳刷新
-                await _redisService.SetAsync(key, value, TimeSpan.FromSeconds(30));
+                await _redisService.HashSetAsync(NodesHashKey, _nodeId, value);
 
                 // Publish node join event / 发布节点加入事件
                 var nodeEvent = new NodeEvent
@@ -174,8 +189,7 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         {
             try
             {
-                var key = $"{_clusterPrefix}:nodes:{_nodeId}";
-                await _redisService.DeleteAsync(key);
+                await _redisService.HashDeleteAsync(NodesHashKey, _nodeId);
 
                 // Publish node leave event / 发布节点离开事件
                 var nodeEvent = new NodeEvent
@@ -236,11 +250,10 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                     _nodeInfo.LastHeartbeat = DateTime.UtcNow;
                 }
 
-                var key = $"{_clusterPrefix}:nodes:{_nodeId}";
+                // Refresh this node's field in the shared hash (see RegisterNodeAsync for why a hash)
+                // 刷新共享 Hash 中本节点的字段（用 Hash 的原因见 RegisterNodeAsync）
                 var value = JsonSerializer.Serialize(_nodeInfo);
-
-                // Refresh node info with 30 seconds expiration / 刷新节点信息，30 秒过期
-                await _redisService.SetAsync(key, value, TimeSpan.FromSeconds(30));
+                await _redisService.HashSetAsync(NodesHashKey, _nodeId, value);
             }
             catch (Exception ex)
             {
@@ -266,11 +279,11 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
         {
             try
             {
-                var pattern = $"{_clusterPrefix}:nodes:*";
-                _logger.LogWarning($"[RedisNodeDiscoveryService] 开始发现节点 - Pattern: {pattern}, CurrentNodeId: {_nodeId}");
-
-                var nodes = await _redisService.GetValuesAsync(pattern);
-                _logger.LogWarning($"[RedisNodeDiscoveryService] 从 Redis 获取到节点数据 - Pattern: {pattern}, FoundKeys: {nodes.Count}, CurrentNodeId: {_nodeId}");
+                // 集群安全：从单个共享 Hash 键读取全部成员，HGETALL 只命中一个分片，能可靠拿到所有节点。
+                // Cluster-safe: read the whole membership from one shared hash key. HGETALL hits a single
+                // shard and reliably returns every node, unlike KEYS/SCAN which misses cross-shard keys.
+                var nodes = await _redisService.HashGetAllAsync(NodesHashKey);
+                _logger.LogDebug($"[RedisNodeDiscoveryService] 从 Redis Hash 获取到节点数据 - Key: {NodesHashKey}, Fields: {nodes.Count}, CurrentNodeId: {_nodeId}");
 
                 var discoveredNodeIds = new HashSet<string>();
 
@@ -278,55 +291,44 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
                 {
                     try
                     {
-                        _logger.LogWarning($"[RedisNodeDiscoveryService] 处理节点数据 - Key: {kvp.Key}, ValueLength: {kvp.Value?.Length ?? 0}, CurrentNodeId: {_nodeId}");
-
                         var nodeInfo = JsonSerializer.Deserialize<NodeInfo>(kvp.Value);
                         if (nodeInfo != null)
                         {
-                            _logger.LogWarning($"[RedisNodeDiscoveryService] 解析节点信息成功 - Key: {kvp.Key}, NodeId: {nodeInfo.NodeId}, CurrentNodeId: {_nodeId}, LastHeartbeat: {nodeInfo.LastHeartbeat}");
-
                             if (nodeInfo.NodeId != _nodeId)
                             {
                                 discoveredNodeIds.Add(nodeInfo.NodeId);
 
                                 // Check if node is still alive (heartbeat within 60 seconds) / 检查节点是否仍然存活（60 秒内有心跳）
                                 var timeSinceHeartbeat = DateTime.UtcNow - nodeInfo.LastHeartbeat;
-                                _logger.LogWarning($"[RedisNodeDiscoveryService] 检查节点存活状态 - NodeId: {nodeInfo.NodeId}, TimeSinceHeartbeat: {timeSinceHeartbeat.TotalSeconds}秒, IsAlive: {timeSinceHeartbeat < TimeSpan.FromSeconds(60)}");
-
                                 if (timeSinceHeartbeat < TimeSpan.FromSeconds(60))
                                 {
-                                    _logger.LogWarning($"[RedisNodeDiscoveryService] 触发节点发现事件 - NodeId: {nodeInfo.NodeId}, Address: {nodeInfo.Address}, Port: {nodeInfo.Port}");
                                     NodeDiscovered?.Invoke(this, nodeInfo);
                                 }
                                 else
                                 {
-                                    // Node appears to be dead, remove it / 节点似乎已死，移除它
+                                    // Node appears to be dead, remove its field / 节点似乎已死，删除其字段
                                     _logger.LogWarning($"[RedisNodeDiscoveryService] 节点已死亡，移除 - NodeId: {nodeInfo.NodeId}, TimeSinceHeartbeat: {timeSinceHeartbeat.TotalSeconds}秒");
-                                    await _redisService.DeleteAsync(kvp.Key);
+                                    await _redisService.HashDeleteAsync(NodesHashKey, kvp.Key);
                                     NodeRemoved?.Invoke(this, nodeInfo.NodeId);
                                 }
-                            }
-                            else
-                            {
-                                _logger.LogWarning($"[RedisNodeDiscoveryService] 跳过自己的节点 - NodeId: {nodeInfo.NodeId}, CurrentNodeId: {_nodeId}");
                             }
                         }
                         else
                         {
-                            _logger.LogWarning($"[RedisNodeDiscoveryService] 节点信息解析为 null - Key: {kvp.Key}");
+                            _logger.LogWarning($"[RedisNodeDiscoveryService] 节点信息解析为 null - Field: {kvp.Key}");
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, $"[RedisNodeDiscoveryService] 反序列化节点信息失败 - Key: {kvp.Key}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                        _logger.LogError(ex, $"[RedisNodeDiscoveryService] 反序列化节点信息失败 - Field: {kvp.Key}, Error: {ex.Message}");
                     }
                 }
 
-                _logger.LogWarning($"[RedisNodeDiscoveryService] 节点发现完成 - Pattern: {pattern}, DiscoveredNodeCount: {discoveredNodeIds.Count}, DiscoveredNodes: {string.Join(", ", discoveredNodeIds)}, CurrentNodeId: {_nodeId}");
+                _logger.LogDebug($"[RedisNodeDiscoveryService] 节点发现完成 - Key: {NodesHashKey}, DiscoveredNodeCount: {discoveredNodeIds.Count}, DiscoveredNodes: {string.Join(", ", discoveredNodeIds)}, CurrentNodeId: {_nodeId}");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"[RedisNodeDiscoveryService] 发现节点失败 - Pattern: {_clusterPrefix}:nodes:*, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
+                _logger.LogError(ex, $"[RedisNodeDiscoveryService] 发现节点失败 - Key: {NodesHashKey}, Error: {ex.Message}, StackTrace: {ex.StackTrace}");
             }
         }
 
@@ -344,23 +346,22 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid
 
             try
             {
-                var key = $"{_clusterPrefix}:nodes:{nodeId}";
-                var value = await _redisService.GetAsync(key);
+                var value = await _redisService.HashGetAsync(NodesHashKey, nodeId);
 
                 if (string.IsNullOrEmpty(value))
                 {
-                    _logger.LogTrace($"[RedisNodeDiscoveryService] 节点信息未找到 - NodeId: {nodeId}, Key: {key}, CurrentNodeId: {_nodeId}");
+                    _logger.LogTrace($"[RedisNodeDiscoveryService] 节点信息未找到 - NodeId: {nodeId}, HashKey: {NodesHashKey}, CurrentNodeId: {_nodeId}");
                     return null;
                 }
 
                 var nodeInfo = JsonSerializer.Deserialize<NodeInfo>(value);
                 if (nodeInfo != null)
                 {
-                    _logger.LogTrace($"[RedisNodeDiscoveryService] 获取节点信息成功 - NodeId: {nodeId}, Key: {key}, CurrentNodeId: {_nodeId}, LastHeartbeat: {nodeInfo.LastHeartbeat}");
+                    _logger.LogTrace($"[RedisNodeDiscoveryService] 获取节点信息成功 - NodeId: {nodeId}, HashKey: {NodesHashKey}, CurrentNodeId: {_nodeId}, LastHeartbeat: {nodeInfo.LastHeartbeat}");
                 }
                 else
                 {
-                    _logger.LogWarning($"[RedisNodeDiscoveryService] 节点信息反序列化失败 - NodeId: {nodeId}, Key: {key}, Value: {value}, CurrentNodeId: {_nodeId}");
+                    _logger.LogWarning($"[RedisNodeDiscoveryService] 节点信息反序列化失败 - NodeId: {nodeId}, HashKey: {NodesHashKey}, Value: {value}, CurrentNodeId: {_nodeId}");
                 }
 
                 return nodeInfo;

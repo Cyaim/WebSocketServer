@@ -38,7 +38,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
             var webSocket = await context.WebSockets.AcceptWebSocketAsync();
             var remoteAddress = $"{context.Connection.RemoteIpAddress}:{context.Connection.RemotePort}";
-            var connectionId = context.Connection.Id;
+            // 某些宿主（如 TestServer）不分配连接 ID，为空时补一个，避免以 null 作字典键崩溃
+            // Some hosts (e.g. TestServer) don't assign a connection id; generate one so the
+            // IncomingConnections dictionary never receives a null key
+            var connectionId = string.IsNullOrEmpty(context.Connection.Id)
+                ? Guid.NewGuid().ToString("N")
+                : context.Connection.Id;
 
             logger.LogInformation($"Cluster WebSocket connection accepted from {remoteAddress} (ConnectionId: {connectionId})");
 
@@ -65,13 +70,32 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
         }
 
         /// <summary>
-        /// Handle cluster connection and forward messages to transport layer
-        /// 处理集群连接并将消息转发到传输层
+        /// Receive buffer size in bytes for a single WebSocket frame / 单个 WebSocket 帧的接收缓冲区大小（字节）
+        /// </summary>
+        private const int ReceiveBufferSize = 16 * 1024;
+
+        /// <summary>
+        /// Maximum allowed size of a single inbound cluster message in bytes (default 64MB).
+        /// Messages larger than this cause the connection to be closed to protect memory.
+        /// 单个入站集群消息允许的最大大小（字节，默认 64MB）。
+        /// 超过此大小的消息将导致连接关闭以保护内存。
+        /// </summary>
+        public static int MaxMessageSize { get; set; } = 64 * 1024 * 1024;
+
+        /// <summary>
+        /// Handle cluster connection and forward messages to transport layer.
+        /// Supports multi-frame message reassembly: frames are accumulated until EndOfMessage,
+        /// so messages larger than the receive buffer are no longer dropped or truncated.
+        /// 处理集群连接并将消息转发到传输层。
+        /// 支持多帧消息重组：帧会被累积直到 EndOfMessage，因此大于接收缓冲区的消息不会再被丢弃或截断。
         /// </summary>
         private static async Task HandleClusterConnection(WebSocket webSocket, HttpContext context, ILogger<WebSocketRouteMiddleware> logger, string connectionId)
         {
-            var buffer = new byte[4096];
+            var buffer = new byte[ReceiveBufferSize];
             string identifiedNodeId = null;
+            // Accumulate frames until EndOfMessage to support messages larger than the buffer
+            // 累积帧直到 EndOfMessage，以支持大于缓冲区的消息
+            using var messageStream = new System.IO.MemoryStream();
 
             while (webSocket.State == WebSocketState.Open)
             {
@@ -82,83 +106,81 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     break;
                 }
 
-                if (result.EndOfMessage && result.Count > 0)
+                if (result.Count > 0)
                 {
-                    var messageJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
-
-                    try
+                    // Guard against oversized messages / 防止超大消息
+                    if (messageStream.Length + result.Count > MaxMessageSize)
                     {
-                        var message = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
-                        if (message == null)
+                        logger.LogError($"Inbound cluster message exceeds MaxMessageSize ({MaxMessageSize} bytes), closing connection {connectionId}");
+                        await webSocket.CloseAsync(WebSocketCloseStatus.MessageTooBig, "Cluster message too big", CancellationToken.None);
+                        break;
+                    }
+
+                    messageStream.Write(buffer, 0, result.Count);
+                }
+
+                if (!result.EndOfMessage)
+                {
+                    // Wait for remaining frames of this message / 等待此消息的剩余帧
+                    continue;
+                }
+
+                if (messageStream.Length == 0)
+                {
+                    continue;
+                }
+
+                var messageJson = Encoding.UTF8.GetString(messageStream.GetBuffer(), 0, (int)messageStream.Length);
+                messageStream.SetLength(0);
+
+                try
+                {
+                    var message = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
+                    if (message == null)
+                    {
+                        logger.LogWarning("Received null or invalid cluster message");
+                        continue;
+                    }
+
+                    // Identify the node from the message
+                    // 从消息中识别节点
+                    if (string.IsNullOrEmpty(identifiedNodeId) && !string.IsNullOrEmpty(message.FromNodeId))
+                    {
+                        identifiedNodeId = message.FromNodeId;
+                        logger.LogInformation($"Identified incoming cluster connection from node {identifiedNodeId} (ConnectionId: {connectionId})");
+                    }
+
+                    // Forward message to cluster manager's transport
+                    // 将消息转发到集群管理器的传输层
+                    var clusterManager = GlobalClusterCenter.ClusterManager;
+                    if (clusterManager != null)
+                    {
+                        if (clusterManager.Transport is Transports.WebSocketClusterTransport wsTransport)
                         {
-                            logger.LogWarning("Received null or invalid cluster message");
-                            continue;
-                        }
-
-                        // Identify the node from the message
-                        // 从消息中识别节点
-                        if (string.IsNullOrEmpty(identifiedNodeId) && !string.IsNullOrEmpty(message.FromNodeId))
-                        {
-                            identifiedNodeId = message.FromNodeId;
-                            logger.LogInformation($"Identified incoming cluster connection from node {identifiedNodeId} (ConnectionId: {connectionId})");
-                        }
-
-                        // Forward message to cluster manager
-                        // 将消息转发到集群管理器
-                        var clusterManager = GlobalClusterCenter.ClusterManager;
-                        if (clusterManager != null)
-                        {
-                            // Get the transport and trigger MessageReceived event
-                            // 获取传输层并触发 MessageReceived 事件
-                            var transport = GetTransportFromManager(clusterManager);
-                            if (transport is Transports.WebSocketClusterTransport wsTransport)
-                            {
-                                // Create event args and trigger the event
-                                // 创建事件参数并触发事件
-                                var eventArgs = new ClusterMessageEventArgs
-                                {
-                                    FromNodeId = message.FromNodeId ?? identifiedNodeId,
-                                    Message = message
-                                };
-
-                                // Trigger MessageReceived event using reflection
-                                // 使用反射触发 MessageReceived 事件
-                                var eventField = typeof(Transports.WebSocketClusterTransport)
-                                    .GetField("MessageReceived", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-                                if (eventField?.GetValue(wsTransport) is EventHandler<ClusterMessageEventArgs> handler)
-                                {
-                                    handler.Invoke(wsTransport, eventArgs);
-                                    logger.LogDebug($"Forwarded cluster message {message.Type} from node {eventArgs.FromNodeId}");
-                                }
-                            }
+                            // Inject the inbound message through the official injection point
+                            // 通过正式注入点注入入站消息
+                            wsTransport.OnPeerMessage(message, message.FromNodeId ?? identifiedNodeId);
+                            logger.LogDebug($"Forwarded cluster message {message.Type} from node {message.FromNodeId ?? identifiedNodeId}");
                         }
                         else
                         {
-                            logger.LogWarning("Cluster manager not available, cannot process cluster message");
+                            logger.LogWarning($"Cluster transport does not accept inbound WebSocket cluster messages (transport: {clusterManager.Transport?.GetType().Name ?? "null"})");
                         }
                     }
-                    catch (JsonException ex)
+                    else
                     {
-                        logger.LogWarning(ex, $"Failed to deserialize cluster message: {messageJson.Substring(0, Math.Min(100, messageJson.Length))}");
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, $"Error processing cluster message: {ex.Message}");
+                        logger.LogWarning("Cluster manager not available, cannot process cluster message");
                     }
                 }
+                catch (JsonException ex)
+                {
+                    logger.LogWarning(ex, $"Failed to deserialize cluster message: {messageJson.Substring(0, Math.Min(100, messageJson.Length))}");
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, $"Error processing cluster message: {ex.Message}");
+                }
             }
-        }
-
-        /// <summary>
-        /// Get transport instance from cluster manager using reflection
-        /// 使用反射从集群管理器获取传输实例
-        /// </summary>
-        private static IClusterTransport GetTransportFromManager(ClusterManager manager)
-        {
-            var transportField = typeof(ClusterManager)
-                .GetField("_transport", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            return transportField?.GetValue(manager) as IClusterTransport;
         }
     }
 }

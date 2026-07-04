@@ -31,6 +31,19 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
         private bool _disposed = false;
 
         /// <summary>
+        /// Receive buffer size in bytes for a single WebSocket frame / 单个 WebSocket 帧的接收缓冲区大小（字节）
+        /// </summary>
+        private const int ReceiveBufferSize = 16 * 1024;
+
+        /// <summary>
+        /// Maximum allowed size of a single cluster message in bytes (default 64MB).
+        /// Messages larger than this cause the connection to be closed to protect memory.
+        /// 单个集群消息允许的最大大小（字节，默认 64MB）。
+        /// 超过此大小的消息将导致连接关闭以保护内存。
+        /// </summary>
+        public int MaxMessageSize { get; set; } = 64 * 1024 * 1024;
+
+        /// <summary>
         /// Event triggered when message received / 消息接收时触发的事件
         /// </summary>
         public event EventHandler<ClusterMessageEventArgs> MessageReceived;
@@ -165,7 +178,20 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
                 {
                     if (connection.State == WebSocketState.Open)
                     {
-                        await connection.CloseAsync(WebSocketCloseStatus.NormalClosure, "Transport stopping", CancellationToken.None);
+                        // 关闭握手要等待对端回应关闭帧；对端若无响应，CloseAsync 会永久阻塞。
+                        // 关闭时限时握手，超时则 Abort，确保节点停止不被不响应的 peer 拖死。
+                        // The close handshake waits for the peer's close frame; an unresponsive peer
+                        // would make CloseAsync block forever. Bound the handshake and Abort on timeout
+                        // so shutting a node down never hangs on a dead/unresponsive peer.
+                        using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                        try
+                        {
+                            await connection.CloseAsync(WebSocketCloseStatus.NormalClosure, "Transport stopping", closeCts.Token);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            connection.Abort();
+                        }
                     }
                     connection.Dispose();
                 }
@@ -246,55 +272,83 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
 
         /// <summary>
         /// Receive messages from WebSocket connection / 从 WebSocket 连接接收消息
+        /// Supports multi-frame message reassembly: frames are accumulated until EndOfMessage,
+        /// so messages larger than the receive buffer are no longer dropped or truncated.
+        /// 支持多帧消息重组：帧会被累积直到 EndOfMessage，因此大于接收缓冲区的消息不会再被丢弃或截断。
         /// </summary>
         /// <param name="nodeId">Source node ID / 源节点 ID</param>
         /// <param name="webSocket">WebSocket instance / WebSocket 实例</param>
         private async Task ReceiveMessagesAsync(string nodeId, WebSocket webSocket)
         {
-            var buffer = new byte[4096];
-            
+            var buffer = new byte[ReceiveBufferSize];
+            // Accumulate frames until EndOfMessage to support messages larger than the buffer
+            // 累积帧直到 EndOfMessage，以支持大于缓冲区的消息
+            using var messageStream = new System.IO.MemoryStream();
+
             try
             {
-                _logger.LogWarning($"[WebSocketClusterTransport] 开始接收消息 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
-                
+                _logger.LogDebug($"[WebSocketClusterTransport] 开始接收消息 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+
                 while (webSocket.State == WebSocketState.Open && !_cancellationTokenSource.Token.IsCancellationRequested)
                 {
                     var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), _cancellationTokenSource.Token);
-                    
+
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        _logger.LogWarning($"[WebSocketClusterTransport] 收到关闭消息 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
+                        _logger.LogDebug($"[WebSocketClusterTransport] 收到关闭消息 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}");
                         await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Connection closed", CancellationToken.None);
                         break;
                     }
 
-                    if (result.EndOfMessage && result.Count > 0)
+                    if (result.Count > 0)
                     {
-                        var messageJson = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                        try
+                        // Guard against oversized messages / 防止超大消息
+                        if (messageStream.Length + result.Count > MaxMessageSize)
                         {
-                            var message = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
-                            if (message == null)
-                            {
-                                _logger.LogError($"[WebSocketClusterTransport] 收到空或无效消息 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}, MessageSize: {result.Count} bytes");
-                                continue;
-                            }
-                            message.FromNodeId = nodeId;
-                            
-                            _logger.LogWarning($"[WebSocketClusterTransport] 收到集群消息 - NodeId: {nodeId}, MessageType: {message.Type}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}, MessageSize: {result.Count} bytes");
-                            
-                            MessageReceived?.Invoke(this, new ClusterMessageEventArgs
-                            {
-                                FromNodeId = nodeId,
-                                Message = message
-                            });
-                            
-                            _logger.LogWarning($"[WebSocketClusterTransport] 集群消息已触发事件 - NodeId: {nodeId}, MessageType: {message.Type}, CurrentNodeId: {_nodeId}");
+                            _logger.LogError($"[WebSocketClusterTransport] 集群消息超过最大限制，关闭连接 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}, MaxMessageSize: {MaxMessageSize} bytes");
+                            await webSocket.CloseAsync(WebSocketCloseStatus.MessageTooBig, "Cluster message too big", CancellationToken.None);
+                            break;
                         }
-                        catch (Exception ex)
+
+                        messageStream.Write(buffer, 0, result.Count);
+                    }
+
+                    if (!result.EndOfMessage)
+                    {
+                        // Wait for remaining frames of this message / 等待此消息的剩余帧
+                        continue;
+                    }
+
+                    if (messageStream.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    var messageJson = Encoding.UTF8.GetString(messageStream.GetBuffer(), 0, (int)messageStream.Length);
+                    var messageSize = messageStream.Length;
+                    messageStream.SetLength(0);
+
+                    try
+                    {
+                        var message = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
+                        if (message == null)
                         {
-                            _logger.LogError(ex, $"[WebSocketClusterTransport] 反序列化消息失败 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, StackTrace: {ex.StackTrace}, MessageJson: {messageJson.Substring(0, Math.Min(200, messageJson.Length))}");
+                            _logger.LogError($"[WebSocketClusterTransport] 收到空或无效消息 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}, MessageSize: {messageSize} bytes");
+                            continue;
                         }
+                        message.FromNodeId = nodeId;
+
+                        _logger.LogTrace($"[WebSocketClusterTransport] 收到集群消息 - NodeId: {nodeId}, MessageType: {message.Type}, MessageId: {message.MessageId}, CurrentNodeId: {_nodeId}, MessageSize: {messageSize} bytes");
+
+                        MessageReceived?.Invoke(this, new ClusterMessageEventArgs
+                        {
+                            FromNodeId = nodeId,
+                            Message = message
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"[WebSocketClusterTransport] 反序列化消息失败 - NodeId: {nodeId}, CurrentNodeId: {_nodeId}, Error: {ex.Message}, MessageJson: {messageJson.Substring(0, Math.Min(200, messageJson.Length))}");
                     }
                 }
             }
@@ -558,6 +612,29 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster.Transports
                 _logger.LogWarning(ex, $"Failed to get network quality for node {nodeId}");
                 return 0;
             }
+        }
+
+        /// <summary>
+        /// Raise MessageReceived for a message received by the inbound /cluster server endpoint.
+        /// This is the official injection point for server-side (incoming) cluster connections,
+        /// replacing the previous reflection-based event invocation.
+        /// 为入站 /cluster 服务器端点接收到的消息触发 MessageReceived 事件。
+        /// 这是服务器端（入站）集群连接的正式注入点，替代了之前基于反射的事件调用。
+        /// </summary>
+        /// <param name="message">Received cluster message / 接收到的集群消息</param>
+        /// <param name="fromNodeId">Source node ID (falls back to message.FromNodeId) / 源节点 ID（默认为 message.FromNodeId）</param>
+        internal void OnPeerMessage(ClusterMessage message, string fromNodeId = null)
+        {
+            if (message == null)
+            {
+                return;
+            }
+
+            MessageReceived?.Invoke(this, new ClusterMessageEventArgs
+            {
+                FromNodeId = fromNodeId ?? message.FromNodeId,
+                Message = message
+            });
         }
 
         /// <summary>

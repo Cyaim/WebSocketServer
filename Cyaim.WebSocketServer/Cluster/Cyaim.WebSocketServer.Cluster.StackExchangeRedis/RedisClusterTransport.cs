@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -36,6 +37,12 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
         private bool _disposed = false;
 
         /// <summary>
+        /// Node liveness tracker based on last-seen message timestamps (Raft heartbeats arrive ~every second)
+        /// 基于最后一次收到消息时间戳的节点存活跟踪器（Raft 心跳约每秒到达一次）
+        /// </summary>
+        private readonly NodeLivenessTracker _liveness;
+
+        /// <summary>
         /// Redis connection multiplexer / Redis 连接复用器
         /// </summary>
         private ConnectionMultiplexer _redis;
@@ -53,11 +60,10 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
         /// </summary>
         public event EventHandler<ClusterNodeEventArgs> NodeConnected;
         /// <summary>
-        /// Event triggered when node disconnected / 节点断开连接时触发的事件
+        /// Event triggered when node disconnected (raised when a node has not been seen within the liveness timeout)
+        /// 节点断开连接时触发的事件（当节点在存活超时时间内未被观察到时触发）
         /// </summary>
-#pragma warning disable CS0067 // 事件从未使用，但可能是接口要求的一部分
         public event EventHandler<ClusterNodeEventArgs> NodeDisconnected;
-#pragma warning restore CS0067
 
         /// <summary>
         /// Constructor / 构造函数
@@ -72,6 +78,68 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
             _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
             _nodes = new ConcurrentDictionary<string, ClusterNode>();
             _cancellationTokenSource = new CancellationTokenSource();
+
+            // Node liveness: consider a node disconnected when no message (incl. Raft heartbeat ~1s)
+            // has been seen within the timeout window (default 15s, checked every 5s)
+            // 节点存活：当在超时窗口（默认 15 秒，每 5 秒检查一次）内未收到任何消息
+            // （包括约每秒一次的 Raft 心跳）时，认为节点已断开
+            _liveness = new NodeLivenessTracker();
+            _liveness.NodeTimedOut += (sender, e) =>
+            {
+                _logger.LogWarning($"Node {e.NodeId} has not been seen within the liveness timeout, raising NodeDisconnected");
+                NodeDisconnected?.Invoke(this, e);
+            };
+            _liveness.NodeRecovered += (sender, e) =>
+            {
+                _logger.LogInformation($"Node {e.NodeId} is reachable again, raising NodeConnected");
+                NodeConnected?.Invoke(this, e);
+            };
+        }
+
+        /// <summary>
+        /// Handle a cluster message received from Redis / 处理从 Redis 接收到的集群消息
+        /// </summary>
+        /// <param name="messageJson">Serialized cluster message / 序列化的集群消息</param>
+        /// <param name="isBroadcast">Whether the message came from the broadcast channel / 消息是否来自广播通道</param>
+        private void HandleRedisMessage(string messageJson, bool isBroadcast)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(messageJson))
+                {
+                    _logger.LogWarning("Received empty message from Redis");
+                    return;
+                }
+
+                var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
+                if (clusterMessage == null)
+                {
+                    _logger.LogWarning("Failed to deserialize cluster message from Redis");
+                    return;
+                }
+
+                // Skip messages from self on the broadcast channel / 跳过广播通道上来自自己的消息
+                if (isBroadcast && clusterMessage.FromNodeId == _nodeId)
+                {
+                    return;
+                }
+
+                // Update node liveness on every received message / 每收到一条消息更新节点存活状态
+                if (!string.IsNullOrEmpty(clusterMessage.FromNodeId) && clusterMessage.FromNodeId != _nodeId)
+                {
+                    _liveness.Touch(clusterMessage.FromNodeId);
+                }
+
+                MessageReceived?.Invoke(this, new ClusterMessageEventArgs
+                {
+                    FromNodeId = clusterMessage.FromNodeId,
+                    Message = clusterMessage
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to process Redis message");
+            }
         }
 
         /// <summary>
@@ -80,77 +148,41 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
         public async Task StartAsync()
         {
             _logger.LogInformation($"Starting Redis cluster transport for node {_nodeId}");
-            
+
             try
             {
-                _redis = await ConnectionMultiplexer.ConnectAsync(_connectionString);
+                // AbortOnConnectFail=false lets the multiplexer keep retrying in the background.
+                // StackExchange.Redis automatically re-establishes subscriptions after a reconnect,
+                // so no manual resubscribe handling is required here.
+                // AbortOnConnectFail=false 使连接复用器在后台持续重试。
+                // StackExchange.Redis 会在重连后自动恢复订阅，因此这里无需手动重新订阅。
+                var options = ConfigurationOptions.Parse(_connectionString);
+                options.AbortOnConnectFail = false;
+
+                _redis = await ConnectionMultiplexer.ConnectAsync(options);
+                _redis.ConnectionFailed += (sender, e) =>
+                {
+                    _logger.LogWarning(e.Exception, $"Redis connection failed (type: {e.FailureType}, endpoint: {e.EndPoint}), the client will retry automatically");
+                };
+                _redis.ConnectionRestored += (sender, e) =>
+                {
+                    _logger.LogInformation($"Redis connection restored (endpoint: {e.EndPoint}), subscriptions are re-established automatically");
+                };
+
                 _subscriber = _redis.GetSubscriber();
-                
+
                 // Subscribe to node-specific channel / 订阅节点特定通道
                 await _subscriber.SubscribeAsync(RedisChannel.Literal($"{ClusterNodeChannelPrefix}{_nodeId}"), (channel, message) =>
                 {
-                    try
-                    {
-                        // RedisValue needs to be converted to string / RedisValue 需要转换为字符串
-                        var messageJson = message.ToString();
-                        if (string.IsNullOrEmpty(messageJson))
-                        {
-                            _logger.LogWarning("Received empty message from Redis");
-                            return;
-                        }
-                        
-                        var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
-                        if (clusterMessage == null)
-                        {
-                            _logger.LogWarning("Failed to deserialize cluster message from Redis");
-                            return;
-                        }
-                        
-                        MessageReceived?.Invoke(this, new ClusterMessageEventArgs
-                        {
-                            FromNodeId = clusterMessage.FromNodeId,
-                            Message = clusterMessage
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to process Redis message");
-                    }
+                    // RedisValue needs to be converted to string / RedisValue 需要转换为字符串
+                    HandleRedisMessage(message.ToString(), isBroadcast: false);
                 });
 
                 // Subscribe to broadcast channel / 订阅广播通道
                 await _subscriber.SubscribeAsync(RedisChannel.Literal(ClusterBroadcastChannel), (channel, message) =>
                 {
-                    try
-                    {
-                        // RedisValue needs to be converted to string / RedisValue 需要转换为字符串
-                        var messageJson = message.ToString();
-                        if (string.IsNullOrEmpty(messageJson))
-                        {
-                            _logger.LogWarning("Received empty broadcast message from Redis");
-                            return;
-                        }
-                        
-                        var clusterMessage = JsonSerializer.Deserialize<ClusterMessage>(messageJson);
-                        if (clusterMessage == null)
-                        {
-                            _logger.LogWarning("Failed to deserialize cluster broadcast message from Redis");
-                            return;
-                        }
-                        
-                        if (clusterMessage.FromNodeId != _nodeId)
-                        {
-                            MessageReceived?.Invoke(this, new ClusterMessageEventArgs
-                            {
-                                FromNodeId = clusterMessage.FromNodeId,
-                                Message = clusterMessage
-                            });
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to process Redis broadcast message");
-                    }
+                    // RedisValue needs to be converted to string / RedisValue 需要转换为字符串
+                    HandleRedisMessage(message.ToString(), isBroadcast: true);
                 });
 
                 _logger.LogInformation($"Redis cluster transport started successfully for node {_nodeId}");
@@ -259,10 +291,18 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
         /// <returns>True if connected, false otherwise / 已连接返回 true，否则返回 false</returns>
         public bool IsNodeConnected(string nodeId)
         {
-            // With Redis, we consider a node connected if it's registered
-            // 对于 Redis，如果节点已注册，我们认为它已连接
-            // In practice, you might want to track node health separately
-            // 在实践中，您可能需要单独跟踪节点健康状况
+            // Liveness-based check: a node is connected if a message from it (incl. Raft heartbeats)
+            // was seen within the liveness timeout.
+            // If the node has never been seen (e.g. right after startup, before the first heartbeat),
+            // fall back to configuration presence to avoid false negatives during the startup grace period.
+            // 基于存活状态的检查：如果在存活超时时间内观察到来自该节点的消息（包括 Raft 心跳），则认为节点已连接。
+            // 如果从未观察到该节点（例如刚启动、尚未收到第一个心跳），则回退到配置存在性检查，
+            // 以避免启动宽限期内的误报。
+            if (_liveness.HasBeenSeen(nodeId))
+            {
+                return _liveness.IsAlive(nodeId);
+            }
+
             return _nodes.ContainsKey(nodeId);
         }
 
@@ -332,6 +372,7 @@ namespace Cyaim.WebSocketServer.Cluster.StackExchangeRedis
             if (!_disposed)
             {
                 StopAsync().GetAwaiter().GetResult();
+                _liveness.Dispose();
                 _cancellationTokenSource.Dispose();
                 _disposed = true;
             }

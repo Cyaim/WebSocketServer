@@ -177,6 +177,8 @@ amqp://guest:guest@localhost:5672/
 
 ## Hybrid 混合传输
 
+> 📌 **已在真实 Redis 集群 + RabbitMQ 上实测通过**（跨节点广播/定向/反向送达、Redis 连接路由存储往返）。在 **Redis 集群**下部署前请务必阅读 [集群真实中间件验证](./CLUSTER_VALIDATION.md)：节点发现使用单个 Redis Hash 键以保证跨分片可靠；每个 Hybrid 节点须独立进程；`BroadcastAsync` 在发现到对端前不发送。
+
 ### 特点
 
 - ✅ Redis 服务发现 - 自动节点注册和发现

@@ -23,6 +23,14 @@ namespace Cyaim.WebSocketServer.Infrastructure
         private readonly ConcurrentDictionary<string, ConnectionBandwidthTracker> _connectionTrackers = new ConcurrentDictionary<string, ConnectionBandwidthTracker>();
 
         /// <summary>
+        /// 每通道活跃连接计数（随连接跟踪器增删维护），
+        /// 替代每条消息对全部连接跟踪器的 O(n) 扫描（百万连接下为 O(n²) 总开销）
+        /// Per-channel active connection counts, maintained incrementally with tracker add/remove,
+        /// replacing the per-message O(n) scan over all connection trackers (O(n²) aggregate at 1M connections)
+        /// </summary>
+        private readonly ConcurrentDictionary<string, int> _channelConnectionCounts = new ConcurrentDictionary<string, int>();
+
+        /// <summary>
         /// 限速策略更新事件
         /// </summary>
         public event Action<BandwidthLimitPolicy> PolicyUpdated;
@@ -90,8 +98,22 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 // 获取或创建通道跟踪器
                 var channelTracker = _channelTrackers.GetOrAdd(channel, _ => new ChannelBandwidthTracker(channel, _policy));
 
-                // 获取或创建连接跟踪器
-                var connectionTracker = _connectionTrackers.GetOrAdd(connectionId, _ => new ConnectionBandwidthTracker(connectionId, channel, _policy));
+                // 获取或创建连接跟踪器（显式 TryAdd 以便精确维护通道连接计数）
+                // Get or create connection tracker (explicit TryAdd so the channel count stays exact)
+                if (!_connectionTrackers.TryGetValue(connectionId, out var connectionTracker))
+                {
+                    var created = new ConnectionBandwidthTracker(connectionId, channel, _policy);
+                    if (_connectionTrackers.TryAdd(connectionId, created))
+                    {
+                        connectionTracker = created;
+                        _channelConnectionCounts.AddOrUpdate(channel, 1, static (_, count) => count + 1);
+                    }
+                    else
+                    {
+                        created.Dispose();
+                        _connectionTrackers.TryGetValue(connectionId, out connectionTracker);
+                    }
+                }
 
                 // 获取或创建端点跟踪器（如果提供了端点）
                 EndPointBandwidthTracker endPointTracker = null;
@@ -234,11 +256,11 @@ namespace Cyaim.WebSocketServer.Infrastructure
         }
 
         /// <summary>
-        /// 获取通道的活跃连接数
+        /// 获取通道的活跃连接数（O(1) 计数器查询）
         /// </summary>
         private int GetActiveConnectionsCount(string channel)
         {
-            return _connectionTrackers.Values.Count(t => t.Channel == channel);
+            return _channelConnectionCounts.TryGetValue(channel, out var count) ? count : 0;
         }
 
         /// <summary>
@@ -246,8 +268,13 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// </summary>
         public void RemoveConnection(string connectionId)
         {
+            if (string.IsNullOrEmpty(connectionId))
+            {
+                return;
+            }
             if (_connectionTrackers.TryRemove(connectionId, out var tracker))
             {
+                _channelConnectionCounts.AddOrUpdate(tracker.Channel, 0, static (_, count) => count > 0 ? count - 1 : 0);
                 tracker.Dispose();
             }
 
@@ -271,6 +298,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 tracker.Dispose();
             }
             _connectionTrackers.Clear();
+            _channelConnectionCounts.Clear();
 
             foreach (var tracker in _endPointTrackers.Values)
             {

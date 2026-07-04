@@ -39,13 +39,73 @@ dotnet add package Cyaim.WebSocketServer
 
 ### Using Minimal API / 使用 Minimal API
 
+Two lines are all you need — `AddWebSocketServer()` automatically wires an `MvcChannelHandler` on channel `/ws` and discovers all `[WebSocket]` endpoints in your `*.Controllers` namespace.  
+只需两行代码 —— `AddWebSocketServer()` 会自动在 `/ws` 通道上挂载 `MvcChannelHandler`，并自动发现 `*.Controllers` 命名空间下所有标记了 `[WebSocket]` 的终结点。
+
 ```csharp
-using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+using Cyaim.WebSocketServer.Infrastructure;
 using Cyaim.WebSocketServer.Middlewares;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure WebSocket route / 配置 WebSocket 路由
+// Add WebSocket server (default channel: /ws) / 添加 WebSocket 服务器（默认通道：/ws）
+builder.Services.AddWebSocketServer();
+
+var app = builder.Build();
+
+app.UseWebSockets();
+app.UseWebSocketServer();
+
+app.Run();
+```
+
+Need more channels or options? Use the fluent builder or the configure overload:  
+需要更多通道或配置？使用流式构建器或配置重载：
+
+```csharp
+// Custom channels / 自定义通道
+builder.Services.AddWebSocketServer()
+    .AddMvcChannel("/im")                          // MVC-style channel / MVC 风格通道
+    .AddChannel("/chat", myHandler.ConnectionEntry); // Custom handler / 自定义处理器
+// Note: explicitly adding channels replaces the auto default "/ws".
+// 注意：显式添加通道会替换自动默认的 "/ws" 通道。
+
+// Custom options / 自定义配置
+builder.Services.AddWebSocketServer(x =>
+{
+    x.MaxConnectionLimit = 10000;
+    x.WatchAssemblyNamespacePrefix = "MyApp.WsControllers"; // Endpoint scan prefix / 终结点扫描前缀
+});
+```
+
+### Using Startup.cs / 使用 Startup.cs
+
+```csharp
+public void ConfigureServices(IServiceCollection services)
+{
+    services.AddWebSocketServer();
+}
+
+public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+{
+    app.UseWebSockets();
+    app.UseWebSocketServer();
+}
+```
+
+### Advanced: Manual Configuration / 高级：手动配置
+
+`ConfigureWebSocketRoute` remains fully supported when you want full manual control (channel table, service collection, etc.):  
+当您需要完全手动控制（通道表、服务容器等）时，仍可使用 `ConfigureWebSocketRoute`：
+
+```csharp
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
+using Cyaim.WebSocketServer.Infrastructure.Configures;
+using Cyaim.WebSocketServer.Middlewares;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Configure WebSocket route manually / 手动配置 WebSocket 路由
 builder.Services.ConfigureWebSocketRoute(x =>
 {
     var mvcHandler = new MvcChannelHandler();
@@ -67,33 +127,6 @@ app.UseWebSockets(webSocketOptions);
 app.UseWebSocketServer();
 
 app.Run();
-```
-
-### Using Startup.cs / 使用 Startup.cs
-
-```csharp
-public void ConfigureServices(IServiceCollection services)
-{
-    services.ConfigureWebSocketRoute(x =>
-    {
-        var mvcHandler = new MvcChannelHandler();
-        x.WebSocketChannels = new Dictionary<string, WebSocketRouteOption.WebSocketChannelHandler>()
-        {
-            { "/ws", mvcHandler.ConnectionEntry }
-        };
-        x.ApplicationServiceCollection = services;
-    });
-}
-
-public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
-{
-    var webSocketOptions = new WebSocketOptions()
-    {
-        KeepAliveInterval = TimeSpan.FromSeconds(120),
-    };
-    app.UseWebSockets(webSocketOptions);
-    app.UseWebSocketServer();
-}
 ```
 
 ## 3. Mark WebSocket Endpoints / 标记 WebSocket 端点

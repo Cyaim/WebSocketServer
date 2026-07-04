@@ -70,6 +70,29 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.Abstractions
         Task<bool> ExistsAsync(string key);
 
         /// <summary>
+        /// Set a hash field / 设置哈希字段。
+        /// 用于集群安全的节点注册：所有字段位于同一个键（同一分片），避免 KEYS/SCAN 在 Redis 集群下跨分片不可靠的问题。
+        /// Used for cluster-safe node registration: all fields live under one key (one shard),
+        /// avoiding the unreliable cross-shard KEYS/SCAN in Redis Cluster.
+        /// </summary>
+        Task HashSetAsync(string key, string field, string value);
+
+        /// <summary>
+        /// Get a single hash field value, or null if absent / 获取单个哈希字段值，不存在返回 null
+        /// </summary>
+        Task<string> HashGetAsync(string key, string field);
+
+        /// <summary>
+        /// Get all fields and values of a hash / 获取哈希的所有字段与值
+        /// </summary>
+        Task<Dictionary<string, string>> HashGetAllAsync(string key);
+
+        /// <summary>
+        /// Delete a hash field / 删除哈希字段
+        /// </summary>
+        Task HashDeleteAsync(string key, string field);
+
+        /// <summary>
         /// Subscribe to a channel / 订阅通道
         /// </summary>
         /// <param name="channel">Channel name / 通道名称</param>

@@ -16,6 +16,8 @@
 - **[集群模块](./CLUSTER.md)** - 多节点集群、Raft 协议、消息路由
 - **[集群传输扩展](./CLUSTER_TRANSPORTS.md)** - Redis、RabbitMQ 传输实现
 - **[Hybrid 混合集群传输](./HYBRID_CLUSTER.md)** - Redis + RabbitMQ 混合传输方案
+- **[集群真实中间件验证](./CLUSTER_VALIDATION.md)** - 全部传输在真实 Redis 集群 + RabbitMQ 上的实测结论与生产兼容性要点
+- **[Hybrid 生产部署 Checklist](./HYBRID_DEPLOYMENT_CHECKLIST.md)** - Hybrid 上生产前的逐项确认清单
 - **[指标统计](./METRICS.md)** - OpenTelemetry 集成、性能监控
 - **[Dashboard](./DASHBOARD.md)** - 监控面板、API 接口、前端界面
 - **[客户端 SDK](./CLIENTS.md)** - 多语言客户端 SDK，支持自动 endpoint 发现

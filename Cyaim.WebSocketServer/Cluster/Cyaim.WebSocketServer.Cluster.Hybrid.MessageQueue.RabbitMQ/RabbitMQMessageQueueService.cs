@@ -1035,8 +1035,11 @@ namespace Cyaim.WebSocketServer.Cluster.Hybrid.MessageQueue.RabbitMQ
                 // 设置消息处理事件
                 consumer.ReceivedAsync += async (model, ea) =>
                 {
-                    // 使用 model（channel）而不是闭包中的 _channel，确保使用正确的 channel
-                    var channel = model as IChannel;
+                    // RabbitMQ.Client 7.x 中 ReceivedAsync 的 sender 是消费者对象本身（不是 IChannel，
+                    // 旧版 5.x/6.x 才是 IModel）。取消费者的 Channel 属性，回退到共享 _channel。
+                    // In RabbitMQ.Client 7.x the ReceivedAsync sender is the consumer (NOT an IChannel,
+                    // as it was in 5.x/6.x). Use the consumer's Channel, falling back to the shared _channel.
+                    var channel = (model as AsyncEventingBasicConsumer)?.Channel ?? _channel;
                     if (channel == null)
                     {
                         _logger.LogWarning("[RabbitMQMessageQueueService] 收到消息但 channel 无效 - QueueName: {QueueName}, DeliveryTag: {DeliveryTag}",

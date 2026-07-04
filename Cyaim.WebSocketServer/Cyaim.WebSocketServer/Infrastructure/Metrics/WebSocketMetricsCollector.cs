@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging;
 
@@ -9,6 +10,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
     /// WebSocket metrics collector for OpenTelemetry
     /// WebSocket 指标收集器，用于 OpenTelemetry
     /// </summary>
+    /// <remarks>
+    /// Hot-path record methods use <see cref="TagList"/> (a stack-allocated struct) instead of
+    /// List/array tag collections, so recording a metric performs no heap allocation.
+    /// 热路径记录方法使用 <see cref="TagList"/>（栈上结构体）替代 List/数组标签集合，记录指标不产生堆分配。
+    /// </remarks>
     public class WebSocketMetricsCollector
     {
         private readonly Meter _meter;
@@ -52,12 +58,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
                 "websocket_connections_total",
                 "count",
                 "Total number of WebSocket connections established / WebSocket 连接总数");
-            
+
             _connectionsClosed = _meter.CreateCounter<long>(
                 "websocket_connections_closed_total",
                 "count",
                 "Total number of WebSocket connections closed / WebSocket 连接关闭总数");
-            
+
             _connectionsActive = _meter.CreateUpDownCounter<long>(
                 "websocket_connections_active",
                 "count",
@@ -68,17 +74,17 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
                 "websocket_messages_received_total",
                 "count",
                 "Total number of messages received / 接收的消息总数");
-            
+
             _messagesSent = _meter.CreateCounter<long>(
                 "websocket_messages_sent_total",
                 "count",
                 "Total number of messages sent / 发送的消息总数");
-            
+
             _messageSizeReceived = _meter.CreateHistogram<long>(
                 "websocket_message_size_received_bytes",
                 "bytes",
                 "Size of received messages in bytes / 接收消息的大小（字节）");
-            
+
             _messageSizeSent = _meter.CreateHistogram<long>(
                 "websocket_message_size_sent_bytes",
                 "bytes",
@@ -89,7 +95,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
                 "websocket_bytes_received_total",
                 "bytes",
                 "Total bytes received / 接收的总字节数");
-            
+
             _bytesSent = _meter.CreateCounter<long>(
                 "websocket_bytes_sent_total",
                 "bytes",
@@ -100,17 +106,17 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
                 "websocket_cluster_messages_forwarded_total",
                 "count",
                 "Total number of messages forwarded in cluster / 集群中转发的消息总数");
-            
+
             _clusterMessagesReceived = _meter.CreateCounter<long>(
                 "websocket_cluster_messages_received_total",
                 "count",
                 "Total number of messages received from cluster / 从集群接收的消息总数");
-            
+
             _clusterNodesConnected = _meter.CreateUpDownCounter<long>(
                 "websocket_cluster_nodes_connected",
                 "count",
                 "Current number of connected cluster nodes / 当前连接的集群节点数");
-            
+
             _clusterConnectionsTotal = _meter.CreateUpDownCounter<long>(
                 "websocket_cluster_connections_total",
                 "count",
@@ -123,6 +129,20 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
                 "Total number of errors / 错误总数");
         }
 
+        private static TagList BuildTags(string nodeId, string endpoint)
+        {
+            var tags = new TagList();
+            if (!string.IsNullOrEmpty(nodeId))
+            {
+                tags.Add("node_id", nodeId);
+            }
+            if (!string.IsNullOrEmpty(endpoint))
+            {
+                tags.Add("endpoint", endpoint);
+            }
+            return tags;
+        }
+
         /// <summary>
         /// Record connection established / 记录连接建立
         /// </summary>
@@ -130,18 +150,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="endpoint">Endpoint path (optional) / 端点路径（可选）</param>
         public void RecordConnectionEstablished(string nodeId = null, string endpoint = null)
         {
-            var tags = new List<KeyValuePair<string, object>>();
-            if (!string.IsNullOrEmpty(nodeId))
-            {
-                tags.Add(new KeyValuePair<string, object>("node_id", nodeId));
-            }
-            if (!string.IsNullOrEmpty(endpoint))
-            {
-                tags.Add(new KeyValuePair<string, object>("endpoint", endpoint));
-            }
-
-            _connectionsTotal.Add(1, tags.ToArray());
-            _connectionsActive.Add(1, tags.ToArray());
+            var tags = BuildTags(nodeId, endpoint);
+            _connectionsTotal.Add(1, tags);
+            _connectionsActive.Add(1, tags);
         }
 
         /// <summary>
@@ -152,22 +163,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="closeStatus">Close status (optional) / 关闭状态（可选）</param>
         public void RecordConnectionClosed(string nodeId = null, string endpoint = null, string closeStatus = null)
         {
-            var tags = new List<KeyValuePair<string, object>>();
-            if (!string.IsNullOrEmpty(nodeId))
-            {
-                tags.Add(new KeyValuePair<string, object>("node_id", nodeId));
-            }
-            if (!string.IsNullOrEmpty(endpoint))
-            {
-                tags.Add(new KeyValuePair<string, object>("endpoint", endpoint));
-            }
+            var tags = BuildTags(nodeId, endpoint);
             if (!string.IsNullOrEmpty(closeStatus))
             {
-                tags.Add(new KeyValuePair<string, object>("close_status", closeStatus));
+                tags.Add("close_status", closeStatus);
             }
 
-            _connectionsClosed.Add(1, tags.ToArray());
-            _connectionsActive.Add(-1, tags.ToArray());
+            _connectionsClosed.Add(1, tags);
+            _connectionsActive.Add(-1, tags);
         }
 
         /// <summary>
@@ -178,19 +181,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="endpoint">Endpoint path (optional) / 端点路径（可选）</param>
         public void RecordMessageReceived(long size, string nodeId = null, string endpoint = null)
         {
-            var tags = new List<KeyValuePair<string, object>>();
-            if (!string.IsNullOrEmpty(nodeId))
-            {
-                tags.Add(new KeyValuePair<string, object>("node_id", nodeId));
-            }
-            if (!string.IsNullOrEmpty(endpoint))
-            {
-                tags.Add(new KeyValuePair<string, object>("endpoint", endpoint));
-            }
-
-            _messagesReceived.Add(1, tags.ToArray());
-            _messageSizeReceived.Record(size, tags.ToArray());
-            _bytesReceived.Add(size, tags.ToArray());
+            var tags = BuildTags(nodeId, endpoint);
+            _messagesReceived.Add(1, tags);
+            _messageSizeReceived.Record(size, tags);
+            _bytesReceived.Add(size, tags);
         }
 
         /// <summary>
@@ -201,19 +195,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="endpoint">Endpoint path (optional) / 端点路径（可选）</param>
         public void RecordMessageSent(long size, string nodeId = null, string endpoint = null)
         {
-            var tags = new List<KeyValuePair<string, object>>();
-            if (!string.IsNullOrEmpty(nodeId))
-            {
-                tags.Add(new KeyValuePair<string, object>("node_id", nodeId));
-            }
-            if (!string.IsNullOrEmpty(endpoint))
-            {
-                tags.Add(new KeyValuePair<string, object>("endpoint", endpoint));
-            }
-
-            _messagesSent.Add(1, tags.ToArray());
-            _messageSizeSent.Record(size, tags.ToArray());
-            _bytesSent.Add(size, tags.ToArray());
+            var tags = BuildTags(nodeId, endpoint);
+            _messagesSent.Add(1, tags);
+            _messageSizeSent.Record(size, tags);
+            _bytesSent.Add(size, tags);
         }
 
         /// <summary>
@@ -223,13 +208,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="nodeId">Node ID (optional) / 节点 ID（可选）</param>
         public void RecordBytesReceived(long bytes, string nodeId = null)
         {
-            var tags = new List<KeyValuePair<string, object>>();
-            if (!string.IsNullOrEmpty(nodeId))
-            {
-                tags.Add(new KeyValuePair<string, object>("node_id", nodeId));
-            }
-
-            _bytesReceived.Add(bytes, tags.ToArray());
+            _bytesReceived.Add(bytes, BuildTags(nodeId, null));
         }
 
         /// <summary>
@@ -239,13 +218,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="nodeId">Node ID (optional) / 节点 ID（可选）</param>
         public void RecordBytesSent(long bytes, string nodeId = null)
         {
-            var tags = new List<KeyValuePair<string, object>>();
-            if (!string.IsNullOrEmpty(nodeId))
-            {
-                tags.Add(new KeyValuePair<string, object>("node_id", nodeId));
-            }
-
-            _bytesSent.Add(bytes, tags.ToArray());
+            _bytesSent.Add(bytes, BuildTags(nodeId, null));
         }
 
         /// <summary>
@@ -255,13 +228,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="targetNodeId">Target node ID / 目标节点 ID</param>
         public void RecordClusterMessageForwarded(string sourceNodeId, string targetNodeId)
         {
-            var tags = new[]
-            {
+            _clusterMessagesForwarded.Add(1,
                 new KeyValuePair<string, object>("source_node_id", sourceNodeId ?? "unknown"),
-                new KeyValuePair<string, object>("target_node_id", targetNodeId ?? "unknown")
-            };
-
-            _clusterMessagesForwarded.Add(1, tags);
+                new KeyValuePair<string, object>("target_node_id", targetNodeId ?? "unknown"));
         }
 
         /// <summary>
@@ -270,12 +239,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="sourceNodeId">Source node ID / 源节点 ID</param>
         public void RecordClusterMessageReceived(string sourceNodeId)
         {
-            var tags = new[]
-            {
-                new KeyValuePair<string, object>("source_node_id", sourceNodeId ?? "unknown")
-            };
-
-            _clusterMessagesReceived.Add(1, tags);
+            _clusterMessagesReceived.Add(1, new KeyValuePair<string, object>("source_node_id", sourceNodeId ?? "unknown"));
         }
 
         /// <summary>
@@ -284,12 +248,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="nodeId">Node ID / 节点 ID</param>
         public void RecordClusterNodeConnected(string nodeId)
         {
-            var tags = new[]
-            {
-                new KeyValuePair<string, object>("node_id", nodeId ?? "unknown")
-            };
-
-            _clusterNodesConnected.Add(1, tags);
+            _clusterNodesConnected.Add(1, new KeyValuePair<string, object>("node_id", nodeId ?? "unknown"));
         }
 
         /// <summary>
@@ -298,12 +257,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="nodeId">Node ID / 节点 ID</param>
         public void RecordClusterNodeDisconnected(string nodeId)
         {
-            var tags = new[]
-            {
-                new KeyValuePair<string, object>("node_id", nodeId ?? "unknown")
-            };
-
-            _clusterNodesConnected.Add(-1, tags);
+            _clusterNodesConnected.Add(-1, new KeyValuePair<string, object>("node_id", nodeId ?? "unknown"));
         }
 
         /// <summary>
@@ -313,13 +267,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="nodeId">Node ID (optional) / 节点 ID（可选）</param>
         public void UpdateClusterConnectionCount(long delta, string nodeId = null)
         {
-            var tags = new List<KeyValuePair<string, object>>();
-            if (!string.IsNullOrEmpty(nodeId))
-            {
-                tags.Add(new KeyValuePair<string, object>("node_id", nodeId));
-            }
-
-            _clusterConnectionsTotal.Add(delta, tags.ToArray());
+            _clusterConnectionsTotal.Add(delta, BuildTags(nodeId, null));
         }
 
         /// <summary>
@@ -329,16 +277,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Metrics
         /// <param name="nodeId">Node ID (optional) / 节点 ID（可选）</param>
         public void RecordError(string errorType, string nodeId = null)
         {
-            var tags = new List<KeyValuePair<string, object>>
+            var tags = new TagList
             {
-                new KeyValuePair<string, object>("error_type", errorType ?? "unknown")
+                { "error_type", errorType ?? "unknown" }
             };
             if (!string.IsNullOrEmpty(nodeId))
             {
-                tags.Add(new KeyValuePair<string, object>("node_id", nodeId));
+                tags.Add("node_id", nodeId);
             }
 
-            _errorsTotal.Add(1, tags.ToArray());
+            _errorsTotal.Add(1, tags);
         }
 
         /// <summary>
