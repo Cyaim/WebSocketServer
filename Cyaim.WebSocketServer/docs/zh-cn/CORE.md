@@ -649,41 +649,46 @@ if (failedConnections.Any())
 
 ## 高级功能
 
-### 请求管道
+### 请求中间件（Middleware）
 
-`MvcChannelHandler` 支持请求管道，可以在请求处理的不同阶段插入自定义逻辑：
+请求处理采用 ASP.NET Core 风格的**中间件责任链**：在路由选项上用 `Use(...)` 注册中间件，它们在**启动时被一次性折叠编译**成单个委托，每条消息零额外分发开销。每个中间件可以在调用 `next(ctx)` 前后执行代码（环绕请求）、修改请求/响应、或不调用 `next` 直接**短路**返回。
 
 ```csharp
-var handler = new MvcChannelHandler();
-
-// 在请求解析前执行
-handler.RequestPipeline.TryAdd(
-    RequestPipelineStage.BeforeParse,
-    new ConcurrentQueue<PipelineItem>()
-);
-
-// 添加管道项
-handler.RequestPipeline[RequestPipelineStage.BeforeParse].Enqueue(
-    new PipelineItem
+services.ConfigureWebSocketRoute(options =>
+{
+    // 环绕：记录耗时（在端点前后各执行一段）
+    options.Use(async (ctx, next) =>
     {
-        Name = "CustomMiddleware",
-        Handler = async (context, next) =>
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await next(ctx);                       // 执行下游中间件与端点
+        logger.LogInformation("{Target} 耗时 {Ms}ms", ctx.Request?.Target, sw.ElapsedMilliseconds);
+    });
+
+    // 短路：鉴权失败直接返回，端点不会执行
+    options.Use((ctx, next) =>
+    {
+        if (!IsAuthorized(ctx.HttpContext))
         {
-            // 自定义逻辑
-            await next();
+            ctx.Response = new MvcResponseScheme { Status = 1, Id = ctx.Request?.Id, Msg = "unauthorized" };
+            return Task.CompletedTask;         // 不调用 next => 短路
         }
-    }
-);
+        return next(ctx);
+    });
+});
 ```
 
-### 管道阶段
+也可以实现 `IWebSocketMiddleware` 接口并用 `options.Use(new MyMiddleware())` 注册。
 
-- `BeforeParse`: 解析请求前
-- `AfterParse`: 解析请求后
-- `BeforeInvoke`: 调用方法前
-- `AfterInvoke`: 调用方法后
-- `BeforeSend`: 发送响应前
-- `AfterSend`: 发送响应后
+### 中间件上下文（`WebSocketMessageContext`）
+
+- `HttpContext` / `WebSocket` / `Options`：连接与路由信息
+- `Request` / `RequestBody`：已解析的请求（`Id`/`Target`/`Body`）
+- `Response`：端点产生的响应对象；链返回后由框架序列化并发送（MVC 通道为 JSON，MessagePack 通道为二进制）
+- `SuppressResponse`：设为 `true` 则框架不再发送响应（例如中间件已自行写 socket）
+- `Items`：本消息内各中间件共享的临时状态
+- `ReceivedData`：入站消息原始字节（仅在注册了中间件时物化，异步处理模式下已复制以保证安全）
+
+> 连接建立/断开属于生命周期事件，请用路由选项上的 `BeforeConnectionEvent` / `DisconnectedEvent`（见下文事件章节），不在消息中间件链内。
 
 ### 依赖注入
 
@@ -815,28 +820,21 @@ public async Task<string> GetAsync(string id)
 
 #### 自定义错误处理
 
-可以在管道中自定义错误处理：
+可以用中间件环绕端点来自定义错误处理：
 
 ```csharp
-handler.RequestPipeline[RequestPipelineStage.AfterInvoke].Enqueue(
-    new PipelineItem
+options.Use(async (ctx, next) =>
+{
+    try
     {
-        Name = "ErrorHandler",
-        Handler = async (context, next) =>
-        {
-            try
-            {
-                await next();
-            }
-            catch (Exception ex)
-            {
-                // 自定义错误处理
-                context.Response.Status = 1;
-                context.Response.Msg = ex.Message;
-            }
-        }
+        await next(ctx);
     }
-);
+    catch (Exception ex)
+    {
+        // 自定义错误处理：改写响应
+        ctx.Response = new MvcResponseScheme { Status = 1, Id = ctx.Request?.Id, Msg = ex.Message };
+    }
+});
 ```
 
 ## 性能优化

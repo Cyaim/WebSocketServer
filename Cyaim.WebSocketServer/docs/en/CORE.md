@@ -303,41 +303,46 @@ Two message types are supported:
 
 ## Advanced Features
 
-### Request Pipeline
+### Request Middleware
 
-`MvcChannelHandler` supports request pipelines, allowing custom logic to be inserted at different stages of request processing:
+Request processing uses an ASP.NET Core-style **middleware chain**: register middleware with `Use(...)` on the route options. They are **folded into a single delegate once at startup** (zero per-message dispatch overhead). Each middleware may run code before/after calling `next(ctx)` (wrap the request), modify the request/response, or skip `next` to **short-circuit**.
 
 ```csharp
-var handler = new MvcChannelHandler();
-
-// Execute before request parsing
-handler.RequestPipeline.TryAdd(
-    RequestPipelineStage.BeforeParse,
-    new ConcurrentQueue<PipelineItem>()
-);
-
-// Add pipeline item
-handler.RequestPipeline[RequestPipelineStage.BeforeParse].Enqueue(
-    new PipelineItem
+services.ConfigureWebSocketRoute(options =>
+{
+    // Wrap: measure latency around the endpoint
+    options.Use(async (ctx, next) =>
     {
-        Name = "CustomMiddleware",
-        Handler = async (context, next) =>
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await next(ctx);                       // run downstream middleware + endpoint
+        logger.LogInformation("{Target} took {Ms}ms", ctx.Request?.Target, sw.ElapsedMilliseconds);
+    });
+
+    // Short-circuit: reject unauthorized requests; the endpoint never runs
+    options.Use((ctx, next) =>
+    {
+        if (!IsAuthorized(ctx.HttpContext))
         {
-            // Custom logic
-            await next();
+            ctx.Response = new MvcResponseScheme { Status = 1, Id = ctx.Request?.Id, Msg = "unauthorized" };
+            return Task.CompletedTask;         // don't call next => short-circuit
         }
-    }
-);
+        return next(ctx);
+    });
+});
 ```
 
-### Pipeline Stages
+You can also implement `IWebSocketMiddleware` and register it with `options.Use(new MyMiddleware())`.
 
-- `BeforeParse`: Before parsing request
-- `AfterParse`: After parsing request
-- `BeforeInvoke`: Before invoking method
-- `AfterInvoke`: After invoking method
-- `BeforeSend`: Before sending response
-- `AfterSend`: After sending response
+### Middleware context (`WebSocketMessageContext`)
+
+- `HttpContext` / `WebSocket` / `Options`: connection and route info
+- `Request` / `RequestBody`: the parsed request (`Id`/`Target`/`Body`)
+- `Response`: the endpoint result; serialized and sent after the chain (JSON for the MVC channel, binary for the MessagePack channel)
+- `SuppressResponse`: set true so the framework does not send a response
+- `Items`: scratch state shared across middleware for this message
+- `ReceivedData`: raw inbound bytes (materialized only when middleware is registered; copied in async mode for safety)
+
+> Connection connect/disconnect are lifecycle events — use `BeforeConnectionEvent` / `DisconnectedEvent` on the route options, not the message middleware chain.
 
 ### Dependency Injection
 
@@ -469,28 +474,21 @@ Exceptions thrown by methods are caught and returned as error responses:
 
 #### Custom Error Handling
 
-Custom error handling can be implemented in the pipeline:
+Custom error handling can be implemented by wrapping the endpoint with a middleware:
 
 ```csharp
-handler.RequestPipeline[RequestPipelineStage.AfterInvoke].Enqueue(
-    new PipelineItem
+options.Use(async (ctx, next) =>
+{
+    try
     {
-        Name = "ErrorHandler",
-        Handler = async (context, next) =>
-        {
-            try
-            {
-                await next();
-            }
-            catch (Exception ex)
-            {
-                // Custom error handling
-                context.Response.Status = 1;
-                context.Response.Msg = ex.Message;
-            }
-        }
+        await next(ctx);
     }
-);
+    catch (Exception ex)
+    {
+        // Custom error handling: replace the response
+        ctx.Response = new MvcResponseScheme { Status = 1, Id = ctx.Request?.Id, Msg = ex.Message };
+    }
+});
 ```
 
 ## Performance Optimization

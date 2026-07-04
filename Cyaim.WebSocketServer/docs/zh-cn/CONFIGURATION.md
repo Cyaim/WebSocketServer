@@ -234,11 +234,13 @@ policy.LoadFromConfiguration(configuration, "BandwidthLimitPolicy");
 ```csharp
 using OpenTelemetry.Metrics;
 using Cyaim.WebSocketServer.Infrastructure.Metrics;
+// OTLP 导出扩展在可选包 Cyaim.WebSocketServer.OpenTelemetry 中
+using Cyaim.WebSocketServer.OpenTelemetry;
 
-// 添加 WebSocket 指标收集
+// 添加 WebSocket 指标收集（核心库，无 OpenTelemetry 依赖）
 builder.Services.AddWebSocketMetrics();
 
-// 配置 OpenTelemetry Metrics
+// 配置 OpenTelemetry Metrics（需引用可选包 Cyaim.WebSocketServer.OpenTelemetry）
 builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {

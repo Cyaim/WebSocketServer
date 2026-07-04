@@ -522,19 +522,34 @@ public static class DashboardMiddlewareExtensions
 }
 ```
 
-### WebSocketMetricsExtensions
+### WebSocketMetricsExtensions（核心库）
 
 ```csharp
+// 命名空间 Cyaim.WebSocketServer.Infrastructure.Metrics
 public static class WebSocketMetricsExtensions
 {
+    // 注册指标收集器。指标通过 BCL Meter "Cyaim.WebSocketServer" 发布，核心库不依赖 OpenTelemetry。
     public static IServiceCollection AddWebSocketMetrics(
         this IServiceCollection services);
-    
+}
+```
+
+### WebSocketMetricsOpenTelemetryExtensions（可选包 `Cyaim.WebSocketServer.OpenTelemetry`）
+
+OTLP 导出扩展已从核心库拆到独立可选包，避免核心库引入 OpenTelemetry 及其漏洞/版本约束。需要 OTLP 导出时引用该包：
+
+```csharp
+// 命名空间 Cyaim.WebSocketServer.OpenTelemetry
+public static class WebSocketMetricsOpenTelemetryExtensions
+{
+    // 添加 "Cyaim.WebSocketServer" Meter 与 OTLP 导出器。
     public static MeterProviderBuilder AddWebSocketMetricsExporter(
         this MeterProviderBuilder builder,
         Action<OtlpExporterOptions> configure = null);
 }
 ```
+
+> 若不使用本可选包，也可在应用侧自行 `AddMeter("Cyaim.WebSocketServer")` 接入任意导出器（Prometheus、Console 等）。
 
 ## 数据模型
 

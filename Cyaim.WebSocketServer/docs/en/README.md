@@ -61,6 +61,7 @@ Cyaim.WebSocketServer/
 │   ├── Middlewares/                    # Middlewares
 │   └── ...
 ├── Cyaim.WebSocketServer.Dashboard/    # Dashboard backend
+├── Cyaim.WebSocketServer.OpenTelemetry/ # Optional OTLP metrics exporter helper
 ├── Cyaim.WebSocketServer.Cluster.*/   # Cluster transport extensions
 ├── Sample/                             # Sample projects
 └── docs/                               # Documentation directory

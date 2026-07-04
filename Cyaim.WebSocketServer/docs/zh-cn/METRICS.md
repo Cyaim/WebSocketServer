@@ -60,16 +60,19 @@ Cyaim.WebSocketServer 提供了完整的指标统计功能，支持：
 
 ### 2. 配置指标收集
 
+> **指标与 OpenTelemetry 已解耦**：核心库通过 BCL 的 `System.Diagnostics.Metrics.Meter`（名称 `Cyaim.WebSocketServer`）发布指标，**不依赖任何 OpenTelemetry 包**。若需 OTLP 导出，引用可选包 **`Cyaim.WebSocketServer.OpenTelemetry`** 使用其 `AddWebSocketMetricsExporter()`；或在应用侧自行 `AddMeter("Cyaim.WebSocketServer")` 接入任意导出器（Prometheus、Console 等）。
+
 ```csharp
 using OpenTelemetry.Metrics;
 using Cyaim.WebSocketServer.Infrastructure.Metrics;
+using Cyaim.WebSocketServer.OpenTelemetry;   // 可选包，提供 AddWebSocketMetricsExporter
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 添加 WebSocket 指标收集
+// 添加 WebSocket 指标收集（核心库）
 builder.Services.AddWebSocketMetrics();
 
-// 配置 OpenTelemetry Metrics
+// 配置 OpenTelemetry Metrics（需引用可选包 Cyaim.WebSocketServer.OpenTelemetry）
 builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {
@@ -92,6 +95,8 @@ if (metricsCollector != null)
 ```
 
 ## OpenTelemetry 集成
+
+> 以下 `AddWebSocketMetricsExporter` 来自可选包 **`Cyaim.WebSocketServer.OpenTelemetry`**（`dotnet add package Cyaim.WebSocketServer.OpenTelemetry`），核心库本身不含 OpenTelemetry。
 
 ### 配置 OTLP 导出器
 

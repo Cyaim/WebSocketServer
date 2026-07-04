@@ -68,6 +68,7 @@ Cyaim.WebSocketServer/
 │   ├── Middlewares/                    # 中间件
 │   └── ...
 ├── Cyaim.WebSocketServer.Dashboard/    # Dashboard 后端
+├── Cyaim.WebSocketServer.OpenTelemetry/ # 可选的 OTLP 指标导出扩展
 ├── Cyaim.WebSocketServer.Cluster.*/   # 集群传输扩展
 ├── Clients/                            # 多语言客户端 SDK
 │   ├── Cyaim.WebSocketServer.Client/  # C# 客户端
