@@ -14,3 +14,4 @@
 
 # 其他忽略项
 **/node_modules/
+.claude/

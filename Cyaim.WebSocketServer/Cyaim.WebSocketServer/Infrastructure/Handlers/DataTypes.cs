@@ -23,22 +23,22 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
         /// <summary>
         /// System.Text.Json.JsonNode
         /// </summary>
-        private const string Type_JsonNode = "System.Text.Json.JsonNode";
+        private const string Type_JsonNode = "System.Text.Json.Nodes.JsonNode";
 
         /// <summary>
         /// System.Text.Json.JsonObject
         /// </summary>
-        private const string Type_JsonObject = "System.Text.Json.JsonObject";
+        private const string Type_JsonObject = "System.Text.Json.Nodes.JsonObject";
 
         /// <summary>
         /// System.Text.Json.JsonArray
         /// </summary>
-        private const string Type_JsonArray = "System.Text.Json.JsonArray";
+        private const string Type_JsonArray = "System.Text.Json.Nodes.JsonArray";
 
         /// <summary>
         /// System.Text.Json.JsonValue
         /// </summary>
-        private const string Type_JsonValue = "System.Text.Json.JsonValue";
+        private const string Type_JsonValue = "System.Text.Json.Nodes.JsonValue";
 
 
         #region BaseType
@@ -192,7 +192,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers
                     case Type_Char:
                         return Convert.ToChar(value);
                     case Type_Decimal:
-                        return Convert.ToChar(value);
+                        return Convert.ToDecimal(value);
                     case Type_DateTime:
                         return Convert.ToDateTime(value);
                     case Type_DateTimeOffset:

@@ -108,6 +108,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// </summary>
         public SemaphoreSlim ParallelForwardLimitSlim = null;
 
+        /// <summary>
+        /// Cached scope factory (singleton) to avoid a service lookup per request.
+        /// 缓存的 ScopeFactory（单例），避免每次请求做一次服务查找。
+        /// </summary>
+        private static IServiceScopeFactory _cachedScopeFactory;
+
 
         #region Pipeline
         #endregion
@@ -123,6 +129,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         {
             this.logger = logger;
             webSocketOption = webSocketOptions;
+
+            // 某些宿主（如 TestServer）不分配连接 ID，为空时补一个，避免后续以 null 作字典键崩溃
+            // Some hosts (e.g. TestServer) don't assign a connection id; generate one so later
+            // dictionary operations never receive a null key
+            if (string.IsNullOrEmpty(context.Connection.Id))
+            {
+                context.Connection.Id = Guid.NewGuid().ToString("N");
+            }
 
             // 初始化注入器工厂（如果尚未初始化）
             if (webSocketOptions.InjectorFactory == null)
@@ -171,10 +185,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 bandwidthLimitManager = new BandwidthLimitManager(bandwidthLogger, policy, qpsPriorityManager);
             }
 
-            // 配置并行转发上限
+            // 配置并行转发上限（初始许可数必须等于上限，否则首个 WaitAsync 将永久阻塞）
+            // Initial permit count must equal the limit, otherwise the first WaitAsync blocks forever
             if (ParallelForwardLimitSlim == null && webSocketOptions.MaxConnectionParallelForwardLimit != null)
             {
-                ParallelForwardLimitSlim = new SemaphoreSlim(0, (int)webSocketOptions.MaxConnectionParallelForwardLimit);
+                ParallelForwardLimitSlim = new SemaphoreSlim((int)webSocketOptions.MaxConnectionParallelForwardLimit, (int)webSocketOptions.MaxConnectionParallelForwardLimit);
             }
 
             WebSocketCloseStatus? webSocketCloseStatus = null;
@@ -194,8 +209,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         return;
                     }
 
-                    // 配置最大连接数
-                    if ((ulong)Clients.LongCount() >= webSocketOptions.MaxConnectionLimit)
+                    // 配置最大连接数（Count 为 O(锁桶数)，避免 LongCount 对百万级连接做 O(n) 快照枚举）
+                    // Use Count instead of LongCount: O(lock buckets) vs O(n) snapshot enumeration at 1M+ connections
+                    if ((ulong)Clients.Count >= webSocketOptions.MaxConnectionLimit)
                     {
                         return;
                     }
@@ -241,7 +257,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         // 执行Connected管道
-                        _ = await InvokePipeline(RequestPipelineStage.Connected, PipelineContext.CreateReceive(context, webSocket, null, null, webSocketOptions));
+                        if (HasPipeline(RequestPipelineStage.Connected))
+                        {
+                            _ = await InvokePipeline(RequestPipelineStage.Connected, PipelineContext.CreateReceive(context, webSocket, null, null, webSocketOptions));
+                        }
 
                         IHostApplicationLifetime appLifetime = WebSocketRouteOption.ApplicationServices.GetRequiredService<IHostApplicationLifetime>();
 
@@ -287,7 +306,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 await MvcChannel_OnDisconnected(context, webSocketCloseStatus, webSocketOptions, logger);
 
                 // 执行管道 Disconnected
-                _ = await InvokePipeline(RequestPipelineStage.Disconnected, PipelineContext.CreateBasic(context, webSocketOptions));
+                if (HasPipeline(RequestPipelineStage.Disconnected))
+                {
+                    _ = await InvokePipeline(RequestPipelineStage.Disconnected, PipelineContext.CreateBasic(context, webSocketOptions));
+                }
             }
         }
 
@@ -306,7 +328,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 bool connectionClosed = false;
                 do
                 {
-                    long requestTime = DateTime.Now.Ticks;
+                    long requestTime = DateTime.UtcNow.Ticks;
                     WebSocketReceiveResult result = null;
                     SemaphoreSlim endPointSlim = null;
                     bool receivedClose = false;
@@ -335,7 +357,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         // 执行BeforeReceivingData管道
-                        _ = await InvokePipeline(RequestPipelineStage.BeforeReceivingData, PipelineContext.CreateReceive(context, webSocket, null, null, webSocketOption));
+                        if (HasPipeline(RequestPipelineStage.BeforeReceivingData))
+                        {
+                            _ = await InvokePipeline(RequestPipelineStage.BeforeReceivingData, PipelineContext.CreateReceive(context, webSocket, null, null, webSocketOption));
+                        }
 
                         #region 接收数据
                         // 接收数据的缓冲区
@@ -403,7 +428,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                     {
                                         try
                                         {
-                                            endPoint = FindJsonPropertyValue(wsReceiveReader.GetBuffer());
+                                            // 仅解析有效数据段，GetBuffer 的空闲区可能残留上一条消息的数据
+                                            // Slice to valid length: GetBuffer slack may contain previous message bytes
+                                            endPoint = FindJsonPropertyValue(wsReceiveReader.GetBuffer().AsSpan(0, (int)wsReceiveReader.Length));
                                         }
                                         catch
                                         {
@@ -431,7 +458,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesReceived(context.Connection.Id, result.Count);
 
                                 // 执行ReceivingData管道
-                                _ = await InvokePipeline(RequestPipelineStage.ReceivingData, PipelineContext.CreateReceive(context, webSocket, result, buffer, webSocketOption));
+                                if (HasPipeline(RequestPipelineStage.ReceivingData))
+                                {
+                                    _ = await InvokePipeline(RequestPipelineStage.ReceivingData, PipelineContext.CreateReceive(context, webSocket, result, buffer, webSocketOption));
+                                }
 
                                 // 检查消息是否接收完成
                                 // 只有当EndOfMessage为true时，才认为消息接收完成
@@ -474,11 +504,6 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             break;
                         }
 
-                        // 缩小Capacity避免Getbuffer出现0x00
-                        if (wsReceiveReader.Capacity > wsReceiveReader.Length)
-                        {
-                            wsReceiveReader.Capacity = (int)wsReceiveReader.Length;
-                        }
                         #endregion
 
                         // 如果result为null或接收到Close消息，跳过后续处理
@@ -487,16 +512,29 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             continue;
                         }
 
+                        // 有效数据视图：仅取已写入长度，替代旧版为让 GetBuffer 干净而做的 Capacity 收缩
+                        // （Capacity 收缩每条消息都会重新分配并拷贝整个缓冲区）
+                        // Valid-data view sliced to written length, replacing the old Capacity-shrink hack
+                        // (which reallocated and copied the whole buffer on every message)
+                        int receivedLength = (int)wsReceiveReader.Length;
+                        ReadOnlyMemory<byte> receivedData = wsReceiveReader.GetBuffer().AsMemory(0, receivedLength);
+                        // 仅当注册了管道处理器时才物化一份精确大小的缓冲区
+                        // Materialize an exact-size buffer only when pipeline handlers are registered
+                        byte[] pipelineBuffer = RequestPipeline.IsEmpty ? null : receivedData.ToArray();
+
                         // 执行AfterReceivingData管道
-                        _ = await InvokePipeline(RequestPipelineStage.AfterReceivingData, PipelineContext.CreateReceive(context, webSocket, result, wsReceiveReader.GetBuffer(), webSocketOption));
+                        if (HasPipeline(RequestPipelineStage.AfterReceivingData))
+                        {
+                            _ = await InvokePipeline(RequestPipelineStage.AfterReceivingData, PipelineContext.CreateReceive(context, webSocket, result, pipelineBuffer, webSocketOption));
+                        }
 
                         // 在接收完数据后，应用端点级别的限速策略
                         string endpoint = null;
-                        if (bandwidthLimitManager != null && wsReceiveReader.Length > 0)
+                        if (bandwidthLimitManager != null && receivedLength > 0)
                         {
                             try
                             {
-                                endpoint = FindJsonPropertyValue(wsReceiveReader.GetBuffer());
+                                endpoint = FindJsonPropertyValue(receivedData.Span);
                                 if (!string.IsNullOrEmpty(endpoint))
                                 {
                                     // 对完整消息应用端点级别限速
@@ -504,7 +542,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                         context.Request.Path,
                                         context.Connection.Id,
                                         endpoint,
-                                        (int)wsReceiveReader.Length,
+                                        receivedLength,
                                         context.Connection.RemoteIpAddress?.ToString(),
                                         CancellationToken.None);
                                 }
@@ -520,9 +558,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         {
                             if (string.IsNullOrEmpty(endpoint))
                             {
-                                endpoint = FindJsonPropertyValue(wsReceiveReader.GetBuffer());
+                                endpoint = FindJsonPropertyValue(receivedData.Span);
                             }
-                            if (webSocketOption.MaxEndPointParallelForwardLimit.TryGetValue(endpoint, out endPointSlim) && endPointSlim != null)
+                            if (endpoint != null && webSocketOption.MaxEndPointParallelForwardLimit.TryGetValue(endpoint, out endPointSlim) && endPointSlim != null)
                             {
                                 await endPointSlim.WaitAsync().ConfigureAwait(false);
                             }
@@ -534,8 +572,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         MvcRequestScheme requestScheme = null;
                         JsonObject requestBody = null;
 
-                        //Console.WriteLine(Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
-                        using (JsonDocument doc = JsonDocument.Parse(wsReceiveReader.GetBuffer()))
+                        using (JsonDocument doc = JsonDocument.Parse(receivedData))
                         {
                             JsonElement root = doc.RootElement;
                             JsonElement body = default;
@@ -547,7 +584,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             }
 
                             requestScheme = doc.Deserialize<MvcRequestScheme>(webSocketOption.DefaultRequestJsonSerializerOptions);
-                            requestBody = body.ValueKind == JsonValueKind.Undefined ? null : (JsonNode.Parse(body.GetRawText())?.AsObject());
+                            // Clone 使节点脱离文档的池化缓冲区；JsonObject.Create 避免旧版 GetRawText 的字符串分配和第三次解析
+                            // Clone detaches from the document's pooled buffer; JsonObject.Create avoids the old GetRawText string alloc + third parse
+                            requestBody = body.ValueKind != JsonValueKind.Object ? null : JsonObject.Create(body.Clone());
                         }
 
                         // 检查请求是否包含Id属性
@@ -558,16 +597,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             {
                                 Status = 1,
                                 RequestTime = requestTime,
-                                CompleteTime = DateTime.Now.Ticks,
+                                CompleteTime = DateTime.UtcNow.Ticks,
                                 Target = requestScheme?.Target,
                                 Id = requestScheme?.Id,
                                 Msg = string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestIdRequired)
                             };
 
-                            // 发送错误响应
-                            string serialJson = JsonSerializer.Serialize(errorResponse, webSocketOption.DefaultResponseJsonSerializerOptions);
-                            var responseBytes = Encoding.UTF8.GetBytes(serialJson);
-                            await webSocket.SendAsync(new ArraySegment<byte>(responseBytes), result.MessageType, result.EndOfMessage, CancellationToken.None);
+                            // 发送错误响应（经由每 socket 发送锁，避免与并发响应交叠）
+                            // Send error response through the per-socket send gate to avoid interleaving with concurrent responses
+                            var responseBytes = JsonSerializer.SerializeToUtf8Bytes(errorResponse, webSocketOption.DefaultResponseJsonSerializerOptions);
+                            await WebSocketManager.SendLocalAsync(responseBytes.AsMemory(), result.MessageType, true, CancellationToken.None, timeout: ResponseSendTimeout, sockets: webSocket).ConfigureAwait(false);
 
                             logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestIdRequired));
 
@@ -582,9 +621,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
 
                         // 执行管道 BeforeForwardingData
-                        _ = await InvokePipeline(RequestPipelineStage.BeforeForwardingData, PipelineContext.CreateForward(context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody, webSocketOption));
+                        if (HasPipeline(RequestPipelineStage.BeforeForwardingData))
+                        {
+                            _ = await InvokePipeline(RequestPipelineStage.BeforeForwardingData, PipelineContext.CreateForward(context, webSocket, result, pipelineBuffer, requestScheme, requestBody, webSocketOption));
+                        }
 
-                        //requestScheme = JsonSerializer.Deserialize<MvcRequestScheme>(wsReceiveReader.GetBuffer(), webSocketOption.DefaultRequestJsonSerialiazerOptions);
                         // 改异步转发
                         Task forwardTask = MvcForwardSendData(webSocket, context, result, requestScheme, requestBody, requestTime, appLifetime);
                         // 是否串行
@@ -594,25 +635,27 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
                         else
                         {
-                            // 无论是否串行，都处理 Task 异常（关键）
-                            forwardTask = forwardTask.ContinueWith(t =>
+                            // 处理 Task 异常，避免未观察到的异常。
+                            // 静态委托 + state 避免闭包分配；不捕获接收缓冲区（异步完成时缓冲区已被复用）
+                            // Static delegate + state avoids closure allocation; do NOT capture the receive
+                            // buffer (it is reused by the time the continuation may run)
+                            _ = forwardTask.ContinueWith(static (t, state) =>
                             {
-                                if (t.IsFaulted)
-                                {
-                                    // 记录异常日志，避免未观察到的异常
-                                    logger.LogInformation(t.Exception, t.Exception.Message, Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
-                                }
-                            }, TaskContinuationOptions.OnlyOnFaulted);
+                                ((ILogger)state).LogInformation(t.Exception, I18nText.ConnectionEntry_DisconnectedInternalExceptions);
+                            }, logger, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
                         }
 
                         // 执行管道 AfterForwardingData
-                        _ = await InvokePipeline(RequestPipelineStage.AfterForwardingData, PipelineContext.CreateForward(context, webSocket, result, wsReceiveReader.GetBuffer(), requestScheme, requestBody, webSocketOption));
+                        if (HasPipeline(RequestPipelineStage.AfterForwardingData))
+                        {
+                            _ = await InvokePipeline(RequestPipelineStage.AfterForwardingData, PipelineContext.CreateForward(context, webSocket, result, pipelineBuffer, requestScheme, requestBody, webSocketOption));
+                        }
 
                     CONTINUE_RECEIVE:;
                     }
                     catch (Exception ex)
                     {
-                        logger.LogInformation(ex, ex.Message, Encoding.UTF8.GetString(wsReceiveReader.GetBuffer()));
+                        logger.LogInformation(ex, ex.Message, Encoding.UTF8.GetString(wsReceiveReader.GetBuffer(), 0, (int)wsReceiveReader.Length));
                     }
                     finally
                     {
@@ -698,15 +741,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 //按节点请求转发
                 object invokeResult = await MvcDistributeAsync(webSocketOption, context, webSocket, request, requestBody, logger, appLifetime);
 
-                // 发送结果给客户端
-                //string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
-                //await webSocket.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(serialJson)), result.MessageType, result.EndOfMessage, CancellationToken.None);
+                // 序列化响应（仅一次），直接序列化为 UTF-8 字节，同一份数据用于发送与指标统计
+                // Serialize the response exactly once, straight to UTF-8 bytes, reused for both send and metrics
+                var responseBytes = JsonSerializer.SerializeToUtf8Bytes(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
 
-                // 序列化响应以获取大小
-                string serialJson = JsonSerializer.Serialize(invokeResult, webSocketOption.DefaultResponseJsonSerializerOptions);
-                var responseBytes = Encoding.UTF8.GetBytes(serialJson);
-
-                await invokeResult.SendLocalAsync(webSocketOption.DefaultResponseJsonSerializerOptions, result.MessageType, timeout: ResponseSendTimeout, encoding: Encoding.UTF8, sendBufferSize: SendTextBufferSize, socket: webSocket).ConfigureAwait(false);
+                await WebSocketManager.SendLocalAsync(responseBytes.AsMemory(), result.MessageType, responseBytes.Length <= SendTextBufferSize, CancellationToken.None, timeout: ResponseSendTimeout, sendBufferSize: (uint)SendTextBufferSize, sockets: webSocket).ConfigureAwait(false);
 
                 // 记录消息发送指标
                 var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
@@ -721,7 +760,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     Status = 1,
                     RequestTime = requsetTicks,
-                    CompleteTime = DateTime.Now.Ticks,
+                    CompleteTime = DateTime.UtcNow.Ticks,
                     Target = request.Target,
                 };
                 logger.LogInformation(mvcRespEx, mvcRespEx.Message);
@@ -777,7 +816,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     Status = 1,
                     RequestTime = requsetTicks,
-                    CompleteTime = DateTime.Now.Ticks,
+                    CompleteTime = DateTime.UtcNow.Ticks,
                 };
                 logger.LogInformation(mvcRespEx, mvcRespEx.Message);
             }
@@ -823,7 +862,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     Status = 1,
                     RequestTime = requsetTicks,
-                    CompleteTime = DateTime.Now.Ticks,
+                    CompleteTime = DateTime.UtcNow.Ticks,
                 };
                 logger.LogInformation(mvcRespEx, mvcRespEx.Message);
             }
@@ -849,19 +888,27 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <returns></returns>
         public static async Task<MvcResponseScheme> MvcDistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, MvcRequestScheme request, JsonObject requestBody, ILogger<WebSocketRouteMiddleware> logger, IHostApplicationLifetime appLifetime)
         {
-            long requestTime = DateTime.Now.Ticks;
-            string requestPath = request.Target.ToLower();
+            long requestTime = DateTime.UtcNow.Ticks;
+            // 终结点表为忽略大小写字典，无需每请求 ToLower 分配
+            // Endpoint tables use case-insensitive comparers, no per-request ToLower allocation needed
+            string requestPath = request.Target;
             IServiceScope serviceScope = null;
+            if (string.IsNullOrEmpty(requestPath))
+            {
+                goto NotFound;
+            }
             try
             {
-                // 从键值对中获取对应的执行函数 
+                // 从键值对中获取对应的执行函数
                 webSocketOptions.WatchAssemblyContext.WatchMethods.TryGetValue(requestPath, out MethodInfo method);
 
                 if (method == null)
                 {
                     goto NotFound;
                 }
-                Type targetClass = webSocketOptions.WatchAssemblyContext.WatchEndPoint.FirstOrDefault(x => x.MethodPath == requestPath)?.Class;
+                // O(1) 字典查找，替代对 WatchEndPoint 的每请求线性扫描
+                // O(1) dictionary lookup instead of a per-request linear scan over WatchEndPoint
+                Type targetClass = webSocketOptions.WatchAssemblyContext.GetEndpointClass(requestPath);
                 if (targetClass == null)
                 {
                     //找不到访问目标
@@ -871,30 +918,20 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 #region 注入Socket的HttpContext和WebSocket客户端
                 webSocketOptions.WatchAssemblyContext.MaxConstructorParameters.TryGetValue(targetClass, out ConstructorParameter constructorParameter);
 
-                object[] instanceParmas = new object[constructorParameter.ParameterInfos.Length];
-                // 从Scope DI容器提取目标类构造函数所需的对象 
-                var serviceScopeFactory = WebSocketRouteOption.ApplicationServices.GetService<IServiceScopeFactory>();
+                int ctorParamCount = constructorParameter.ParameterInfos?.Length ?? 0;
+                object[] instanceParmas = ctorParamCount == 0 ? Array.Empty<object>() : new object[ctorParamCount];
+                // 从Scope DI容器提取目标类构造函数所需的对象。
+                // Scope 容器可正确解析所有生命周期（单例来自根容器），
+                // 无需再对 IServiceCollection 做每参数 O(n) 的 ServiceDescriptor 扫描。
+                // Resolve constructor dependencies from the scoped provider. It handles every
+                // lifetime correctly (singletons come from the root), eliminating the old
+                // per-parameter O(n) scan of the IServiceCollection.
+                var serviceScopeFactory = _cachedScopeFactory ??= WebSocketRouteOption.ApplicationServices.GetService<IServiceScopeFactory>();
                 serviceScope = serviceScopeFactory.CreateScope();
                 var scopeIocProvider = serviceScope.ServiceProvider;
-                for (int i = 0; i < constructorParameter.ParameterInfos.Length; i++)
+                for (int i = 0; i < ctorParamCount; i++)
                 {
-                    ParameterInfo item = constructorParameter.ParameterInfos[i];
-
-                    if (webSocketOptions.ApplicationServiceCollection == null)
-                    {
-                        logger.LogWarning(I18nText.MvcDistributeAsync_EmptyDI);
-                        break;
-                    }
-
-                    ServiceDescriptor nonSingleton = webSocketOptions.ApplicationServiceCollection.FirstOrDefault(x => x.ServiceType == item.ParameterType);
-                    if (nonSingleton == null || nonSingleton.Lifetime == ServiceLifetime.Singleton)
-                    {
-                        instanceParmas[i] = WebSocketRouteOption.ApplicationServices.GetService(item.ParameterType);
-                    }
-                    else
-                    {
-                        instanceParmas[i] = scopeIocProvider.GetService(item.ParameterType);
-                    }
+                    instanceParmas[i] = scopeIocProvider.GetService(constructorParameter.ParameterInfos[i].ParameterType);
                 }
 
                 object inst = Activator.CreateInstance(targetClass, instanceParmas);
@@ -952,6 +989,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         ParameterInfo targetBindParam = methodParam[0];
                         // 先是直接按形参参数名提取，从Json提取不到则进行参数展开
                         bool hasVal = requestBody.TryGetPropertyValue(targetBindParam.Name, out JsonNode jProp);
+                        if (!hasVal)
+                        {
+                            // 忽略大小写再提取一次（与多参数路径保持一致）
+                            // Case-insensitive retry, consistent with the multi-parameter path
+                            jProp = requestBodyDict.FirstOrDefault(x => x.Key.Equals(targetBindParam.Name, StringComparison.OrdinalIgnoreCase)).Value;
+                            hasVal = jProp != null;
+                        }
                         if (hasVal)
                         {
                             args[0] = targetBindParam.ParameterType.ConvertTo(jProp);
@@ -1109,17 +1153,24 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 mvcResponse.Id = request.Id;
                 mvcResponse.Target = request.Target;
                 mvcResponse.Body = invokeResult;
-                mvcResponse.CompleteTime = DateTime.Now.Ticks;
+                mvcResponse.CompleteTime = DateTime.UtcNow.Ticks;
 
                 return mvcResponse;
             }
             catch (Exception ex)
             {
-                MvcResponseScheme resp = new MvcResponseScheme() { Id = request.Id, Status = 1, Target = request.Target, RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
+                MvcResponseScheme resp = new MvcResponseScheme() { Id = request.Id, Status = 1, Target = request.Target, RequestTime = requestTime, CompleteTime = DateTime.UtcNow.Ticks };
 
                 if (ex is AggregateException aggEx && aggEx.InnerException != null)
                 {
                     ex = aggEx.InnerException;
+                }
+                // 反射调用的同步异常被 TargetInvocationException 包裹，剥掉以暴露原始异常
+                // Synchronous endpoint exceptions surface wrapped in TargetInvocationException
+                // via reflection invoke — unwrap so callers see the original exception
+                if (ex is TargetInvocationException tiEx && tiEx.InnerException != null)
+                {
+                    ex = tiEx.InnerException;
                 }
 
                 resp.Msg = string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcDistributeAsync_Target + requestPath + Environment.NewLine + ex.Message + Environment.NewLine + ex.StackTrace);
@@ -1139,7 +1190,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         NotFound:
             logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcDistributeAsync_EndPointNotFound + requestPath));
 
-            return new MvcResponseScheme() { Id = request.Id, Status = 2, Target = request.Target, RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
+            return new MvcResponseScheme() { Id = request.Id, Status = 2, Target = request.Target, RequestTime = requestTime, CompleteTime = DateTime.UtcNow.Ticks };
         }
 
         /// <summary>
@@ -1321,7 +1372,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// <returns></returns>
         public string FindJsonPropertyValue(ReadOnlySpan<byte> jsonFragment, string PropertyName = IMvcScheme.VAR_TATGET)
         {
-            var jsonReader = new Utf8JsonReader(jsonFragment);
+            var jsonReader = new Utf8JsonReader(jsonFragment, isFinalBlock: false, state: default);
 
             try
             {
@@ -1329,13 +1380,24 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 {
                     try
                     {
-                        if (jsonReader.TokenType == JsonTokenType.PropertyName && jsonReader.GetString()?.ToLower() == PropertyName)
+                        if (jsonReader.TokenType == JsonTokenType.PropertyName)
                         {
-                            jsonReader.Read();
-                            if (jsonReader.TokenType == JsonTokenType.String)
+                            // 先做零分配的精确匹配；不匹配时仅在长度一致的情况下才分配字符串做忽略大小写比较
+                            // Zero-alloc exact match first; only allocate for a case-insensitive
+                            // comparison when the raw length matches the target name
+                            bool matched = jsonReader.ValueTextEquals(PropertyName);
+                            if (!matched && !jsonReader.HasValueSequence && jsonReader.ValueSpan.Length == PropertyName.Length)
                             {
-                                string targetValue = jsonReader.GetString();
-                                return targetValue;
+                                matched = string.Equals(jsonReader.GetString(), PropertyName, StringComparison.OrdinalIgnoreCase);
+                            }
+
+                            if (matched)
+                            {
+                                jsonReader.Read();
+                                if (jsonReader.TokenType == JsonTokenType.String)
+                                {
+                                    return jsonReader.GetString();
+                                }
                             }
                         }
                     }
@@ -1360,6 +1422,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         /// 注意：context 对象会在所有管道处理器执行完毕后自动归还到对象池。
         /// 管道处理器不应在异步操作中保存 context 的引用，因为方法返回后对象会被清理和重用。
         /// </remarks>
+        /// <summary>
+        /// Fast check whether any handler is registered for a stage, allowing callers to skip
+        /// pooled-context creation entirely on the (common) no-pipeline path.
+        /// 快速判断某阶段是否注册了处理器，让调用方在（常见的）无管道场景下完全跳过池化上下文的创建。
+        /// </summary>
+        private bool HasPipeline(RequestPipelineStage stage)
+        {
+            return !RequestPipeline.IsEmpty && RequestPipeline.TryGetValue(stage, out var queue) && queue != null && !queue.IsEmpty;
+        }
+
         private async Task<ConcurrentQueue<PipelineItem>> InvokePipeline(RequestPipelineStage requestStage, PipelineContext context)
         {
             try
@@ -1369,7 +1441,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     return null;
                 }
 
-                var ordered = invokes.OrderBy(x => x.Order);
+                // 单处理器时跳过排序，避免每次调用的 OrderBy 枚举器分配
+                // Skip ordering for a single handler to avoid the per-call OrderBy allocation
+                IEnumerable<PipelineItem> ordered = invokes.Count == 1 ? invokes : invokes.OrderBy(x => x.Order);
                 foreach (PipelineItem item in ordered)
                 {
                     try

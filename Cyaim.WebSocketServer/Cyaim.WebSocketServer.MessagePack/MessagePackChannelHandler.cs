@@ -174,7 +174,7 @@ namespace Cyaim.WebSocketServer.MessagePack
                     }
 
                     // 配置最大连接数
-                    if ((ulong)Clients.LongCount() >= webSocketOptions.MaxConnectionLimit)
+                    if ((ulong)Clients.Count >= webSocketOptions.MaxConnectionLimit)
                     {
                         return;
                     }
@@ -623,7 +623,7 @@ namespace Cyaim.WebSocketServer.MessagePack
                             {
                                 endpoint = FindTargetFromMessagePack(wsReceiveReader.GetBuffer());
                             }
-                            if (webSocketOption.MaxEndPointParallelForwardLimit.TryGetValue(endpoint, out endPointSlim) && endPointSlim != null)
+                            if (endpoint != null && webSocketOption.MaxEndPointParallelForwardLimit.TryGetValue(endpoint, out endPointSlim) && endPointSlim != null)
                             {
                                 await endPointSlim.WaitAsync().ConfigureAwait(false);
                             }

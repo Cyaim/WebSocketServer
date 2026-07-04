@@ -11,7 +11,6 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
-using System.Threading.Channels;
 using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Infrastructure.Cluster;
 using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
@@ -34,227 +33,137 @@ namespace Cyaim.WebSocketServer.Infrastructure
         private static Encoding DefaultEncoding { get; } = Encoding.UTF8;
 
         /// <summary>
-        /// Channel for sending tasks
+        /// Per-socket send gate. WebSocket allows only one outstanding SendAsync per instance,
+        /// so concurrent callers targeting the same socket serialize here instead of through
+        /// a process-wide queue. Entries are released automatically when the socket is collected.
+        /// 每个 socket 的发送门闩。WebSocket 同一实例只允许一个未完成的 SendAsync，
+        /// 并发发送同一 socket 时在此串行化（替代旧的全局单消费者队列）。socket 被回收后条目自动释放。
         /// </summary>
-        private static Channel<SendItem> sendChannel = Channel.CreateUnbounded<SendItem>();
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<WebSocket, SemaphoreSlim> SendLocks = new System.Runtime.CompilerServices.ConditionalWeakTable<WebSocket, SemaphoreSlim>();
 
-        class SendItem : IDisposable
+        private static SemaphoreSlim GetSendLock(WebSocket socket)
         {
-            public Stream Stream { get; set; }
-            public ReadOnlyMemory<byte> Buffer { get; set; }
-
-
-            /// <summary>
-            /// true if the Send all data at once, false if the send in batches according to SendBufferSize size
-            /// </summary>
-            public bool SendAtOnce { get; set; }
-            /// <summary>
-            /// Client to be sent
-            /// </summary>
-            public List<KeyValuePair<WebSocket, (WebSocketMessageType MessgaeType, CancellationToken CancellationToken)>> Sockets { get; set; }
-
-            /// <summary>
-            /// Send buffer size, default 4K
-            /// </summary>
-            public uint SendBufferSize { get; set; } = 4 * 1024;
-
-            /// <summary>
-            /// Whether to send the completed flag and release it after sending is completed
-            /// </summary>
-            public SemaphoreSlim SendCompletedSemaphore { get; } = new SemaphoreSlim(0, 1);
-
-            /// <summary>
-            /// Internal error
-            /// </summary>
-            public Exception Exception { get; set; }
-
-            public void Dispose()
-            {
-                try
-                {
-                    Stream?.Dispose();
-                    Sockets.Clear();
-                    Sockets = null;
-                    SendCompletedSemaphore?.Dispose();
-                }
-                catch { }
-            }
+            return SendLocks.GetValue(socket, static _ => new SemaphoreSlim(1, 1));
         }
 
-        static WebSocketManager()
-        {
-            // Start listen channel
-            _ = ListenSendChannel();
-        }
-
-        #region Send channel
+        #region Send core
 
         /// <summary>
-        /// Listen send channel
+        /// Send a buffer to a single socket, holding the socket's send gate for the whole message
+        /// so multi-frame sends never interleave with other senders.
+        /// 向单个 socket 发送缓冲区数据，整条消息期间持有该 socket 的发送门闩，避免多帧交叠。
         /// </summary>
-        /// <returns></returns>
-        private static async Task ListenSendChannel()
+        private static async Task SendBufferCoreAsync(WebSocket socket, ReadOnlyMemory<byte> buffer, WebSocketMessageType messageType, bool sendAtOnce, uint sendBufferSize, CancellationToken cancellationToken)
         {
-            while (await sendChannel.Reader.WaitToReadAsync().ConfigureAwait(false))
+            var gate = GetSendLock(socket);
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                //lock (alarmCheck_locker)
-                //{
-
-                while (sendChannel.Reader.TryRead(out SendItem item))
+                if (socket.State != WebSocketState.Open)
                 {
-                    if (item == null || item.Sockets == null || item.Sockets.Count < 1) continue;
-                    try
-                    {
-                        await SendItemInBatchesAsync(item);
-                    }
-                    catch (Exception ex)
-                    {
-                        item.Exception = ex;
-                    }
-                    finally
-                    {
-                        item.SendCompletedSemaphore.Release();
-                    }
-
-                    //ParallelLoopResult result = Parallel.ForEach(item.Sockets, async (s, state) =>
-                    //{
-                    //    try
-                    //    {
-                    //        if (item.CancellationToken.IsCancellationRequested)
-                    //        {
-                    //            state.Stop();
-                    //            return;
-                    //        }
-                    //        if (s.Key.State == WebSocketState.Open)
-                    //        {
-                    //            await s.SendAsync(item.Buffer, item.MessageType, item.EndOfMessage, item.CancellationToken);
-                    //        }
-                    //    }
-                    //    catch (AggregateException age)
-                    //    {
-                    //        foreach (var item in age.InnerExceptions)
-                    //        {
-                    //            Console.WriteLine(item.Message);
-                    //        }
-                    //    }
-                    //});
+                    return;
                 }
-                //}
+                if (sendAtOnce || buffer.Length <= sendBufferSize)
+                {
+                    await socket.SendAsync(buffer, messageType, endOfMessage: true, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await SendBufferedDataInBatchesAsync(socket, messageType, buffer, sendBufferSize, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                gate.Release();
             }
         }
 
         /// <summary>
-        /// Websocket senditem 
+        /// Send stream content to a single socket under its send gate.
+        /// 在发送门闩保护下向单个 socket 发送流数据。
         /// </summary>
-        /// <param name="item"></param>
-        /// <returns></returns>
-        private static async Task SendItemInBatchesAsync(SendItem item)
+        private static async Task SendStreamCoreAsync(WebSocket socket, Stream stream, WebSocketMessageType messageType, bool sendAtOnce, uint sendBufferSize, CancellationToken cancellationToken)
         {
-            // 分批发送数据
-            for (int i = 0; i < item.Sockets.Count; i += BatchProcessingWebsocketLimit)
+            var gate = GetSendLock(socket);
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                //var batch = item.Sockets.Skip(i).Take(BatchProcessingWebsocketLimit);
-                var batch = item.Sockets.GetRange(i, Math.Min(BatchProcessingWebsocketLimit, item.Sockets.Count - i));
-                var sendTasks1 = batch.Select(socketInfo =>
+                if (socket.State != WebSocketState.Open)
                 {
-                    // 检查取消发送的标记
-                    if (socketInfo.Value.CancellationToken.IsCancellationRequested)
-                    {
-                        return Task.FromException(new OperationCanceledException(socketInfo.Value.CancellationToken));
-                    }
-
-                    try
-                    {
-                        // 发送数据
-                        if (item.Stream != null && item.Stream.CanRead)
-                        {
-                            if (item.SendAtOnce)
-                            {
-                                return SendStreamDataAsync(socketInfo.Key, socketInfo.Value.MessgaeType, item.Stream, socketInfo.Value.CancellationToken);
-                            }
-                            else
-                            {
-                                return SendStreamDataInBatchesAsync(socketInfo.Key, socketInfo.Value.MessgaeType, item.Stream, item.SendBufferSize, socketInfo.Value.CancellationToken);
-                            }
-                        }
-                        else if (item.Buffer.Length > 0)
-                        {
-                            if (item.SendAtOnce)
-                            {
-                                return socketInfo.Key.SendAsync(item.Buffer, socketInfo.Value.MessgaeType, endOfMessage: true, socketInfo.Value.CancellationToken).AsTask();
-                            }
-                            else
-                            {
-                                return SendBufferedDataInBatchesAsync(socketInfo.Key, socketInfo.Value.MessgaeType, item.Buffer, item.SendBufferSize, socketInfo.Value.CancellationToken);
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        return Task.FromException(ex);
-                    }
-                    return Task.CompletedTask;
-                }).ToList();
-                try
-                {
-
-                    await Task.WhenAll(sendTasks1);
+                    return;
                 }
-                catch (Exception)
-                { }
+                if (sendAtOnce)
+                {
+                    await SendStreamDataAsync(socket, messageType, stream, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await SendStreamDataInBatchesAsync(socket, messageType, stream, sendBufferSize, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                gate.Release();
             }
         }
 
         /// <summary>
-        /// Websocket senditem 
+        /// Send a buffer to many sockets, bounded by <see cref="BatchProcessingWebsocketLimit"/> per wave.
+        /// Individual socket failures are swallowed so one bad connection doesn't fail the batch.
+        /// 向多个 socket 发送缓冲区数据，每波并发受 <see cref="BatchProcessingWebsocketLimit"/> 限制。
+        /// 单个 socket 的失败被吞掉，避免一个坏连接影响整批。
         /// </summary>
-        /// <param name="item"></param>
-        /// <returns></returns>
-        private static async Task SendItemAsync(SendItem item)
+        private static async Task SendBufferToManyAsync(WebSocket[] sockets, ReadOnlyMemory<byte> buffer, WebSocketMessageType messageType, bool sendAtOnce, uint sendBufferSize, CancellationToken cancellationToken)
         {
-            List<Task> sendTasks = item.Sockets
-                .Where(s => s.Key.State == WebSocketState.Open)
-                .Select(socketInfo =>
+            List<Task> batch = new List<Task>(Math.Min(sockets.Length, BatchProcessingWebsocketLimit));
+            for (int i = 0; i < sockets.Length; i++)
+            {
+                WebSocket socket = sockets[i];
+                if (socket == null || socket.State != WebSocketState.Open)
                 {
-                    // 检查取消发送的标记
-                    if (socketInfo.Value.CancellationToken.IsCancellationRequested)
-                    {
-                        return Task.FromException(new OperationCanceledException(socketInfo.Value.CancellationToken));
-                    }
+                    continue;
+                }
+                batch.Add(SendBufferCoreAsync(socket, buffer, messageType, sendAtOnce, sendBufferSize, cancellationToken));
+                if (batch.Count >= BatchProcessingWebsocketLimit)
+                {
+                    try { await Task.WhenAll(batch).ConfigureAwait(false); } catch { }
+                    batch.Clear();
+                }
+            }
+            if (batch.Count > 0)
+            {
+                try { await Task.WhenAll(batch).ConfigureAwait(false); } catch { }
+            }
+        }
 
-                    try
-                    {
-                        // 发送数据
-                        if (item.Stream != null && item.Stream.CanRead)
-                        {
-                            if (item.SendAtOnce)
-                            {
-                                return SendStreamDataAsync(socketInfo.Key, socketInfo.Value.MessgaeType, item.Stream, socketInfo.Value.CancellationToken);
-                            }
-                            else
-                            {
-                                return SendStreamDataInBatchesAsync(socketInfo.Key, socketInfo.Value.MessgaeType, item.Stream, item.SendBufferSize, socketInfo.Value.CancellationToken);
-                            }
-                        }
-                        else if (item.Buffer.Length > 0)
-                        {
-                            if (item.SendAtOnce)
-                            {
-                                return socketInfo.Key.SendAsync(item.Buffer, socketInfo.Value.MessgaeType, endOfMessage: true, socketInfo.Value.CancellationToken).AsTask();
-                            }
-                            else
-                            {
-                                return SendBufferedDataInBatchesAsync(socketInfo.Key, socketInfo.Value.MessgaeType, item.Buffer, item.SendBufferSize, socketInfo.Value.CancellationToken);
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        return Task.FromException(ex);
-                    }
-                    return Task.CompletedTask;
-                }).ToList();
-            await Task.WhenAll(sendTasks);
+        /// <summary>
+        /// Await a send with an optional completion-wait timeout. On timeout the send keeps
+        /// running detached (previous channel-based behavior) and its exception, if any, is observed.
+        /// 等待发送完成，支持可选超时。超时后发送继续在后台执行（与旧的通道行为一致），异常会被观察以防进程崩溃。
+        /// </summary>
+        private static async Task AwaitWithTimeoutAsync(Task sendTask, TimeSpan? timeout, CancellationToken cancellationToken)
+        {
+            if (timeout == null || timeout.Value == Timeout.InfiniteTimeSpan)
+            {
+                // 无超时：直接等待并让异常传播，调用方（如集群本地流路由）据此判断发送是否成功。
+                // 多目标扇出在 SendBufferToManyAsync 内部已吞掉单 socket 失败，不会传播到这里。
+                // No timeout: await directly and let exceptions propagate so callers (e.g. cluster
+                // local stream routing) can detect send failure. Multi-target fan-out already
+                // swallows per-socket faults inside SendBufferToManyAsync, so nothing propagates there.
+                await sendTask.ConfigureAwait(false);
+                return;
+            }
+
+            var completed = await Task.WhenAny(sendTask, Task.Delay(timeout.Value, cancellationToken)).ConfigureAwait(false);
+            if (completed == sendTask)
+            {
+                try { await sendTask.ConfigureAwait(false); } catch { }
+            }
+            else
+            {
+                // Detached: observe faults to avoid unobserved task exceptions
+                _ = sendTask.ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+            }
         }
 
         /// <summary>
@@ -309,7 +218,9 @@ namespace Cyaim.WebSocketServer.Infrastructure
             try
             {
                 int bytesRead;
-                while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+                // 按请求的 bufferSize 读取，租借的缓冲区可能大于请求大小
+                // Read at the requested bufferSize: the rented buffer may be larger than requested
+                while ((bytesRead = await stream.ReadAsync(buffer, 0, (int)bufferSize, cancellationToken)) > 0)
                 {
                     await webSocket.SendAsync(buffer.AsMemory(0, bytesRead), messageType, endOfMessage: false, cancellationToken);
                 }
@@ -377,17 +288,36 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 return;
             }
-            using var sendItem = new SendItem
+
+            Task sendTask;
+            WebSocket single = sockets.Length == 1 ? sockets[0] : null;
+            if (single != null)
             {
-                Stream = sendStream,
-                SendAtOnce = sendAtOnce,
-                Sockets = sockets.Where(x => x != null && x.State == WebSocketState.Open).Select(x => KeyValuePair.Create(x, (messageType, cancellationToken))).ToList(),
-                SendBufferSize = sendBufferSize,
-            };
-            await sendChannel.Writer.WriteAsync(sendItem, cancellationToken).ConfigureAwait(false);
+                if (single.State != WebSocketState.Open)
+                {
+                    return;
+                }
+                sendTask = SendStreamCoreAsync(single, sendStream, messageType, sendAtOnce, sendBufferSize, cancellationToken);
+            }
+            else
+            {
+                // Multiple targets cannot share one stream concurrently: buffer it once, then fan out
+                // 多个目标不能并发共享同一个流：先一次性缓冲，再分发
+                sendTask = SendStreamToManyAsync(sockets, sendStream, messageType, sendAtOnce, sendBufferSize, cancellationToken);
+            }
 
+            await AwaitWithTimeoutAsync(sendTask, timeout, cancellationToken).ConfigureAwait(false);
+        }
 
-            await sendItem.SendCompletedSemaphore.WaitAsync(timeout ?? Timeout.InfiniteTimeSpan, cancellationToken);
+        /// <summary>
+        /// Buffer a stream once and fan it out to many sockets.
+        /// 将流缓冲一次后分发给多个 socket。
+        /// </summary>
+        private static async Task SendStreamToManyAsync(WebSocket[] sockets, Stream stream, WebSocketMessageType messageType, bool sendAtOnce, uint sendBufferSize, CancellationToken cancellationToken)
+        {
+            using var buffered = new MemoryStream();
+            await stream.CopyToAsync(buffered, cancellationToken).ConfigureAwait(false);
+            await SendBufferToManyAsync(sockets, buffered.GetBuffer().AsMemory(0, (int)buffered.Length), messageType, sendAtOnce, sendBufferSize, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -408,46 +338,35 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 return;
             }
-            using var sendItem = new SendItem
+
+            // Fast path: single open socket, no intermediate allocations
+            // 快速路径：单个打开的 socket，无中间分配
+            WebSocket single = sockets.Length == 1 ? sockets[0] : null;
+            if (single != null)
             {
-                Buffer = buffer,
-                SendAtOnce = sendAtOnce,
-                Sockets = sockets.Where(x => x != null && x.State == WebSocketState.Open).Select(x => KeyValuePair.Create(x, (messageType, cancellationToken))).ToList(),
-                SendBufferSize = sendBufferSize,
-            };
-            if (sendItem.Sockets.Count < 1)
-                throw new ArgumentNullException(nameof(sendItem.Sockets));
+                if (single.State != WebSocketState.Open)
+                {
+                    throw new ArgumentNullException(nameof(sockets));
+                }
+                await AwaitWithTimeoutAsync(SendBufferCoreAsync(single, buffer, messageType, sendAtOnce, sendBufferSize, cancellationToken), timeout, cancellationToken).ConfigureAwait(false);
+                return;
+            }
 
-            await sendChannel.Writer.WriteAsync(sendItem, cancellationToken).ConfigureAwait(false);
+            bool anyOpen = false;
+            for (int i = 0; i < sockets.Length; i++)
+            {
+                if (sockets[i] != null && sockets[i].State == WebSocketState.Open)
+                {
+                    anyOpen = true;
+                    break;
+                }
+            }
+            if (!anyOpen)
+            {
+                throw new ArgumentNullException(nameof(sockets));
+            }
 
-            await sendItem.SendCompletedSemaphore.WaitAsync(timeout ?? Timeout.InfiniteTimeSpan, cancellationToken);
-
-            //ParallelLoopResult result = Parallel.ForEach(sockets, async (s, state) =>
-            //{
-            //    try
-            //    {
-            //        if (cancellationToken.IsCancellationRequested)
-            //        {
-            //            state.Stop();
-            //            return;
-            //        }
-            //        if (s.State == WebSocketState.Open)
-            //        {
-            //            await s.SendAsync(buffer, messageType, endOfMessage, cancellationToken);
-            //        }
-            //    }
-            //    catch (AggregateException age)
-            //    {
-            //        foreach (var item in age.InnerExceptions)
-            //        {
-            //            Console.WriteLine(item.Message);
-            //        }
-            //    }
-            //});
-            //while (!result.IsCompleted)
-            //{
-            //    await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
-            //}
+            await AwaitWithTimeoutAsync(SendBufferToManyAsync(sockets, buffer, messageType, sendAtOnce, sendBufferSize, cancellationToken), timeout, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -975,36 +894,44 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     return results;
                 }
 
-                // For multiple connections, buffer the stream / 对于多个连接，缓冲流
+                // For multiple connections, buffer the stream once into an immutable byte[].
+                // 对于多个连接，将流一次性缓冲为不可变的 byte[]。
+                // 关键：不能让多个并发任务共享同一个可变 MemoryStream 并各自重置 Position——
+                // 并发读取会相互踩踏导致发给不同客户端的数据损坏；结果也不能并发写普通 Dictionary。
+                // Critical: concurrent tasks must NOT share one mutable MemoryStream and reset its
+                // Position — concurrent reads corrupt each other, delivering garbled data to clients;
+                // and results must not be written to a plain Dictionary concurrently.
                 if (connectionIdList.Count > 1)
                 {
-                    using var memoryStream = new MemoryStream();
-                    await stream.CopyToAsync(memoryStream, cancellationToken);
-                    memoryStream.Position = 0;
-
-                    var tasks = connectionIdList.Select(async connectionId =>
+                    byte[] payload;
+                    using (var memoryStream = new MemoryStream())
                     {
-                        memoryStream.Position = 0;
+                        await stream.CopyToAsync(memoryStream, cancellationToken);
+                        payload = memoryStream.ToArray();
+                    }
+
+                    var sendResults = await Task.WhenAll(connectionIdList.Select(async connectionId =>
+                    {
                         var webSocket = GetLocalWebSocket(connectionId);
                         if (webSocket != null && webSocket.State == WebSocketState.Open)
                         {
                             try
                             {
-                                await SendLocalAsync(memoryStream, messageType, cancellationToken, timeout: null, sendAtOnce: false, sendBufferSize: (uint)chunkSize, sockets: webSocket);
-                                results[connectionId] = true;
+                                await SendLocalAsync(new ReadOnlyMemory<byte>(payload), messageType, sendAtOnce: false, cancellationToken, timeout: null, sendBufferSize: (uint)chunkSize, sockets: webSocket);
+                                return (connectionId, ok: true);
                             }
                             catch
                             {
-                                results[connectionId] = false;
+                                return (connectionId, ok: false);
                             }
                         }
-                        else
-                        {
-                            results[connectionId] = false;
-                        }
-                    });
+                        return (connectionId, ok: false);
+                    }));
 
-                    await Task.WhenAll(tasks);
+                    foreach (var (connectionId, ok) in sendResults)
+                    {
+                        results[connectionId] = ok;
+                    }
                 }
                 else
                 {
