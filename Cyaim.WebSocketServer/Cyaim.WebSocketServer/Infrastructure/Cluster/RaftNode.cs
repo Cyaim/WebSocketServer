@@ -227,9 +227,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
 
             if (knownNodes.Count == 0)
             {
-                // 单节点场景是正常的，降低日志级别避免频繁警告
-                // Single node scenario is normal, reduce log level to avoid frequent warnings
-                _logger.LogDebug($"No known nodes found, cannot start election. Node will remain as candidate. This is normal in single-node scenarios or when other nodes haven't started yet.");
+                // Single-node cluster: this node is a majority of one, become leader immediately.
+                // Without this, a standalone node would stay Candidate forever and IsLeader() would never be true.
+                // 单节点集群：此节点本身即构成多数（1/1），立即成为领导者。
+                // 否则，独立节点将永远停留在候选者状态，IsLeader() 永远不会为 true。
+                _logger.LogInformation($"No other known nodes found. Node {_nodeId} becomes leader immediately (single-node cluster, majority of 1).");
+                BecomeLeader();
                 return;
             }
 
@@ -579,9 +582,26 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
             {
                 var response = System.Text.Json.JsonSerializer.Deserialize<RequestVoteResponseMessage>(message.Payload);
 
-                // Find and complete the pending request / 查找并完成待处理的请求
+                // Find and complete the pending request. The pending key uses the REQUESTER's term,
+                // but a denial may carry the responder's (higher) term — fall back to matching by
+                // node id so higher-term denials aren't dropped and can trigger step-down immediately.
+                // 查找并完成待处理的请求。挂起键使用请求方任期，而拒票可能携带响应方（更高）的任期——
+                // 因此按节点 ID 回退匹配，避免更高任期的拒票被丢弃、无法及时触发退位。
                 var requestKey = $"{message.FromNodeId}:{response.Term}";
-                if (_pendingVoteRequests.TryRemove(requestKey, out var tcs))
+                if (!_pendingVoteRequests.TryRemove(requestKey, out var tcs))
+                {
+                    var nodePrefix = message.FromNodeId + ":";
+                    foreach (var key in _pendingVoteRequests.Keys)
+                    {
+                        if (key.StartsWith(nodePrefix, StringComparison.Ordinal) && _pendingVoteRequests.TryRemove(key, out tcs))
+                        {
+                            break;
+                        }
+                        tcs = null;
+                    }
+                }
+
+                if (tcs != null)
                 {
                     tcs.TrySetResult(message);
                     _logger.LogDebug($"Completed vote request for node {message.FromNodeId}, term {response.Term}, granted: {response.VoteGranted}");
