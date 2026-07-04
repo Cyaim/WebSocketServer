@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Authors>Psyche</Authors>
+    <Company>Cyaim Studio</Company>
+    <Copyright>Copyright © Cyaim Studio</Copyright>
+    <Version>2.0.0</Version>
+    <PackageProjectUrl>https://github.com/Cyaim/WebSocketServer</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Cyaim/WebSocketServer</RepositoryUrl>
+    <Description>Optional OpenTelemetry OTLP exporter helper for Cyaim.WebSocketServer metrics. 可选的 OpenTelemetry OTLP 导出扩展。</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry" Version="1.16.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.16.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.16.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cyaim.WebSocketServer\Cyaim.WebSocketServer.csproj" />
+  </ItemGroup>
+
+</Project>

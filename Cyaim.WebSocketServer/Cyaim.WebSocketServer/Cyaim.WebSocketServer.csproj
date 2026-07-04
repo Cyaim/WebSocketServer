@@ -153,10 +153,17 @@
         <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
     </ItemGroup>
     
-    <!-- OpenTelemetry Metrics for OTLP export - 使用最新稳定版本，所有框架版本使用相同版本 -->
-    <ItemGroup>
-        <PackageReference Include="OpenTelemetry" Version="1.9.0" />
-        <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.9.0" />
-        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.9.0" />
+    <!-- 指标通过 BCL System.Diagnostics.Metrics.Meter 发布，核心库不再依赖 OpenTelemetry 包， -->
+    <!-- 从而消除 OpenTelemetry 1.9.0 的漏洞告警并避免为其固定 Microsoft.Extensions.* 版本。 -->
+    <!-- 需要 OTLP 导出时引用可选包 Cyaim.WebSocketServer.OpenTelemetry。 -->
+    <!-- Metrics flow through the BCL Meter; the core no longer depends on OpenTelemetry (removes the -->
+    <!-- OTel 1.9.0 CVE warnings). For OTLP export, use the optional Cyaim.WebSocketServer.OpenTelemetry. -->
+
+    <!-- UpDownCounter<T> 需要 System.Diagnostics.DiagnosticSource >= 7.0；netstandard2.1/net6/net7 的
+         内置版本不含它（此前由 OpenTelemetry 传递引入），移除 OTel 后需显式引用。net8+ 框架已内置。 -->
+    <!-- UpDownCounter<T> needs System.Diagnostics.DiagnosticSource >= 7.0; the in-box version on
+         netstandard2.1/net6/net7 lacks it (previously pulled transitively by OpenTelemetry). net8+ has it built-in. -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1' Or '$(TargetFramework)' == 'net6.0' Or '$(TargetFramework)' == 'net7.0'">
+        <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="9.0.0" />
     </ItemGroup>
 </Project>

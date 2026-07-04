@@ -13,5 +13,8 @@
     <ItemGroup>
         <PackageReference Include="Swashbuckle.AspNetCore"
                           Version="10.0.1" />
+        <!-- 覆盖 Swashbuckle 传递引入的存在漏洞的 Microsoft.OpenApi 2.3.0（GHSA-v5pm-xwqc-g5wc），
+             显式引用已修复版本 2.7.5。 / Override the vulnerable transitive Microsoft.OpenApi 2.3.0. -->
+        <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     </ItemGroup>
 </Project>
