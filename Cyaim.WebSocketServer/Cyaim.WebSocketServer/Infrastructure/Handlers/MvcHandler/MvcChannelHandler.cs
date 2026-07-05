@@ -315,6 +315,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     WebSocketReceiveResult result = null;
                     SemaphoreSlim endPointSlim = null;
                     bool receivedClose = false;
+                    // 单帧快路径：整条消息一次 ReceiveAsync 收全时借用的租用缓冲区（所有权从接收循环转移到本迭代，
+                    // 在同步解析完成后于外层 finally 归还）。为 null 表示走多帧 MemoryStream 重组路径。
+                    // Single-frame fast path: the rented buffer borrowed when the whole message arrived in one
+                    // ReceiveAsync (ownership moves out of the receive loop, returned in the outer finally after
+                    // the synchronous parse). Null => multi-frame MemoryStream reassembly path.
+                    byte[] singleFrameBuffer = null;
+                    int singleFrameCount = 0;
                     try
                     {
                         // Connection level restrictions
@@ -424,15 +431,30 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                         CancellationToken.None);
                                 }
 
-                                // 将接收到的数据写入MemoryStream
-                                await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
-
                                 // 记录消息接收指标
                                 var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
                                 _metricsCollector?.RecordMessageReceived(result.Count, currentNodeId, context.Request.Path);
 
                                 // 记录统计信息（如果统计记录器可用）
                                 Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesReceived(context.Connection.Id, result.Count);
+
+                                // 单帧快路径：本条消息第一帧即 EndOfMessage（wsReceiveReader 尚为空），说明整条消息
+                                // 已在租用缓冲区中收全。直接借用该缓冲区做后续解析，跳过写入 MemoryStream 的整条负载拷贝。
+                                // 通过 singleFrameBuffer 转移所有权，接收循环的 finally 不再归还，改由外层 finally 归还。
+                                // Single-frame fast path: the message completed on its first frame (wsReceiveReader still
+                                // empty), so the whole payload is already in the rented buffer. Borrow it for parsing and
+                                // skip the full-payload copy into the MemoryStream. Ownership transfers via singleFrameBuffer.
+                                if ((result.EndOfMessage || result.CloseStatus.HasValue) && wsReceiveReader.Length == 0)
+                                {
+                                    singleFrameBuffer = buffer;
+                                    singleFrameCount = result.Count;
+                                    messageComplete = true;
+                                    break;
+                                }
+
+                                // 多帧：写入 MemoryStream 重组
+                                // Multi-frame: reassemble into the MemoryStream
+                                await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
 
                                 // 检查消息是否接收完成
                                 // 只有当EndOfMessage为true时，才认为消息接收完成
@@ -463,8 +485,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
                         finally
                         {
-                            // 归还buffer
-                            ArrayPool<byte>.Shared.Return(buffer);
+                            // 归还buffer；单帧快路径已把所有权转移给本迭代（外层 finally 归还），此处不归还
+                            // Return the buffer, unless the single-frame fast path took ownership (outer finally returns it)
+                            if (!ReferenceEquals(buffer, singleFrameBuffer))
+                            {
+                                ArrayPool<byte>.Shared.Return(buffer);
+                            }
                         }
 
                         // 如果接收到Close消息，直接退出当前循环，不再处理数据
@@ -483,12 +509,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             continue;
                         }
 
-                        // 有效数据视图：仅取已写入长度，替代旧版为让 GetBuffer 干净而做的 Capacity 收缩
-                        // （Capacity 收缩每条消息都会重新分配并拷贝整个缓冲区）
-                        // Valid-data view sliced to written length, replacing the old Capacity-shrink hack
-                        // (which reallocated and copied the whole buffer on every message)
-                        int receivedLength = (int)wsReceiveReader.Length;
-                        ReadOnlyMemory<byte> receivedData = wsReceiveReader.GetBuffer().AsMemory(0, receivedLength);
+                        // 有效数据视图：单帧快路径直接取自租用缓冲区（零拷贝，未经过 MemoryStream）；
+                        // 多帧路径取 MemoryStream 已写入长度的视图。
+                        // Valid-data view: the single-frame fast path reads straight from the rented buffer
+                        // (zero-copy, never touched the MemoryStream); multi-frame reads the written slice.
+                        int receivedLength = singleFrameBuffer != null ? singleFrameCount : (int)wsReceiveReader.Length;
+                        ReadOnlyMemory<byte> receivedData = singleFrameBuffer != null
+                            ? singleFrameBuffer.AsMemory(0, singleFrameCount)
+                            : wsReceiveReader.GetBuffer().AsMemory(0, receivedLength);
 
                         // 在接收完数据后，应用端点级别的限速策略
                         string endpoint = null;
@@ -622,6 +650,17 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     }
                     finally
                     {
+                        // 归还单帧快路径借用的租用缓冲区（此时同步解析已完成：requestScheme/requestBody 已独立解析出，
+                        // 中间件的 ReceivedData 已按需复制，异步转发只引用 ctx，不再引用本缓冲区）。
+                        // Return the single-frame fast-path buffer. By now the synchronous parse is done
+                        // (requestScheme/requestBody are independent, middleware ReceivedData is copied if needed,
+                        // and the async forward only references ctx), so the buffer is no longer read.
+                        if (singleFrameBuffer != null)
+                        {
+                            ArrayPool<byte>.Shared.Return(singleFrameBuffer);
+                            singleFrameBuffer = null;
+                        }
+
                         // 保存Close状态信息（如果还没有保存）
                         if (result != null && !string.IsNullOrEmpty(result.CloseStatusDescription) && string.IsNullOrEmpty(wsCloseDesc))
                         {

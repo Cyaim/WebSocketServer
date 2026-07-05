@@ -395,8 +395,20 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 return;
             }
             encoding ??= DefaultEncoding;
-            var sendData = encoding.GetBytes(data);
-            await SendLocalAsync(sendData, messageType, sendData.Length <= 4 * 1024, cancellationToken: cancellationToken, timeout, sendBufferSize: (uint)sendBufferSize, sockets: socket);
+            // 编码到租用缓冲区，避免为每次发送分配一个 byte[]。租用缓冲区在整个异步发送期间存活，发送后归还。
+            // Encode into a pooled buffer to avoid a per-send byte[] allocation; the rental lives across
+            // the whole async send and is returned afterwards.
+            int rentSize = encoding.GetMaxByteCount(data.Length);
+            var rented = ArrayPool<byte>.Shared.Rent(rentSize);
+            try
+            {
+                int written = encoding.GetBytes(data.AsSpan(), rented.AsSpan());
+                await SendLocalAsync(rented.AsMemory(0, written), messageType, written <= 4 * 1024, cancellationToken: cancellationToken, timeout, sendBufferSize: (uint)sendBufferSize, sockets: socket);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
         }
 
         /// <summary>
@@ -425,6 +437,14 @@ namespace Cyaim.WebSocketServer.Infrastructure
         {
             if (data == null || socket == null || socket.LongLength < 1)
             {
+                return;
+            }
+            // 默认/UTF-8：直接序列化为 UTF-8 字节，省去中间 string 分配（WebSocket 文本本就是 UTF-8）。
+            // Default/UTF-8: serialize straight to UTF-8 bytes, skipping the intermediate string allocation.
+            if (encoding == null || ReferenceEquals(encoding, Encoding.UTF8))
+            {
+                var utf8 = JsonSerializer.SerializeToUtf8Bytes(data, options);
+                await SendLocalAsync(new ReadOnlyMemory<byte>(utf8), messageType, utf8.Length <= sendBufferSize, cancellationToken ?? CancellationToken.None, timeout, (uint)sendBufferSize, socket);
                 return;
             }
             await SendLocalAsync(JsonSerializer.Serialize(data, options), messageType, cancellationToken ?? CancellationToken.None, timeout, encoding, sendBufferSize, socket);
@@ -456,6 +476,14 @@ namespace Cyaim.WebSocketServer.Infrastructure
         {
             if (data == null || socket == null)
             {
+                return;
+            }
+            // 默认/UTF-8：直接序列化为 UTF-8 字节，省去中间 string 分配。
+            // Default/UTF-8: serialize straight to UTF-8 bytes, skipping the intermediate string.
+            if (encoding == null || ReferenceEquals(encoding, Encoding.UTF8))
+            {
+                var utf8 = JsonSerializer.SerializeToUtf8Bytes(data, options);
+                await SendLocalAsync(new ReadOnlyMemory<byte>(utf8), messageType, utf8.Length <= sendBufferSize, cancellationToken ?? CancellationToken.None, timeout, (uint)sendBufferSize, socket);
                 return;
             }
             await SendLocalAsync(JsonSerializer.Serialize(data, options), messageType, cancellationToken ?? CancellationToken.None, timeout, encoding, sendBufferSize, socket);

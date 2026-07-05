@@ -430,6 +430,11 @@ namespace Cyaim.WebSocketServer.MessagePack
                     long requestTime = DateTime.Now.Ticks;
                     WebSocketReceiveResult result = null;
                     SemaphoreSlim endPointSlim = null;
+                    // 单帧快路径：整条消息一次 ReceiveAsync 收全时借用的租用缓冲区（外层 finally 归还）。null=多帧重组。
+                    // Single-frame fast path: rented buffer borrowed when the whole message arrived in one
+                    // ReceiveAsync (returned in the outer finally). Null => multi-frame reassembly path.
+                    byte[] singleFrameBuffer = null;
+                    int singleFrameCount = 0;
                     try
                     {
                         // Connection level restrictions
@@ -489,14 +494,24 @@ namespace Cyaim.WebSocketServer.MessagePack
                                         CancellationToken.None);
                                 }
 
-                                await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
-
                                 // 记录消息接收指标
                                 var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
                                 _metricsCollector?.RecordMessageReceived(result.Count, currentNodeId, context.Request.Path);
 
                                 // 记录统计信息
                                 Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesReceived(context.Connection.Id, result.Count);
+
+                                // 单帧快路径：首帧即 EndOfMessage（wsReceiveReader 尚为空）时借用租用缓冲区解析，跳过整条负载拷贝。
+                                // Single-frame fast path: borrow the rented buffer and skip the full-payload copy.
+                                if ((result.EndOfMessage || result.CloseStatus.HasValue) && wsReceiveReader.Length == 0)
+                                {
+                                    singleFrameBuffer = buffer;
+                                    singleFrameCount = result.Count;
+                                    break;
+                                }
+
+                                // 多帧：写入 MemoryStream 重组
+                                await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
 
                                 if (result.EndOfMessage || result.CloseStatus.HasValue)
                                 {
@@ -516,7 +531,11 @@ namespace Cyaim.WebSocketServer.MessagePack
                             }
                             finally
                             {
-                                ArrayPool<byte>.Shared.Return(buffer);
+                                // 单帧快路径已转移缓冲区所有权（外层 finally 归还），此处不归还
+                                if (!ReferenceEquals(buffer, singleFrameBuffer))
+                                {
+                                    ArrayPool<byte>.Shared.Return(buffer);
+                                }
                             }
                         }
 
@@ -525,7 +544,9 @@ namespace Cyaim.WebSocketServer.MessagePack
                             break;
                         }
 
-                        if (wsReceiveReader.Capacity > wsReceiveReader.Length)
+                        // 单帧快路径未写入 MemoryStream（Length==0），不要把 Capacity 收缩为 0（否则下条多帧消息要重新扩容）。
+                        // Single-frame path didn't write the stream; don't shrink its Capacity to 0.
+                        if (singleFrameBuffer == null && wsReceiveReader.Capacity > wsReceiveReader.Length)
                         {
                             wsReceiveReader.Capacity = (int)wsReceiveReader.Length;
                         }
@@ -536,20 +557,25 @@ namespace Cyaim.WebSocketServer.MessagePack
                             continue;
                         }
 
+                        // 有效数据：单帧快路径取自租用缓冲区（零拷贝，未经 MemoryStream）；多帧取 MemoryStream 缓冲。
+                        // Valid data: single-frame reads from the rented buffer (zero-copy); multi-frame from the stream.
+                        byte[] msgArray = singleFrameBuffer ?? wsReceiveReader.GetBuffer();
+                        int msgLen = singleFrameBuffer != null ? singleFrameCount : (int)wsReceiveReader.Length;
+
                         // 在接收完数据后，应用端点级别的限速策略
                         string endpoint = null;
-                        if (bandwidthLimitManager != null && wsReceiveReader.Length > 0)
+                        if (bandwidthLimitManager != null && msgLen > 0)
                         {
                             try
                             {
-                                endpoint = FindTargetFromMessagePack(wsReceiveReader.GetBuffer());
+                                endpoint = FindTargetFromMessagePack(msgArray.AsSpan(0, msgLen));
                                 if (!string.IsNullOrEmpty(endpoint))
                                 {
                                     await bandwidthLimitManager.WaitForBandwidthAsync(
                                         context.Request.Path,
                                         context.Connection.Id,
                                         endpoint,
-                                        (int)wsReceiveReader.Length,
+                                        msgLen,
                                         context.Connection.RemoteIpAddress?.ToString(),
                                         CancellationToken.None);
                                 }
@@ -565,7 +591,7 @@ namespace Cyaim.WebSocketServer.MessagePack
                         {
                             if (string.IsNullOrEmpty(endpoint))
                             {
-                                endpoint = FindTargetFromMessagePack(wsReceiveReader.GetBuffer());
+                                endpoint = FindTargetFromMessagePack(msgArray.AsSpan(0, msgLen));
                             }
                             if (endpoint != null && webSocketOption.MaxEndPointParallelForwardLimit.TryGetValue(endpoint, out endPointSlim) && endPointSlim != null)
                             {
@@ -579,8 +605,9 @@ namespace Cyaim.WebSocketServer.MessagePack
 
                         try
                         {
-                            var bufferData = wsReceiveReader.GetBuffer();
-                            requestScheme = MessagePackSerializer.Deserialize<MessagePackRequestScheme>(bufferData);
+                            // MessagePack 从偏移 0 读取一个对象，忽略尾部空闲；单帧缓冲区的 slack 与 GetBuffer 的 slack 处理一致。
+                            // MessagePack reads one object from offset 0, ignoring trailing slack (same as GetBuffer()).
+                            requestScheme = MessagePackSerializer.Deserialize<MessagePackRequestScheme>(msgArray);
                             
                             // 将 MessagePack Body 转换为 JsonObject 以兼容现有的 MvcDistributeAsync
                             if (requestScheme?.Body != null)
@@ -643,7 +670,7 @@ namespace Cyaim.WebSocketServer.MessagePack
                             Options = webSocketOption,
                             MessageType = result.MessageType,
                             RequestTimeTicks = requestTime,
-                            ReceivedData = webSocketOption.MiddlewareCount > 0 ? wsReceiveReader.GetBuffer().AsMemory(0, (int)wsReceiveReader.Length).ToArray() : default,
+                            ReceivedData = webSocketOption.MiddlewareCount > 0 ? msgArray.AsMemory(0, msgLen).ToArray() : default,
                             Request = mvcRequestScheme,
                             RequestBody = requestBody,
                         };
@@ -669,6 +696,14 @@ namespace Cyaim.WebSocketServer.MessagePack
                     }
                     finally
                     {
+                        // 归还单帧快路径借用的租用缓冲区（同步反序列化已完成，异步转发只引用 ctx）。
+                        // Return the single-frame fast-path buffer (sync deserialize done; async forward uses only ctx).
+                        if (singleFrameBuffer != null)
+                        {
+                            ArrayPool<byte>.Shared.Return(singleFrameBuffer);
+                            singleFrameBuffer = null;
+                        }
+
                         wsCloseDesc = result?.CloseStatusDescription;
 
                         wsReceiveReader.Flush();
