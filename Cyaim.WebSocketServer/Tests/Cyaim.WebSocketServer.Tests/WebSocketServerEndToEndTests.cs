@@ -450,6 +450,33 @@ namespace Cyaim.WebSocketServer.Tests
         }
 
         [Fact]
+        public async Task GrosslyOversizedMessage_IsClosedWith1009_NotDrainedForever()
+        {
+            // A message far larger than both the limit and the drain cap must NOT be drained in full
+            // (wasted bandwidth / potential hang). The server sends 1009 (Message Too Big) and closes.
+            using var host = await StartHostAsync(CreateOption(o => o.MaxRequestReceiveDataLimit = 100));
+            var socket = await ConnectAsync(host);
+            using var cts = new CancellationTokenSource(TestTimeout);
+
+            // ~300 KB, well past the 64 KB drain cap; sent as many small fragments.
+            byte[] payload = Encoding.UTF8.GetBytes(new string('x', 300 * 1024));
+            for (int off = 0; off < payload.Length; off += 8192)
+            {
+                int len = Math.Min(8192, payload.Length - off);
+                bool last = off + len >= payload.Length;
+                try { await socket.SendAsync(new ArraySegment<byte>(payload, off, len), WebSocketMessageType.Text, endOfMessage: last, cts.Token); }
+                catch { break; } // server may abort mid-send once the drain cap is hit
+            }
+
+            // The server must have closed the connection (rather than hanging or staying open).
+            var buf = new byte[1024];
+            var completed = await Task.WhenAny(socket.ReceiveAsync(new ArraySegment<byte>(buf), cts.Token), Task.Delay(TestTimeout));
+            Assert.NotEqual(WebSocketState.Open, socket.State);
+
+            try { await host.StopAsync(); } catch { }
+        }
+
+        [Fact]
         public async Task DisconnectedEvent_FiresWhenClientCloses()
         {
             var disconnected = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -1,4 +1,6 @@
+using System.Net.WebSockets;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Cyaim.WebSocketServer.Infrastructure
 {
@@ -57,6 +59,55 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 return;
             }
             Interlocked.Add(ref _current, -bytes);
+        }
+
+        /// <summary>
+        /// Bytes drained before giving up on an oversized message and closing the connection.
+        /// 在放弃一条超限消息并关闭连接前，最多排空的字节数。
+        /// </summary>
+        public const long DefaultMaxDrainBytes = 64 * 1024;
+
+        /// <summary>
+        /// A message tripped the size limit (or the global budget) and must be discarded. Read (and
+        /// discard, no memory growth) the rest of THIS message so its remaining frames aren't misread
+        /// as a new message — but only up to <paramref name="maxDrainBytes"/>. Reading stops exactly at
+        /// this message's EndOfMessage boundary, so the NEXT message is never consumed.
+        ///
+        /// If the message is grossly oversized or never ends (an unbounded/streaming message), draining
+        /// the whole thing would waste bandwidth and could hang the connection forever, so instead a
+        /// 1009 (Message Too Big) close frame is sent and the socket is aborted; the connection loop then
+        /// exits promptly at its next state check.
+        ///
+        /// 超限消息需丢弃：读并丢弃(内存不增长)本条消息的剩余帧,避免残余帧被当作新消息误读——但最多排空
+        /// maxDrainBytes。到本条消息 EndOfMessage 即停,绝不会吃掉下一条消息。若消息过大或永不结束(无界/流式),
+        /// 排空整条会浪费带宽且可能永久挂住连接,故改为发送 1009(Message Too Big)并 Abort,连接循环随后即退出。
+        /// </summary>
+        /// <returns>true if the connection was aborted (too large to drain); false if fully drained and the connection can continue.</returns>
+        public static async Task<bool> DrainOversizedAsync(
+            WebSocket webSocket, byte[] buffer, WebSocketReceiveResult result, long maxDrainBytes = DefaultMaxDrainBytes)
+        {
+            long drained = 0;
+            while (result != null && !(result.EndOfMessage || result.CloseStatus.HasValue))
+            {
+                result = await webSocket.ReceiveAsync(new System.ArraySegment<byte>(buffer), CancellationToken.None).ConfigureAwait(false);
+                drained += result.Count;
+                if (drained > maxDrainBytes)
+                {
+                    // Grossly oversized / unbounded: notify the client (1009) without waiting for its ack,
+                    // then abort so the receive loop exits at its next state check instead of draining forever.
+                    try
+                    {
+                        if (webSocket.State == WebSocketState.Open)
+                        {
+                            await webSocket.CloseOutputAsync(WebSocketCloseStatus.MessageTooBig, "Request exceeds size limit", CancellationToken.None).ConfigureAwait(false);
+                        }
+                    }
+                    catch { /* best effort */ }
+                    webSocket.Abort();
+                    return true;
+                }
+            }
+            return false;
         }
     }
 }

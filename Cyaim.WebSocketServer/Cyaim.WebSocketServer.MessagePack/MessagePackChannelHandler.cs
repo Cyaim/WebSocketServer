@@ -482,11 +482,8 @@ namespace Cyaim.WebSocketServer.MessagePack
                                 if (webSocketOption.MaxRequestReceiveDataLimit is long maxLen && accumulatedLen > maxLen)
                                 {
                                     logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
-                                    // 排空该超限消息剩余帧,避免残余帧误读。 / Drain the rest of the oversized message.
-                                    while (!(result.EndOfMessage || result.CloseStatus.HasValue))
-                                    {
-                                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-                                    }
+                                    // 有界排空该超限消息剩余帧；过大/无界则 1009+Abort。 / Bounded-drain; 1009+Abort if grossly oversized.
+                                    await Cyaim.WebSocketServer.Infrastructure.WebSocketReceiveMemoryGovernor.DrainOversizedAsync(webSocket, buffer, result);
                                     goto CONTINUE_RECEIVE;
                                 }
 
@@ -535,11 +532,8 @@ namespace Cyaim.WebSocketServer.MessagePack
                                 if (!Cyaim.WebSocketServer.Infrastructure.WebSocketReceiveMemoryGovernor.TryReserve(result.Count))
                                 {
                                     logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
-                                    // 排空该消息剩余帧。 / Drain remaining frames of this rejected message.
-                                    while (!(result.EndOfMessage || result.CloseStatus.HasValue))
-                                    {
-                                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-                                    }
+                                    // 有界排空被拒消息剩余帧。 / Bounded-drain the rejected message's remaining frames.
+                                    await Cyaim.WebSocketServer.Infrastructure.WebSocketReceiveMemoryGovernor.DrainOversizedAsync(webSocket, buffer, result);
                                     goto CONTINUE_RECEIVE;
                                 }
                                 reservedReceiveBytes += result.Count;
