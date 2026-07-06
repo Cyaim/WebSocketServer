@@ -81,6 +81,9 @@ jobs:
         run: |
           set +e
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          # Capture the full build output to a log that is uploaded as a release asset, so build
+          # failures (e.g. the C# pack) can be diagnosed without access to the Actions run logs.
+          exec > >(tee "$GITHUB_WORKSPACE/artifacts/build-log.txt") 2>&1
           C="$GITHUB_WORKSPACE/$CLIENTS_DIR"
 
           echo "::group::C# (NuGet)"
