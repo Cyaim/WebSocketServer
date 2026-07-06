@@ -52,19 +52,27 @@ jobs:
             echo "version=${GITHUB_REF_NAME#client-v}" >> "$GITHUB_OUTPUT"
           fi
 
+      # Every toolchain setup is non-fatal: a single unavailable SDK must never abort the job before
+      # the GitHub Release is created. Whatever builds gets published.
       - uses: actions/setup-dotnet@v4
+        continue-on-error: true
         with:
           dotnet-version: |
             8.0.x
             9.0.x
             10.0.x
       - uses: actions/setup-node@v4
+        continue-on-error: true
         with: { node-version: '20' }
       - uses: actions/setup-python@v5
+        continue-on-error: true
         with: { python-version: '3.12' }
       - uses: dtolnay/rust-toolchain@stable
+        continue-on-error: true
       - uses: dart-lang/setup-dart@v1
+        continue-on-error: true
       - uses: actions/setup-java@v4
+        continue-on-error: true
         with: { distribution: 'temurin', java-version: '11' }
 
       - name: Build all client packages
