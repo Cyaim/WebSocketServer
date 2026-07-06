@@ -18,18 +18,25 @@ enum SerializationProtocol {
 class WebSocketClientOptions {
   /// Serialization protocol (default: Json)
   /// 序列化协议（默认：Json）
-  SerializationProtocol protocol = SerializationProtocol.json;
+  SerializationProtocol protocol;
 
   /// Whether to validate all methods have corresponding endpoints (default: false)
   /// 是否验证所有方法都有对应的端点（默认：false）
-  bool validateAllMethods = false;
+  bool validateAllMethods;
 
   /// Whether to fetch endpoints immediately or lazily (default: false)
   /// 是否立即获取端点或延迟获取（默认：false）
-  bool lazyLoadEndpoints = false;
+  bool lazyLoadEndpoints;
 
   /// Whether to throw exception if endpoint not found (default: true)
   /// 如果找不到端点是否抛出异常（默认：true）
-  bool throwOnEndpointNotFound = true;
+  bool throwOnEndpointNotFound;
+
+  WebSocketClientOptions({
+    this.protocol = SerializationProtocol.json,
+    this.validateAllMethods = false,
+    this.lazyLoadEndpoints = false,
+    this.throwOnEndpointNotFound = true,
+  });
 }
 

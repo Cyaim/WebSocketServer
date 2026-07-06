@@ -6,7 +6,7 @@ namespace Cyaim.WebSocketServer.Client
     /// MessagePack request scheme / MessagePack 请求方案
     /// </summary>
     [MessagePackObject]
-    internal class MessagePackRequestScheme
+    public class MessagePackRequestScheme
     {
         [Key(0)]
         public string Id { get; set; } = string.Empty;

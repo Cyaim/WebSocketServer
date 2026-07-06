@@ -49,9 +49,9 @@ export class WebSocketClientFactory {
                                 );
                         }
 
-                        const apiResponse: ApiResponse<
+                        const apiResponse = (await response.json()) as ApiResponse<
                                 WebSocketEndpointInfo[]
-                        > = await response.json();
+                        >;
 
                         if (apiResponse.success && apiResponse.data) {
                                 this.cachedEndpoints = apiResponse.data;
@@ -101,7 +101,8 @@ export class WebSocketClientFactory {
                 interfaceDefinition: T,
                 endpoints: WebSocketEndpointInfo[] | null
         ): T {
-                const proxy = {} as T;
+                const proxy: Record<string, (...args: any[]) => Promise<any>> =
+                        {};
 
                 for (const [methodName, method] of Object.entries(
                         interfaceDefinition
@@ -216,7 +217,7 @@ export class WebSocketClientFactory {
                         };
                 }
 
-                return proxy;
+                return proxy as unknown as T;
         }
 }
 

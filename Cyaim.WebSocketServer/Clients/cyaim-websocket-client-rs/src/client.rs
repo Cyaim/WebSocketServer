@@ -84,7 +84,10 @@ impl WebSocketClient {
                         }
                     }
                     Ok(Message::Binary(bytes)) if protocol == SerializationProtocol::MessagePack => {
-                        if let Ok(response) = rmp_serde::from_slice::<MvcResponseScheme>(&bytes) {
+                        // Server MessagePack response is a 7-element [Key] array; decode via the
+                        // positional MessagePackResponseScheme then convert.
+                        if let Ok(mp) = rmp_serde::from_slice::<crate::types::MessagePackResponseScheme>(&bytes) {
+                            let response: MvcResponseScheme = mp.into();
                             let mut pending = pending_clone.lock().await;
                             if let Some(tx) = pending.remove(&response.id) {
                                 let _ = tx.send(response);

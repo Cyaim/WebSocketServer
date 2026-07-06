@@ -59,7 +59,10 @@ class WebSocketClient {
 
     // 根据协议选择序列化方式
     if (options.protocol == SerializationProtocol.messagePack) {
-      final requestBytes = serialize(request);
+      // 服务端 MessagePackRequestScheme 使用整数 [Key(0)]Id/[Key(1)]Target/[Key(2)]Body（数组格式），
+      // 因此按 [id, target, body] 数组序列化（而非命名字段 Map）。
+      // Encode as a [id, target, body] array to match the server's integer [Key] contract.
+      final requestBytes = serialize(<dynamic>[requestId, target, requestBody]);
       _channel!.sink.add(requestBytes);
     } else {
       _channel!.sink.add(jsonEncode(request));
@@ -115,14 +118,16 @@ class WebSocketClient {
     }
     try {
       final decoded = deserialize(bytes);
-      // 确保 decoded 是 Map 类型
-      final Map<String, dynamic> responseMap;
-      if (decoded is Map) {
-        responseMap = Map<String, dynamic>.from(decoded);
+      // 服务端 MessagePack 响应为整数 [Key] 数组（List）；兼容极少数 Map 情形。
+      // The server response decodes to a positional List; also tolerate a Map.
+      final MvcResponseScheme response;
+      if (decoded is List) {
+        response = MvcResponseScheme.fromList(decoded);
+      } else if (decoded is Map) {
+        response = MvcResponseScheme.fromJson(Map<String, dynamic>.from(decoded));
       } else {
         throw FormatException('Invalid MessagePack response format');
       }
-      final response = MvcResponseScheme.fromJson(responseMap);
       final completer = _pendingResponses.remove(response.id);
       if (completer != null) {
         completer.complete(response);
@@ -155,13 +160,28 @@ class MvcResponseScheme {
     this.body,
   });
 
+  /// From a JSON map. The server serializes responses in PascalCase (Status/Id/Msg/Body);
+  /// lowercase is tolerated as a fallback. / 服务端响应为 PascalCase，同时容忍小写。
   factory MvcResponseScheme.fromJson(Map<String, dynamic> json) {
     return MvcResponseScheme(
-      id: json['id'] as String,
-      target: json['target'] as String,
-      status: json['status'] as int,
-      msg: json['msg'] as String?,
-      body: json['body'],
+      id: (json['Id'] ?? json['id'] ?? '') as String,
+      target: (json['Target'] ?? json['target'] ?? '') as String,
+      status: (json['Status'] ?? json['status'] ?? 0) as int,
+      msg: (json['Msg'] ?? json['msg']) as String?,
+      body: json['Body'] ?? json['body'],
+    );
+  }
+
+  /// From a MessagePack [Key] array, decoded as a positional list:
+  /// [Status(0), Msg(1), RequestTime(2), CompleteTime(3), Id(4), Target(5), Body(6)].
+  /// 服务端 MessagePack 响应为整数 [Key] 数组（按位置解码）。
+  factory MvcResponseScheme.fromList(List<dynamic> list) {
+    return MvcResponseScheme(
+      id: (list.length > 4 ? list[4] : '') as String,
+      target: (list.length > 5 ? list[5] : '') as String,
+      status: (list.isNotEmpty ? list[0] : 0) as int,
+      msg: (list.length > 1 ? list[1] : null) as String?,
+      body: list.length > 6 ? list[6] : null,
     );
   }
 }

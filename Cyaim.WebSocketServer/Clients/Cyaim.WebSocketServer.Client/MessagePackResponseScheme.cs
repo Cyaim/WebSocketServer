@@ -6,7 +6,7 @@ namespace Cyaim.WebSocketServer.Client
     /// MessagePack response scheme / MessagePack 响应方案
     /// </summary>
     [MessagePackObject]
-    internal class MessagePackResponseScheme
+    public class MessagePackResponseScheme
     {
         [Key(0)]
         public int Status { get; set; }

@@ -243,28 +243,27 @@ namespace Cyaim.WebSocketServer.Client
                 }
             }
 
-            // Build request body from method parameters / 从方法参数构建请求体
+            // Build request body as a { parameterName: value } object for BOTH single- and multi-parameter
+            // methods. The server binds endpoint parameters by name from the request body's properties
+            // (a bare, non-object body binds nothing), so single-parameter methods must also be wrapped.
+            // This is universal: a single complex-object parameter also binds correctly because the server
+            // first tries the parameter name, then expands the object's properties.
+            // 请求体统一构建为 { 形参名: 值 } 对象（单参与多参一致）。服务端按形参名从请求体属性绑定，
+            // 裸值（非对象）无法绑定，因此单参数方法也必须包成对象。单个复杂对象参数同样正确（服务端先按参数名、
+            // 再展开对象属性）。
             object? requestBody = null;
             if (args != null && args.Length > 0)
             {
-                if (args.Length == 1)
+                var paramNames = targetMethod.GetParameters().Select(p => p.Name).ToArray();
+                var dict = new Dictionary<string, object?>();
+                for (int i = 0; i < args.Length && i < paramNames.Length; i++)
                 {
-                    requestBody = args[0];
-                }
-                else
-                {
-                    // Create anonymous object from parameters / 从参数创建匿名对象
-                    var paramNames = targetMethod.GetParameters().Select(p => p.Name).ToArray();
-                    var dict = new Dictionary<string, object?>();
-                    for (int i = 0; i < args.Length && i < paramNames.Length; i++)
+                    if (paramNames[i] != null)
                     {
-                        if (paramNames[i] != null)
-                        {
-                            dict[paramNames[i]!] = args[i];
-                        }
+                        dict[paramNames[i]!] = args[i];
                     }
-                    requestBody = dict;
                 }
+                requestBody = dict;
             }
 
             // Get return type / 获取返回类型

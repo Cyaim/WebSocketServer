@@ -24,6 +24,14 @@ public class WebSocketClientFactory {
     private final OkHttpClient httpClient = new OkHttpClient();
     private final Gson gson = new Gson();
 
+    public WebSocketClientFactory(String serverBaseUrl) {
+        this(serverBaseUrl, "/ws", new WebSocketClientOptions());
+    }
+
+    public WebSocketClientFactory(String serverBaseUrl, String channel) {
+        this(serverBaseUrl, channel, new WebSocketClientOptions());
+    }
+
     public WebSocketClientFactory(String serverBaseUrl, String channel, WebSocketClientOptions options) {
         this.serverBaseUrl = serverBaseUrl.replaceAll("/$", "");
         this.channel = channel;

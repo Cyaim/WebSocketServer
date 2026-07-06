@@ -20,6 +20,20 @@ export interface MvcResponseScheme {
 }
 
 /**
+ * Normalize a server JSON response (PascalCase: Status/Id/Msg/Body) to the client's lowercase shape.
+ * Tolerant of camelCase too. / 将服务端 PascalCase 响应归一化为客户端小写形状（同时容忍 camelCase）。
+ */
+function normalizeResponse(r: any): MvcResponseScheme {
+        return {
+                id: r.Id ?? r.id,
+                target: r.Target ?? r.target,
+                status: r.Status ?? r.status ?? 0,
+                msg: r.Msg ?? r.msg,
+                body: r.Body ?? r.body,
+        };
+}
+
+/**
  * WebSocket client for connecting to Cyaim.WebSocketServer
  * 用于连接到 Cyaim.WebSocketServer 的 WebSocket 客户端
  */
@@ -121,8 +135,14 @@ export class WebSocketClient {
                                 this.options.protocol ===
                                 SerializationProtocol.MessagePack
                         ) {
-                                // 使用 MessagePack 序列化
-                                const requestData = encode(request);
+                                // 服务端 MessagePackRequestScheme 使用整数 [Key(0)]Id/[Key(1)]Target/[Key(2)]Body，
+                                // 即 MessagePack 数组格式，因此按 [id, target, body] 数组编码（而非命名字段的 map）。
+                                // The server scheme uses integer [Key] (array format), so encode as [id, target, body].
+                                const requestData = encode([
+                                        request.id,
+                                        request.target,
+                                        request.body ?? null,
+                                ]);
                                 this.webSocket!.send(requestData);
                         } else {
                                 // 使用 JSON 序列化
@@ -152,19 +172,16 @@ export class WebSocketClient {
                                 SerializationProtocol.MessagePack
                         ) {
                                 // 处理二进制消息（MessagePack）
+                                let buffer: Uint8Array;
                                 if (
                                         data instanceof Buffer ||
                                         data instanceof Uint8Array
                                 ) {
-                                        response = decode(
-                                                data
-                                        ) as MvcResponseScheme;
+                                        buffer = data as Uint8Array;
                                 } else if (Array.isArray(data)) {
-                                        // 处理分片消息
-                                        const buffer = Buffer.concat(data);
-                                        response = decode(
-                                                buffer
-                                        ) as MvcResponseScheme;
+                                        buffer = Buffer.concat(data);
+                                } else if (data instanceof ArrayBuffer) {
+                                        buffer = new Uint8Array(data);
                                 } else {
                                         console.error(
                                                 "Unexpected MessagePack data type:",
@@ -172,10 +189,24 @@ export class WebSocketClient {
                                         );
                                         return;
                                 }
+                                // 服务端 MessagePackResponseScheme 使用整数 [Key]：
+                                // [0]Status [1]Msg [2]RequestTime [3]CompleteTime [4]Id [5]Target [6]Body（数组格式）。
+                                // The server response scheme uses integer [Key], decoded as an array.
+                                const arr = decode(buffer) as any;
+                                response = Array.isArray(arr)
+                                        ? {
+                                                  status: arr[0],
+                                                  msg: arr[1],
+                                                  id: arr[4],
+                                                  target: arr[5],
+                                                  body: arr[6],
+                                          }
+                                        : normalizeResponse(arr);
                         } else {
-                                // 处理文本消息（JSON）
+                                // 处理文本消息（JSON）。服务端响应为 PascalCase（Status/Id/Msg/Body）。
+                                // JSON response is PascalCase; normalize to the client's lowercase shape.
                                 const message = data.toString();
-                                response = JSON.parse(message);
+                                response = normalizeResponse(JSON.parse(message));
                         }
 
                         const pending = this.pendingResponses.get(response.id);

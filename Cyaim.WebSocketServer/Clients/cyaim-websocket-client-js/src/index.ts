@@ -1,7 +1,9 @@
-import WebSocket from "ws";
 import { WebSocketClient } from "./WebSocketClient";
 import { WebSocketClientFactory } from "./WebSocketClientFactory";
-import { WebSocketClientOptions } from "./WebSocketClientOptions";
+import {
+        WebSocketClientOptions,
+        SerializationProtocol,
+} from "./WebSocketClientOptions";
 import { WebSocketEndpointInfo } from "./WebSocketEndpointInfo";
 
 export {

@@ -33,8 +33,17 @@ class WebSocketClientFactory:
                 data = await response.json()
                 
                 if data.get('success') and data.get('data'):
+                    # Server JSON uses camelCase (methodPath/fullName); map to the dataclass fields.
+                    # 服务端 JSON 为 camelCase（methodPath/fullName），映射到数据类字段。
                     self._cached_endpoints = [
-                        WebSocketEndpointInfo(**ep) for ep in data['data']
+                        WebSocketEndpointInfo(
+                            controller=ep.get('controller', ''),
+                            action=ep.get('action', ''),
+                            method_path=ep.get('methodPath') or ep.get('method_path', ''),
+                            methods=ep.get('methods', []),
+                            full_name=ep.get('fullName') or ep.get('full_name', ''),
+                            target=ep.get('target', ''),
+                        ) for ep in data['data']
                     ]
                     return self._cached_endpoints
                 
