@@ -88,12 +88,14 @@ jobs:
 
           echo "::group::C# (NuGet)"
           dotnet --list-sdks || true
-          # Disable analyzers / warnings-as-errors and treat this as a plain library pack.
-          # The client pulls Microsoft.CodeAnalysis + EnforceExtendedAnalyzerRules, whose RS-rule
-          # enforcement differs across SDKs and fails the runner build; none of it is needed to pack.
+          CSPROJ="$C/Cyaim.WebSocketServer.Client/Cyaim.WebSocketServer.Client.csproj"
           CS_PROPS="-p:RunAnalyzers=false -p:EnforceExtendedAnalyzerRules=false -p:TreatWarningsAsErrors=false -p:EnableNETAnalyzers=false"
-          dotnet pack "$C/Cyaim.WebSocketServer.Client/Cyaim.WebSocketServer.Client.csproj" -c Release $CS_PROPS -o "$GITHUB_WORKSPACE/artifacts" \
-            || dotnet pack "$C/Cyaim.WebSocketServer.Client/Cyaim.WebSocketServer.Client.csproj" -c Release $CS_PROPS -p:TargetFrameworks=net8.0 -o "$GITHUB_WORKSPACE/artifacts" \
+          # Build first (the project sets GeneratePackageOnBuild, so the build itself produces the
+          # .nupkg), then pack --no-build. This avoids NU5026 ("dll to be packed was not found"),
+          # which happens when pack -o runs before the per-TFM build output lands.
+          dotnet build "$CSPROJ" -c Release $CS_PROPS
+          dotnet pack "$CSPROJ" -c Release $CS_PROPS --no-build -o "$GITHUB_WORKSPACE/artifacts" \
+            || find "$C/Cyaim.WebSocketServer.Client" -path "*/bin/Release/*" -name "*.nupkg" -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \; \
             || echo "C# pack failed"
           echo "::endgroup::"
 
