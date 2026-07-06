@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Cyaim.WebSocketServer.Dashboard.Models;
 using Cyaim.WebSocketServer.Dashboard.Services;
 using Cyaim.WebSocketServer.Infrastructure.Cluster;
@@ -221,8 +222,10 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
             try
             {
                 var clusterManager = GlobalClusterCenter.ClusterManager;
-                var total = clusterManager?.GetTotalConnectionCount() ?? 0;
-                var local = clusterManager?.GetLocalConnectionCount() ?? 0;
+                // Fall back to the local connection dictionary in standalone (no-cluster) mode.
+                // 单机（无集群）模式回退到本地连接字典。
+                var local = clusterManager?.GetLocalConnectionCount() ?? MvcChannelHandler.Clients?.Count ?? 0;
+                var total = clusterManager?.GetTotalConnectionCount() ?? local;
 
                 var result = new ConnectionCountInfo
                 {
@@ -244,6 +247,59 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                     Success = false,
                     Error = ex.Message
                 });
+            }
+        }
+
+        /// <summary>
+        /// Disconnect (close) a connection — management operation.
+        /// 断开（关闭）一个连接——管理操作。
+        /// </summary>
+        /// <param name="connectionId">Connection ID / 连接 ID</param>
+        [HttpDelete("{connectionId}")]
+        public async Task<ActionResult<ApiResponse<bool>>> Disconnect(string connectionId)
+        {
+            try
+            {
+                // Local connection: close the socket directly.
+                // 本地连接：直接关闭 socket。
+                if (MvcChannelHandler.Clients != null &&
+                    MvcChannelHandler.Clients.TryGetValue(connectionId, out var socket) && socket != null)
+                {
+                    try
+                    {
+                        if (socket.State == System.Net.WebSockets.WebSocketState.Open ||
+                            socket.State == System.Net.WebSockets.WebSocketState.CloseReceived)
+                        {
+                            await socket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure,
+                                "Closed by dashboard", System.Threading.CancellationToken.None);
+                        }
+                        else
+                        {
+                            socket.Abort();
+                        }
+                    }
+                    catch
+                    {
+                        socket.Abort();
+                    }
+                    return Ok(new ApiResponse<bool> { Success = true, Data = true });
+                }
+
+                // Not a local connection. (Routing a disconnect to a remote cluster node is not yet
+                // supported; the owning node's dashboard can close it.)
+                // 非本地连接（跨节点断开暂未支持，可在归属节点的看板上关闭）。
+                await Task.CompletedTask;
+                return NotFound(new ApiResponse<bool>
+                {
+                    Success = false,
+                    Data = false,
+                    Error = $"Connection {connectionId} not found on this node"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error disconnecting client");
+                return StatusCode(500, new ApiResponse<bool> { Success = false, Error = ex.Message });
             }
         }
     }

@@ -145,15 +145,13 @@ namespace Cyaim.WebSocketServer.Dashboard.Middlewares
         /// <returns>HTML content / HTML 内容</returns>
         private string GetDashboardHtml()
         {
+            // Allow overriding with a custom wwwroot/public/index.html if one is deployed;
+            // otherwise serve the self-contained embedded console (works as a NuGet library).
+            // 若部署了自定义 index.html 则用之，否则提供自包含的内嵌控制台（作为 NuGet 库也可用）。
             try
             {
-                // Try to load from wwwroot/public/index.html / 尝试从 wwwroot/public/index.html 加载
                 var htmlPath = System.IO.Path.Combine(
-                    AppDomain.CurrentDomain.BaseDirectory,
-                    "wwwroot",
-                    "public",
-                    "index.html");
-
+                    AppDomain.CurrentDomain.BaseDirectory, "wwwroot", "public", "index.html");
                 if (System.IO.File.Exists(htmlPath))
                 {
                     return System.IO.File.ReadAllText(htmlPath);
@@ -161,23 +159,11 @@ namespace Cyaim.WebSocketServer.Dashboard.Middlewares
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to load dashboard HTML from file, using default");
+                _logger.LogWarning(ex, "Failed to load custom dashboard HTML, using the embedded console");
             }
 
-            // Fallback to default HTML / 回退到默认 HTML
-            return @"<!DOCTYPE html>
-<html lang=""en"">
-<head>
-    <meta charset=""UTF-8"">
-    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
-    <title>WebSocketServer Dashboard</title>
-    <link rel=""stylesheet"" href=""/dashboard/app.css"">
-</head>
-<body>
-    <div id=""app""></div>
-    <script src=""/dashboard/app.js""></script>
-</body>
-</html>";
+            // Embedded management console. {BASE} is the API route prefix served by the controllers.
+            return DashboardUi.Html.Replace("{BASE}", "/ws_server/api");
         }
     }
 }

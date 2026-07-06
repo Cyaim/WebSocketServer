@@ -44,18 +44,24 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                 var clusterManager = Infrastructure.Cluster.GlobalClusterCenter.ClusterManager;
                 var clusterContext = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext;
                 
-                var currentNodeId = clusterContext?.NodeId ?? "unknown";
-                var isCurrentNodeLeader = clusterManager?.IsLeader() ?? false;
-                var totalNodes = nodes.Count;
-                var connectedNodes = nodes.Count(n => n.IsConnected);
-                var totalConnections = clusterManager?.GetTotalConnectionCount() ?? 0;
-                var localConnections = clusterManager?.GetLocalConnectionCount() ?? 0;
+                // Standalone (single-node, no cluster) is a valid, healthy mode. Fall back to the
+                // local connection dictionary so counts/health are accurate without a cluster.
+                // 单机（无集群）是有效且健康的模式；无集群时回退到本地连接字典以给出正确的计数与健康状态。
+                var isStandalone = clusterManager == null || clusterContext == null;
+                var localCount = Infrastructure.Handlers.MvcHandler.MvcChannelHandler.Clients?.Count ?? 0;
+
+                var currentNodeId = clusterContext?.NodeId ?? "standalone";
+                var isCurrentNodeLeader = clusterManager?.IsLeader() ?? true;   // standalone node "leads" itself
+                var totalNodes = isStandalone ? 1 : nodes.Count;
+                var connectedNodes = isStandalone ? 1 : nodes.Count(n => n.IsConnected);
+                var totalConnections = clusterManager?.GetTotalConnectionCount() ?? localCount;
+                var localConnections = clusterManager?.GetLocalConnectionCount() ?? localCount;
                 var healthyNodes = connectedNodes;
-                var hasLeader = isCurrentNodeLeader || nodes.Any(n => n.IsLeader);
+                var hasLeader = isStandalone || isCurrentNodeLeader || nodes.Any(n => n.IsLeader);
 
                 var healthStatus = new ClusterHealthStatus
                 {
-                    IsHealthy = connectedNodes > 0 && totalNodes > 0,
+                    IsHealthy = isStandalone || (connectedNodes > 0 && totalNodes > 0),
                     TotalNodes = totalNodes,
                     HealthyNodes = healthyNodes,
                     UnhealthyNodes = totalNodes - healthyNodes,
@@ -65,7 +71,8 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                     {
                         { "CurrentNodeId", currentNodeId },
                         { "IsCurrentNodeLeader", isCurrentNodeLeader },
-                        { "LocalConnections", localConnections }
+                        { "LocalConnections", localConnections },
+                        { "Mode", isStandalone ? "standalone" : "cluster" }
                     }
                 };
 
