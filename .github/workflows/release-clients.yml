@@ -1,0 +1,199 @@
+name: Release Client Libraries
+
+# Publishes all six client libraries to a GitHub Release (artifacts attached)
+# and then to each language's package registry.
+#
+# Trigger: push a tag like `client-v2.0.0`, or run manually (workflow_dispatch).
+#
+# Required repository secrets (each publish step is skipped if its secret is absent,
+# so you can enable registries incrementally):
+#   NPM_TOKEN          - npm automation token           (JS  -> npmjs.com)
+#   PYPI_TOKEN         - PyPI API token                 (Python -> pypi.org)
+#   CARGO_TOKEN        - crates.io API token            (Rust -> crates.io)
+#   NUGET_API_KEY      - NuGet API key                  (C#  -> nuget.org)
+#   OSSRH_USERNAME     - Sonatype OSSRH user            (Java -> Maven Central)
+#   OSSRH_PASSWORD     - Sonatype OSSRH password/token
+#   MAVEN_GPG_PRIVATE_KEY / MAVEN_GPG_PASSPHRASE  - GPG signing for Maven Central
+# pub.dev (Dart) uses GitHub OIDC automated publishing — configure it on pub.dev
+# for this repo (no secret needed); the job requests an id-token.
+
+on:
+  push:
+    tags:
+      - 'client-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 2.0.0)'
+        required: true
+
+permissions:
+  contents: write        # create releases / upload assets
+  id-token: write        # pub.dev OIDC
+
+env:
+  CLIENTS_DIR: Cyaim.WebSocketServer/Clients
+
+jobs:
+  # 1) Build every client package artifact and create the GitHub Release with them attached.
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#client-v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '10.0.x' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: dart-lang/setup-dart@v1
+      - uses: actions/setup-java@v4
+        with: { distribution: 'temurin', java-version: '11' }
+
+      - name: Build all client packages
+        run: |
+          set -e
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          C="$GITHUB_WORKSPACE/$CLIENTS_DIR"
+
+          # C# (NuGet)
+          dotnet pack "$C/Cyaim.WebSocketServer.Client/Cyaim.WebSocketServer.Client.csproj" -c Release -o "$GITHUB_WORKSPACE/artifacts"
+
+          # JS (npm)
+          ( cd "$C/cyaim-websocket-client-js" && npm ci && npm run build && npm pack --pack-destination "$GITHUB_WORKSPACE/artifacts" )
+
+          # Python (sdist + wheel)
+          ( cd "$C/cyaim-websocket-client-python" && python -m pip install build && python -m build --outdir "$GITHUB_WORKSPACE/artifacts" )
+
+          # Rust (.crate)
+          ( cd "$C/cyaim-websocket-client-rs" && cargo package --no-verify && cp target/package/*.crate "$GITHUB_WORKSPACE/artifacts/" )
+
+          # Java (jar) via Maven
+          ( cd "$C/cyaim-websocket-client-java" && mvn -B -q package -DskipTests && cp target/*.jar "$GITHUB_WORKSPACE/artifacts/" )
+
+          # Dart (source archive; pub.dev publish happens in its own job)
+          ( cd "$C/cyaim-websocket-client-dart" && tar czf "$GITHUB_WORKSPACE/artifacts/cyaim_websocket_client-dart.tar.gz" --exclude .dart_tool --exclude build . )
+
+          ls -la "$GITHUB_WORKSPACE/artifacts"
+
+      - name: Create GitHub Release with artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('client-v{0}', steps.ver.outputs.version) }}
+          name: Client Libraries v${{ steps.ver.outputs.version }}
+          generate_release_notes: true
+          files: artifacts/*
+
+  # 2) Publish to each registry (each guarded on its secret; missing secret => skipped).
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', registry-url: 'https://registry.npmjs.org' }
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then echo "NPM_TOKEN not set — skipping"; exit 0; fi
+          cd "$CLIENTS_DIR/cyaim-websocket-client-js"
+          npm ci && npm run build && npm publish --access public
+
+  publish-pypi:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          if [ -z "$TWINE_PASSWORD" ]; then echo "PYPI_TOKEN not set — skipping"; exit 0; fi
+          cd "$CLIENTS_DIR/cyaim-websocket-client-python"
+          python -m pip install build twine
+          python -m build
+          twine upload dist/*
+
+  publish-crates:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish to crates.io
+        env:
+          CARGO_TOKEN: ${{ secrets.CARGO_TOKEN }}
+        run: |
+          if [ -z "$CARGO_TOKEN" ]; then echo "CARGO_TOKEN not set — skipping"; exit 0; fi
+          cd "$CLIENTS_DIR/cyaim-websocket-client-rs"
+          cargo publish --token "$CARGO_TOKEN"
+
+  publish-nuget:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '10.0.x' }
+      - name: Publish to NuGet
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then echo "NUGET_API_KEY not set — skipping"; exit 0; fi
+          cd "$CLIENTS_DIR/Cyaim.WebSocketServer.Client"
+          dotnet pack -c Release -o out
+          dotnet nuget push "out/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  publish-pub-dev:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - name: Publish to pub.dev (OIDC)
+        run: |
+          cd "$CLIENTS_DIR/cyaim-websocket-client-dart"
+          # Requires pub.dev automated publishing configured for this repo/tag.
+          dart pub get
+          dart pub publish --force || echo "pub.dev publish requires OIDC configured on pub.dev — skipping if unauthorized"
+
+  publish-maven:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+          server-id: ossrh
+          server-username: OSSRH_USERNAME
+          server-password: OSSRH_PASSWORD
+          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+      - name: Publish to Maven Central
+        env:
+          OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+          OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: |
+          if [ -z "$OSSRH_USERNAME" ]; then echo "OSSRH_USERNAME not set — skipping"; exit 0; fi
+          cd "$CLIENTS_DIR/cyaim-websocket-client-java"
+          mvn -B -DskipTests deploy -P release || echo "Maven Central deploy requires the release profile + OSSRH staging config"
