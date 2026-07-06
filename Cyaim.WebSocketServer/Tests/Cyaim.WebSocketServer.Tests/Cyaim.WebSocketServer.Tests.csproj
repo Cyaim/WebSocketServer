@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Cyaim.WebSocketServer\Cyaim.WebSocketServer.csproj" />
     <ProjectReference Include="..\..\Cyaim.WebSocketServer.OpenTelemetry\Cyaim.WebSocketServer.OpenTelemetry.csproj" />
+    <ProjectReference Include="..\..\Cyaim.WebSocketServer.MessagePack\Cyaim.WebSocketServer.MessagePack.csproj" />
   </ItemGroup>
 
   <ItemGroup>

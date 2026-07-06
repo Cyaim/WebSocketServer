@@ -40,11 +40,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Attributes
         /// <summary>
         /// Per-endpoint size cap in bytes; 0 (default) means "use the global MaxRequestReceiveDataLimit".
         /// Meaning depends on <see cref="Stream"/>:
-        /// - buffered endpoint (Stream=false): the max bytes buffered in memory for one message (方案 A).
-        /// - streaming endpoint (Stream=true): the max total bytes streamed for one upload (方案 B),
+        /// - buffered endpoint (Stream=false): the max bytes buffered in memory for one message.
+        /// - streaming endpoint (Stream=true): the max total bytes streamed for one upload,
         ///   enforced as a running counter (not a memory buffer).
         /// 端点级字节上限；0（默认）表示沿用全局 MaxRequestReceiveDataLimit。含义随 Stream 变化：
-        /// 缓冲式=单条消息最多缓冲的内存字节（方案 A）；流式=单次上传最多流过的字节数（方案 B，按计数器封顶，不占内存）。
+        /// 缓冲式=单条消息最多缓冲的内存字节；流式=单次上传最多流过的字节数（按计数器封顶，不占内存）。
         /// </summary>
         public long MaxBytes { get; set; }
     }

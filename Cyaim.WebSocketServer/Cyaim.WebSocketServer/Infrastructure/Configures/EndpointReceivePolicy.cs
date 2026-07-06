@@ -6,12 +6,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
     /// </summary>
     public readonly struct EndpointReceivePolicy
     {
-        /// <summary>Streaming endpoint (方案 B): do not buffer, stream frames to the endpoint.</summary>
+        /// <summary>Streaming endpoint: do not buffer, stream frames to the endpoint.</summary>
         public bool IsStream { get; }
 
         /// <summary>
-        /// Size cap in bytes. 0 = use the global default. For buffered endpoints (方案 A) this bounds the
-        /// in-memory buffer; for streaming endpoints (方案 B) it bounds the total streamed bytes.
+        /// Size cap in bytes. 0 = use the global default. For buffered endpoints this bounds the
+        /// in-memory buffer; for streaming endpoints it bounds the total streamed bytes.
         /// </summary>
         public long MaxBytes { get; }
 

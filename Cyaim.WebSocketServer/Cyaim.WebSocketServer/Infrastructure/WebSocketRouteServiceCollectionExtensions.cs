@@ -266,9 +266,9 @@ namespace Cyaim.WebSocketServer.Infrastructure
             wsrOptions.WatchAssemblyContext.WatchMethods =
                 new ConcurrentDictionary<string, MethodInfo>(wsrOptions.WatchAssemblyContext.WatchEndPoint.ToDictionary(x => x.MethodPath, x => x.MethodInfo), StringComparer.OrdinalIgnoreCase);
 
-            // 端点级接收策略（方案A缓冲上限 / 方案B流式）——只登记有覆盖的端点；流式端点在此做签名校验（启动即失败）。
-            // Per-endpoint receive policy (方案A buffered cap / 方案B streaming). Only endpoints with an override
-            // are registered; streaming endpoints are signature-validated here (fail-fast at startup).
+            // 端点级接收策略（缓冲上限 / 流式）——只登记有覆盖的端点；流式端点在此做签名校验（启动即失败）。
+            // Per-endpoint receive policy (buffered cap / streaming). Only endpoints with an override are
+            // registered; streaming endpoints are signature-validated here (fail-fast at startup).
             var endpointPolicies = new ConcurrentDictionary<string, EndpointReceivePolicy>(StringComparer.OrdinalIgnoreCase);
             foreach (var ep in wsrOptions.WatchAssemblyContext.WatchEndPoint)
             {

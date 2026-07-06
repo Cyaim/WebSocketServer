@@ -52,11 +52,11 @@ namespace Cyaim.WebSocketServer.Tests
 
             public string Echo(string text) => "echo:" + text;
 
-            // 方案A: per-endpoint buffered cap override (8 MiB) — accepts larger messages than the global default.
+            // Per-endpoint buffered cap override (8 MiB) — accepts larger messages than the global default.
             [Infrastructure.Attributes.WebSocket(MaxBytes = 8 * 1024 * 1024)]
             public string EchoBig(string text) => "echobig:" + (text?.Length.ToString() ?? "null");
 
-            // 方案B: streaming endpoint — receives the payload as a Stream (fed frame-by-frame), never fully
+            // Streaming endpoint — receives the payload as a Stream (fed frame-by-frame), never fully
             // buffered. Cap 1 MiB. Returns the total bytes read.
             [Infrastructure.Attributes.WebSocket(Stream = true, MaxBytes = 1024 * 1024)]
             public async Task<string> Upload(System.IO.Stream body, System.Threading.CancellationToken ct)

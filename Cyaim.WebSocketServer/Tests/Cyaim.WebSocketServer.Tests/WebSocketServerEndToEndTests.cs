@@ -479,7 +479,7 @@ namespace Cyaim.WebSocketServer.Tests
         [Fact]
         public async Task PerEndpointLimit_OverridesGlobal_ForBufferedEndpoint()
         {
-            // 方案A: global cap is tight (2 KiB), but wstest.echobig is [WebSocket(MaxBytes = 8 MiB)].
+            // Per-endpoint cap: global cap is tight (2 KiB), but wstest.echobig is [WebSocket(MaxBytes = 8 MiB)].
             using var host = await StartHostAsync(CreateOption(o => o.MaxRequestReceiveDataLimit = 2048));
             var socket = await ConnectAsync(host);
 
@@ -509,7 +509,7 @@ namespace Cyaim.WebSocketServer.Tests
             await host.StopAsync();
         }
 
-        // 方案B: build a streaming-upload binary message:
+        // Build a streaming-upload binary message:
         // [4-byte magic "\0WSU"][4-byte BE header length][UTF8 JSON header][payload].
         private static byte[] BuildUploadMessage(string headerJson, byte[] payload)
         {

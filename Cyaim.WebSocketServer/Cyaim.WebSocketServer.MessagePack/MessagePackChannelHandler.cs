@@ -447,7 +447,7 @@ namespace Cyaim.WebSocketServer.MessagePack
                     int singleFrameCount = 0;
                     // 本条消息在全局接收内存预算中已预留的字节（多帧累计），在本迭代 finally 中释放。
                     long reservedReceiveBytes = 0;
-                    // 方案A：解析出 target 后把生效上限从全局默认切到端点 MaxBytes（0=沿用全局）。
+                    // 端点级上限：解析出 target 后把生效上限从全局默认切到端点 MaxBytes（0=沿用全局）。
                     long effectiveReceiveLimit = webSocketOption.MaxRequestReceiveDataLimit ?? 0;
                     bool endpointPolicyResolved = false;
                     try
@@ -477,14 +477,24 @@ namespace Cyaim.WebSocketServer.MessagePack
                         {
                             try
                             {
+                                // 流式上传：本通道普通消息是 MessagePack 二进制(以数组标记开头)，故用魔数 "\0WSU" 区分流式上传。
+                                // Streaming upload: normal messages here are MessagePack binary (array marker); the "\0WSU"
+                                // magic distinguishes a streaming upload (neither starts with 0x00, so no collision).
+                                if (wsReceiveReader.Length == 0 && singleFrameBuffer == null
+                                    && Cyaim.WebSocketServer.Infrastructure.StreamDispatch.StreamUploadProtocol.StartsWithMagic(buffer, result.Count))
+                                {
+                                    await MessagePackStreamForward(webSocket, context, buffer, result, webSocketOption, logger, appLifetime.ApplicationStopping);
+                                    goto CONTINUE_RECEIVE;
+                                }
+
                                 // 请求大小限制：Length > (long?)null 恒为 false，未配置时该检查被静默禁用。
                                 // 用模式匹配显式判定，并按累计字节(已写入+本帧)判断，超限即拒绝该多帧消息。
                                 // Enforce only when a limit is present (null == explicitly unlimited); check the
                                 // accumulated length so an over-limit message is rejected before further growth.
                                 long accumulatedLen = wsReceiveReader.Length + (result?.Count ?? 0);
 
-                                // 方案A：从头部解析 target（MessagePack 需首帧收齐），命中端点策略则切换生效上限。
-                                // 方案A: resolve target (MessagePack needs the first frame complete) and switch the cap.
+                                // 端点级上限：从头部解析 target（MessagePack 需首帧收齐），命中端点策略则切换生效上限。
+                                // Per-endpoint cap: resolve target (MessagePack needs the first frame complete) and switch the cap.
                                 if (!endpointPolicyResolved && webSocketOption.WatchAssemblyContext != null)
                                 {
                                     ReadOnlySpan<byte> headerSpan = wsReceiveReader.Length > 0
@@ -588,6 +598,16 @@ namespace Cyaim.WebSocketServer.MessagePack
                                     ArrayPool<byte>.Shared.Return(buffer);
                                 }
                             }
+                        }
+
+                        // 空读保护：一条消息收完且暂无新数据时，某些传输会返回 0 长度非关闭帧；不要把它当成空消息去反序列化
+                        // （会误判并断开连接），直接回接收循环等待下一条。MVC 通道对 Count==0 也有类似容忍。
+                        // Empty-read guard: some transports emit a zero-length, non-close frame once a message is fully
+                        // consumed and nothing new is pending. Don't deserialize it as an (empty) message — loop back.
+                        if (result != null && result.Count == 0 && !result.CloseStatus.HasValue
+                            && wsReceiveReader.Length == 0 && singleFrameBuffer == null)
+                        {
+                            goto CONTINUE_RECEIVE;
                         }
 
                         if (result.MessageType == WebSocketMessageType.Close)
@@ -799,6 +819,28 @@ namespace Cyaim.WebSocketServer.MessagePack
             {
                 logger.LogTrace(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_AbortedReceivingData + ex.Message + Environment.NewLine + ex.StackTrace));
             }
+        }
+
+        /// <summary>
+        /// 识别到二进制流式上传后接管本条消息：共享接收器解析头部、建 Pipe、边收边喂端点（内存恒定），
+        /// 本方法只负责把结果按本通道(MessagePack)编码回发。上传的头部仍是 JSON，负载与响应走 MessagePack/二进制。
+        /// Streaming upload path — the shared receiver feeds the endpoint (constant memory); this method encodes the
+        /// result back in this channel's format (MessagePack). The upload header is JSON; the response is MessagePack.
+        /// </summary>
+        private async Task MessagePackStreamForward(WebSocket webSocket, HttpContext context, byte[] buffer, WebSocketReceiveResult firstResult, WebSocketRouteOption webSocketOptions, ILogger<WebSocketRouteMiddleware> logger, CancellationToken connectionToken)
+        {
+            long requestTime = DateTime.Now.Ticks;
+            var outcome = await Cyaim.WebSocketServer.Infrastructure.StreamDispatch.WebSocketStreamReceiver.ReceiveAndInvokeAsync(webSocket, context, buffer, firstResult, webSocketOptions, logger, connectionToken);
+            if (!outcome.Handled || webSocket.State != WebSocketState.Open)
+            {
+                return;
+            }
+            var resp = new MessagePackResponseScheme { Id = outcome.Id, Target = outcome.Target, Status = outcome.Result.Status, Body = outcome.Result.Body, Msg = outcome.Result.Msg, RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
+            var responseBytes = MessagePackSerializer.Serialize(resp);
+            await webSocket.SendAsync(new ArraySegment<byte>(responseBytes), WebSocketMessageType.Binary, true, CancellationToken.None);
+            var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
+            _metricsCollector?.RecordMessageSent(responseBytes.Length, currentNodeId, context.Request.Path);
+            Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesSent(context.Connection.Id, responseBytes.Length);
         }
 
         /// <summary>
