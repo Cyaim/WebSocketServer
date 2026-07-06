@@ -447,6 +447,9 @@ namespace Cyaim.WebSocketServer.MessagePack
                     int singleFrameCount = 0;
                     // 本条消息在全局接收内存预算中已预留的字节（多帧累计），在本迭代 finally 中释放。
                     long reservedReceiveBytes = 0;
+                    // 方案A：解析出 target 后把生效上限从全局默认切到端点 MaxBytes（0=沿用全局）。
+                    long effectiveReceiveLimit = webSocketOption.MaxRequestReceiveDataLimit ?? 0;
+                    bool endpointPolicyResolved = false;
                     try
                     {
                         // Connection level restrictions
@@ -479,7 +482,27 @@ namespace Cyaim.WebSocketServer.MessagePack
                                 // Enforce only when a limit is present (null == explicitly unlimited); check the
                                 // accumulated length so an over-limit message is rejected before further growth.
                                 long accumulatedLen = wsReceiveReader.Length + (result?.Count ?? 0);
-                                if (webSocketOption.MaxRequestReceiveDataLimit is long maxLen && accumulatedLen > maxLen)
+
+                                // 方案A：从头部解析 target（MessagePack 需首帧收齐），命中端点策略则切换生效上限。
+                                // 方案A: resolve target (MessagePack needs the first frame complete) and switch the cap.
+                                if (!endpointPolicyResolved && webSocketOption.WatchAssemblyContext != null)
+                                {
+                                    ReadOnlySpan<byte> headerSpan = wsReceiveReader.Length > 0
+                                        ? wsReceiveReader.GetBuffer().AsSpan(0, (int)wsReceiveReader.Length)
+                                        : buffer.AsSpan(0, result?.Count ?? 0);
+                                    string tgt = null;
+                                    try { tgt = FindTargetFromMessagePack(headerSpan); } catch { /* header not complete yet */ }
+                                    if (tgt != null)
+                                    {
+                                        if (webSocketOption.WatchAssemblyContext.TryGetEndpointPolicy(tgt, out var pol) && pol.MaxBytes > 0)
+                                        {
+                                            effectiveReceiveLimit = pol.MaxBytes;
+                                        }
+                                        endpointPolicyResolved = true;
+                                    }
+                                }
+
+                                if (effectiveReceiveLimit > 0 && accumulatedLen > effectiveReceiveLimit)
                                 {
                                     logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
                                     // 有界排空该超限消息剩余帧；过大/无界则 1009+Abort。 / Bounded-drain; 1009+Abort if grossly oversized.

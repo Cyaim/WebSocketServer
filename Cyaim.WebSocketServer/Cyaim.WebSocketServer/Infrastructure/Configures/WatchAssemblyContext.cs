@@ -32,6 +32,28 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         public ConcurrentDictionary<string, MethodInfo> WatchMethods { get; set; } = new ConcurrentDictionary<string, MethodInfo>();
 
         /// <summary>
+        /// Per-endpoint receive policy (streaming flag + size cap), keyed by MethodPath (target),
+        /// case-insensitive. Only endpoints that set <see cref="Attributes.WebSocketAttribute.Stream"/>
+        /// or <see cref="Attributes.WebSocketAttribute.MaxBytes"/> appear here; others use the global default.
+        /// 端点级接收策略（流式标记 + 上限），按 target 忽略大小写索引；只有配置了 Stream/MaxBytes 的端点才在表里。
+        /// </summary>
+        public ConcurrentDictionary<string, EndpointReceivePolicy> EndpointPolicies { get; set; } = new ConcurrentDictionary<string, EndpointReceivePolicy>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Resolve a target's receive policy. Returns false when the endpoint has no per-endpoint override
+        /// (caller should then use the global default and buffered dispatch). 解析端点策略；无覆盖时返回 false。
+        /// </summary>
+        public bool TryGetEndpointPolicy(string target, out EndpointReceivePolicy policy)
+        {
+            if (target != null && EndpointPolicies != null)
+            {
+                return EndpointPolicies.TryGetValue(target, out policy);
+            }
+            policy = default;
+            return false;
+        }
+
+        /// <summary>
         /// Constructor in assembly type
         /// </summary>
         public Dictionary<Type, ConstructorInfo[]> AssemblyConstructors { get; set; }

@@ -266,6 +266,28 @@ namespace Cyaim.WebSocketServer.Infrastructure
             wsrOptions.WatchAssemblyContext.WatchMethods =
                 new ConcurrentDictionary<string, MethodInfo>(wsrOptions.WatchAssemblyContext.WatchEndPoint.ToDictionary(x => x.MethodPath, x => x.MethodInfo), StringComparer.OrdinalIgnoreCase);
 
+            // 端点级接收策略（方案A缓冲上限 / 方案B流式）——只登记有覆盖的端点；流式端点在此做签名校验（启动即失败）。
+            // Per-endpoint receive policy (方案A buffered cap / 方案B streaming). Only endpoints with an override
+            // are registered; streaming endpoints are signature-validated here (fail-fast at startup).
+            var endpointPolicies = new ConcurrentDictionary<string, EndpointReceivePolicy>(StringComparer.OrdinalIgnoreCase);
+            foreach (var ep in wsrOptions.WatchAssemblyContext.WatchEndPoint)
+            {
+                if (ep.IsStream)
+                {
+                    bool hasStreamParam = ep.MethodInfo.GetParameters().Any(p => typeof(System.IO.Stream).IsAssignableFrom(p.ParameterType));
+                    if (!hasStreamParam)
+                    {
+                        throw new InvalidOperationException(
+                            $"WebSocket streaming endpoint \"{ep.MethodPath}\" ({ep.MethodInfo.DeclaringType?.Name}.{ep.MethodInfo.Name}) is marked [WebSocket(Stream = true)] but has no System.IO.Stream parameter to receive the payload. Add a Stream parameter, e.g. Upload(UploadHeader head, Stream body, CancellationToken ct). / 流式端点缺少 System.IO.Stream 形参。");
+                    }
+                }
+                if (ep.IsStream || ep.MaxBytes > 0)
+                {
+                    endpointPolicies[ep.MethodPath] = new EndpointReceivePolicy(ep.IsStream, ep.MaxBytes);
+                }
+            }
+            wsrOptions.WatchAssemblyContext.EndpointPolicies = endpointPolicies;
+
             #endregion
 
             #region 计算构造函数与构造函数中的参数
@@ -401,13 +423,20 @@ namespace Cyaim.WebSocketServer.Infrastructure
                                           Action = x.Name,
                                           Controller = x.ReflectedType?.Name,
                                           Methods = new[] { a.Method },
-                                          MethodInfo = x
+                                          MethodInfo = x,
+                                          IsStream = a.Stream,
+                                          MaxBytes = a.MaxBytes
                                       })).SelectMany((x, y) => x);
             var points =
                 methodLevel.GroupBy(x => x.Controller + x.Action).Select(x =>
                 {
                     var first = x.FirstOrDefault();
                     first.Methods = x.Select(m => m.Methods).SelectMany((y, z) => y).Distinct().ToArray();
+                    // 一个方法的多个 [WebSocket] 共享同一签名，故流式标记须一致；上限取首个非 0 值。
+                    // A method's multiple [WebSocket] attrs share one signature, so the streaming flag must
+                    // agree; the size cap takes the first non-zero value across them.
+                    first.IsStream = x.Any(m => m.IsStream);
+                    first.MaxBytes = x.Select(m => m.MaxBytes).FirstOrDefault(v => v > 0);
                     return first;
                 });
             return points.ToArray();

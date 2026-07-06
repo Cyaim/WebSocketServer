@@ -341,6 +341,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     // 本条消息在全局接收内存预算中已预留的字节（多帧累计），在本迭代 finally 中释放。
                     // Bytes this message reserved from the global receive-memory budget (multi-frame), released in finally.
                     long reservedReceiveBytes = 0;
+                    // 方案A：一旦从头部解析出 target，就把生效上限从全局默认切到该端点的 MaxBytes（0=沿用全局）。
+                    // 方案A: once the target is parsed from the header, switch the effective cap from the global
+                    // default to this endpoint's MaxBytes (0 = keep global).
+                    long effectiveReceiveLimit = webSocketOption.MaxRequestReceiveDataLimit ?? 0;
+                    bool endpointPolicyResolved = false;
                     try
                     {
                         // Connection level restrictions
@@ -421,7 +426,29 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 // unset. Enforce only when a limit is present; null means explicitly unlimited.
                                 // 累计接收字节 = 已写入流的多帧数据 + 本帧(尚未写入)，避免超限后仍先写入再判断。
                                 long accumulatedLen = wsReceiveReader.Length + (result?.Count ?? 0);
-                                if (webSocketOption.MaxRequestReceiveDataLimit is long maxLen && accumulatedLen > maxLen)
+
+                                // 方案A：从头部解析 target，命中端点策略则切换生效上限。header 通常在首帧内，
+                                // 首帧时数据在 buffer、后续帧在 wsReceiveReader；解析不到(头部未到齐)就先用全局默认兜底。
+                                // 方案A: resolve target from the header; if an endpoint policy matches, switch the effective
+                                // cap. On the first frame the bytes are in `buffer`; later they're in wsReceiveReader.
+                                if (!endpointPolicyResolved && webSocketOption.WatchAssemblyContext != null)
+                                {
+                                    ReadOnlySpan<byte> headerSpan = wsReceiveReader.Length > 0
+                                        ? wsReceiveReader.GetBuffer().AsSpan(0, (int)wsReceiveReader.Length)
+                                        : buffer.AsSpan(0, result?.Count ?? 0);
+                                    string tgt = null;
+                                    try { tgt = FindJsonPropertyValue(headerSpan); } catch { /* header not complete yet */ }
+                                    if (tgt != null)
+                                    {
+                                        if (webSocketOption.WatchAssemblyContext.TryGetEndpointPolicy(tgt, out var pol) && pol.MaxBytes > 0)
+                                        {
+                                            effectiveReceiveLimit = pol.MaxBytes;
+                                        }
+                                        endpointPolicyResolved = true;
+                                    }
+                                }
+
+                                if (effectiveReceiveLimit > 0 && accumulatedLen > effectiveReceiveLimit)
                                 {
                                     logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
 

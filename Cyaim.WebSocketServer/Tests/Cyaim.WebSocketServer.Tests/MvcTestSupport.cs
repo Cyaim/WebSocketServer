@@ -52,6 +52,10 @@ namespace Cyaim.WebSocketServer.Tests
 
             public string Echo(string text) => "echo:" + text;
 
+            // 方案A: per-endpoint buffered cap override (8 MiB) — accepts larger messages than the global default.
+            [Infrastructure.Attributes.WebSocket(MaxBytes = 8 * 1024 * 1024)]
+            public string EchoBig(string text) => "echobig:" + (text?.Length.ToString() ?? "null");
+
             public int Add(int a, int b) => a + b;
 
             public string NoParams() => "noparams";
@@ -95,6 +99,7 @@ namespace Cyaim.WebSocketServer.Tests
             var maxCtor = new Dictionary<Type, ConstructorParameter>();
             var methodParams = new Dictionary<MethodInfo, ParameterInfo[]>();
             var taskGetters = new Dictionary<MethodInfo, Func<Task, object>>();
+            var endpointPolicies = new ConcurrentDictionary<string, Infrastructure.Configures.EndpointReceivePolicy>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var type in controllers)
             {
@@ -117,6 +122,7 @@ namespace Cyaim.WebSocketServer.Tests
 
                     string path = prefix + "." + method.Name.ToLowerInvariant();
                     methods[path] = method;
+                    var wsAttr = method.GetCustomAttribute<Infrastructure.Attributes.WebSocketAttribute>();
                     endpoints.Add(new WebSocketEndPoint
                     {
                         MethodPath = path,
@@ -124,8 +130,14 @@ namespace Cyaim.WebSocketServer.Tests
                         MethodInfo = method,
                         Controller = type.Name,
                         Action = method.Name,
-                        Methods = new[] { method.Name }
+                        Methods = new[] { method.Name },
+                        IsStream = wsAttr?.Stream ?? false,
+                        MaxBytes = wsAttr?.MaxBytes ?? 0
                     });
+                    if (wsAttr != null && (wsAttr.Stream || wsAttr.MaxBytes > 0))
+                    {
+                        endpointPolicies[path] = new Infrastructure.Configures.EndpointReceivePolicy(wsAttr.Stream, wsAttr.MaxBytes);
+                    }
                     methodParams[method] = method.GetParameters();
 
                     if (method.ReturnType.IsGenericType && method.ReturnType.GetGenericTypeDefinition() == typeof(Task<>))
@@ -142,7 +154,8 @@ namespace Cyaim.WebSocketServer.Tests
                 WatchMethods = methods,
                 MaxConstructorParameters = maxCtor,
                 MethodParameters = methodParams,
-                MethodTaskResultGetters = taskGetters
+                MethodTaskResultGetters = taskGetters,
+                EndpointPolicies = endpointPolicies
             };
         }
 

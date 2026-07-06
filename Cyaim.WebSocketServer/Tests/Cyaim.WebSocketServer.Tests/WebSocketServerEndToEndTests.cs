@@ -477,6 +477,39 @@ namespace Cyaim.WebSocketServer.Tests
         }
 
         [Fact]
+        public async Task PerEndpointLimit_OverridesGlobal_ForBufferedEndpoint()
+        {
+            // 方案A: global cap is tight (2 KiB), but wstest.echobig is [WebSocket(MaxBytes = 8 MiB)].
+            using var host = await StartHostAsync(CreateOption(o => o.MaxRequestReceiveDataLimit = 2048));
+            var socket = await ConnectAsync(host);
+
+            // ~40 KiB to the overridden endpoint → accepted (under its 8 MiB cap), even though > global 2 KiB.
+            string big = "{\"id\":\"1\",\"target\":\"wstest.echobig\",\"body\":{\"text\":\"" + new string('x', 40 * 1024) + "\"}}";
+            string resp = await SendAndReceiveAsync(socket, big);
+            using (var doc = JsonDocument.Parse(resp))
+            {
+                Assert.Equal("1", doc.RootElement.GetProperty("Id").GetString());
+                Assert.Equal("echobig:40960", doc.RootElement.GetProperty("Body").GetString());
+            }
+
+            // Same size to a NON-overridden endpoint (wstest.echo) → rejected by the global 2 KiB cap (no response),
+            // and the connection stays usable for a subsequent small request.
+            using (var cts = new CancellationTokenSource(TestTimeout))
+            {
+                string big2 = "{\"id\":\"2\",\"target\":\"wstest.echo\",\"body\":{\"text\":\"" + new string('y', 40 * 1024) + "\"}}";
+                await socket.SendAsync(Encoding.UTF8.GetBytes(big2), WebSocketMessageType.Text, true, cts.Token);
+            }
+            string small = await SendAndReceiveAsync(socket, "{\"id\":\"3\",\"target\":\"wstest.noparams\"}");
+            using (var doc = JsonDocument.Parse(small))
+            {
+                Assert.Equal("3", doc.RootElement.GetProperty("Id").GetString());
+            }
+
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+            await host.StopAsync();
+        }
+
+        [Fact]
         public async Task DisconnectedEvent_FiresWhenClientCloses()
         {
             var disconnected = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
