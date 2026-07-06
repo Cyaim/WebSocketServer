@@ -1,0 +1,71 @@
+name: Publish One Registry (manual)
+
+# On-demand publish of a single client to its package registry. Run from the Actions tab,
+# pick the registry, and paste the token for that run (or leave blank to use a repo secret).
+# This lets you publish each registry in one click without pre-wiring all six secrets.
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: 'Which registry to publish'
+        required: true
+        type: choice
+        options: [npm, pypi, crates, nuget]
+      token:
+        description: 'Token for this run (leave blank to use the matching repo secret)'
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  CLIENTS_DIR: Cyaim.WebSocketServer/Clients
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish to npm
+        if: ${{ github.event.inputs.registry == 'npm' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ github.event.inputs.token != '' && github.event.inputs.token || secrets.NPM_TOKEN }}
+        run: |
+          [ -z "$NODE_AUTH_TOKEN" ] && { echo "No token provided or NPM_TOKEN secret set"; exit 1; }
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          cd "$CLIENTS_DIR/cyaim-websocket-client-js"
+          npm install && npm run build && npm publish --access public
+
+      - name: Publish to PyPI
+        if: ${{ github.event.inputs.registry == 'pypi' }}
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ github.event.inputs.token != '' && github.event.inputs.token || secrets.PYPI_TOKEN }}
+        run: |
+          [ -z "$TWINE_PASSWORD" ] && { echo "No token provided or PYPI_TOKEN secret set"; exit 1; }
+          cd "$CLIENTS_DIR/cyaim-websocket-client-python"
+          python -m pip install build twine
+          python -m build
+          twine upload dist/*
+
+      - name: Publish to crates.io
+        if: ${{ github.event.inputs.registry == 'crates' }}
+        env:
+          CARGO_TOKEN: ${{ github.event.inputs.token != '' && github.event.inputs.token || secrets.CARGO_TOKEN }}
+        run: |
+          [ -z "$CARGO_TOKEN" ] && { echo "No token provided or CARGO_TOKEN secret set"; exit 1; }
+          cd "$CLIENTS_DIR/cyaim-websocket-client-rs"
+          cargo publish --token "$CARGO_TOKEN"
+
+      - name: Publish to NuGet
+        if: ${{ github.event.inputs.registry == 'nuget' }}
+        env:
+          NUGET_API_KEY: ${{ github.event.inputs.token != '' && github.event.inputs.token || secrets.NUGET_API_KEY }}
+        run: |
+          [ -z "$NUGET_API_KEY" ] && { echo "No token provided or NUGET_API_KEY secret set"; exit 1; }
+          cd "$CLIENTS_DIR/Cyaim.WebSocketServer.Client"
+          dotnet build -c Release
+          dotnet pack -c Release --no-build -o out
+          dotnet nuget push "out/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
