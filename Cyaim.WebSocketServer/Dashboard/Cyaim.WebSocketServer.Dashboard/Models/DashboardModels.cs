@@ -183,6 +183,20 @@ namespace Cyaim.WebSocketServer.Dashboard.Models
     }
 
     /// <summary>
+    /// One per-second time-series sample for the dashboard charts.
+    /// 看板图表的一个每秒时序采样点。
+    /// </summary>
+    public class MetricsSample
+    {
+        public DateTime Timestamp { get; set; }
+        public int Connections { get; set; }
+        public double BytesSentPerSecond { get; set; }
+        public double BytesReceivedPerSecond { get; set; }
+        public double MessagesSentPerSecond { get; set; }
+        public double MessagesReceivedPerSecond { get; set; }
+    }
+
+    /// <summary>
     /// Cluster overview / 集群概览
     /// </summary>
     public class ClusterOverview

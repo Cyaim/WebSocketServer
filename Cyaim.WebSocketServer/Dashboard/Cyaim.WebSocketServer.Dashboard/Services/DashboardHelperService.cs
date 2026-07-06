@@ -21,7 +21,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
         {
             var connections = new Dictionary<string, string>();
             var clusterManager = GlobalClusterCenter.ClusterManager;
-            var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "unknown";
+            var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "standalone";
 
             // Priority 1: Get connections from cluster routing table (most authoritative) / 优先级1：从集群路由表获取连接（最权威）
             // This includes all connections from all nodes in the cluster / 这包括集群中所有节点的所有连接
@@ -65,14 +65,16 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
 
                 if (clusterManager == null || clusterContext == null)
                 {
-                    // Return current node only / 仅返回当前节点
+                    // Standalone (no cluster): report a single healthy self-leading node with the live
+                    // local connection count. / 单机（无集群）：返回一个健康的自主节点及本地实时连接数。
                     return new List<NodeStatusInfo>
                     {
                         new NodeStatusInfo
                         {
-                            NodeId = "unknown",
-                            State = "Unknown",
-                            IsConnected = false,
+                            NodeId = "standalone",
+                            State = "Connected",
+                            IsConnected = true,
+                            IsLeader = true,
                             ConnectionCount = MvcChannelHandler.Clients?.Count ?? 0
                         }
                     };

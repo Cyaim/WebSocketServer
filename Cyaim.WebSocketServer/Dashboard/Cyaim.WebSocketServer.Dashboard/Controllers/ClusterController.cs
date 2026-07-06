@@ -43,15 +43,17 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
             {
                 var overview = new ClusterOverview
                 {
-                    CurrentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "unknown",
+                    CurrentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "standalone",
                     IsCurrentNodeLeader = GlobalClusterCenter.ClusterManager?.IsLeader() ?? false,
                     Nodes = _helperService.GetNodeStatusList()
                 };
 
                 overview.TotalNodes = overview.Nodes.Count;
                 overview.ConnectedNodes = overview.Nodes.Count(n => n.IsConnected);
-                overview.TotalConnections = GlobalClusterCenter.ClusterManager?.GetTotalConnectionCount() ?? 0;
-                overview.LocalConnections = GlobalClusterCenter.ClusterManager?.GetLocalConnectionCount() ?? 0;
+                // Fall back to the live local connection count in standalone mode. / 单机模式回退到本地实时连接数。
+                var localLive = Infrastructure.Handlers.MvcHandler.MvcChannelHandler.Clients?.Count ?? 0;
+                overview.LocalConnections = GlobalClusterCenter.ClusterManager?.GetLocalConnectionCount() ?? localLive;
+                overview.TotalConnections = GlobalClusterCenter.ClusterManager?.GetTotalConnectionCount() ?? localLive;
 
                 return Ok(new ApiResponse<ClusterOverview>
                 {
@@ -171,7 +173,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
         {
             try
             {
-                var nodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "unknown";
+                var nodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "standalone";
                 return Ok(new ApiResponse<string>
                 {
                     Success = true,

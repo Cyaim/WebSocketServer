@@ -49,7 +49,10 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
             {
                 var clients = new List<ClientConnectionInfo>();
                 var clusterManager = GlobalClusterCenter.ClusterManager;
-                var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "unknown";
+                // Must match the node id used by the routing table (GetAllClusterConnections) so that
+                // local connections are recognised as on-node and enriched with live stats.
+                // 需与路由表使用的节点 id 一致，本地连接才会被识别为本节点并附加实时统计。
+                var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "standalone";
 
                 // Get all connections from cluster routing table / 从集群路由表获取所有连接
                 var allConnections = _helperService.GetAllClusterConnections();

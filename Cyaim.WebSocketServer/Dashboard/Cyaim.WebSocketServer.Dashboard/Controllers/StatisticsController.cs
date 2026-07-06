@@ -35,6 +35,28 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
         }
 
         /// <summary>
+        /// Get the per-second time-series samples for the dashboard charts.
+        /// 获取每秒时序采样，用于看板图表。
+        /// </summary>
+        [HttpGet("timeseries")]
+        public ActionResult<ApiResponse<IReadOnlyList<MetricsSample>>> GetTimeSeries()
+        {
+            try
+            {
+                return Ok(new ApiResponse<IReadOnlyList<MetricsSample>>
+                {
+                    Success = true,
+                    Data = _statisticsService.GetHistory()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting time series");
+                return StatusCode(500, new ApiResponse<IReadOnlyList<MetricsSample>> { Success = false, Error = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Get bandwidth statistics / 获取带宽统计信息
         /// </summary>
         /// <returns>Bandwidth statistics / 带宽统计信息</returns>
@@ -73,7 +95,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                 // Reuse ClientController logic / 重用 ClientController 的逻辑
                 var clients = new List<ClientConnectionInfo>();
                 var clusterManager = Infrastructure.Cluster.GlobalClusterCenter.ClusterManager;
-                var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId ?? "unknown";
+                var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId ?? "standalone";
 
                 // Get all connections from cluster routing table / 从集群路由表获取所有连接
                 var allConnections = _helperService.GetAllClusterConnections();

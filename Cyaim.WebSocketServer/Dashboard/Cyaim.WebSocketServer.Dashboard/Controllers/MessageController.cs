@@ -67,7 +67,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                 }
 
                 var clusterManager = GlobalClusterCenter.ClusterManager;
-                var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "unknown";
+                var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "standalone";
 
                 // Prepare message data / 准备消息数据
                 var messageType = request.MessageType == "Binary"

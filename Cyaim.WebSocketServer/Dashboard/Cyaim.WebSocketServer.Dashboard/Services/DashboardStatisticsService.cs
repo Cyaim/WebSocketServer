@@ -16,7 +16,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
     /// Service for collecting dashboard statistics
     /// 用于收集仪表板统计信息的服务
     /// </summary>
-    public class DashboardStatisticsService : IWebSocketStatisticsRecorder
+    public class DashboardStatisticsService : IWebSocketStatisticsRecorder, IDisposable
     {
         private readonly ILogger<DashboardStatisticsService> _logger;
         private readonly ConcurrentDictionary<string, ClientConnectionStats> _connectionStats;
@@ -27,6 +27,11 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
         private ulong _lastTotalBytesReceived;
         private ulong _lastTotalMessagesSent;
         private ulong _lastTotalMessagesReceived;
+
+        // Bounded time-series ring buffer of per-second samples for the dashboard charts.
+        // 用于看板图表的每秒采样时序环形缓冲（有界）。
+        private const int HistoryCapacity = 180; // ~3 minutes at 1s
+        private readonly ConcurrentQueue<MetricsSample> _history = new ConcurrentQueue<MetricsSample>();
 
         /// <summary>
         /// Constructor / 构造函数
@@ -168,11 +173,33 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
                 _lastTotalMessagesSent = totalMessagesSent;
                 _lastTotalMessagesReceived = totalMessagesReceived;
                 _lastBandwidthUpdate = now;
+
+                // Append a bounded time-series sample for the dashboard charts.
+                var liveConnections = MvcChannelHandler.Clients?.Count ?? _connectionStats.Count;
+                _history.Enqueue(new MetricsSample
+                {
+                    Timestamp = now,
+                    Connections = liveConnections,
+                    BytesSentPerSecond = bytesSentPerSecond,
+                    BytesReceivedPerSecond = bytesReceivedPerSecond,
+                    MessagesSentPerSecond = messagesSentPerSecond,
+                    MessagesReceivedPerSecond = messagesReceivedPerSecond,
+                });
+                while (_history.Count > HistoryCapacity && _history.TryDequeue(out _)) { }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error updating bandwidth statistics");
             }
+        }
+
+        /// <summary>
+        /// Get the time-series history of per-second samples (oldest first) for charts.
+        /// 获取每秒采样的时序历史（最旧在前），用于图表。
+        /// </summary>
+        public IReadOnlyList<MetricsSample> GetHistory()
+        {
+            return _history.ToArray();
         }
 
         /// <summary>

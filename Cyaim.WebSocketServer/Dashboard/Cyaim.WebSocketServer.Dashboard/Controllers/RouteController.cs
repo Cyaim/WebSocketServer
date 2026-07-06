@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Cyaim.WebSocketServer.Dashboard.Models;
 using Cyaim.WebSocketServer.Infrastructure.Cluster;
+using Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -36,16 +37,25 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
             try
             {
                 var clusterManager = GlobalClusterCenter.ClusterManager;
-                if (clusterManager == null || clusterManager.ConnectionRoutes == null)
+                var routes = new Dictionary<string, string>();
+
+                // Cluster routing table (all nodes) when clustered.
+                if (clusterManager?.ConnectionRoutes != null)
                 {
-                    return Ok(new ApiResponse<Dictionary<string, string>>
-                    {
-                        Success = false,
-                        Error = "Cluster manager or connection routes not available"
-                    });
+                    foreach (var kvp in clusterManager.ConnectionRoutes)
+                        routes[kvp.Key] = kvp.Value;
                 }
 
-                var routes = clusterManager.ConnectionRoutes.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                // Standalone / not-yet-registered local connections route to the current node.
+                // 单机或尚未注册的本地连接路由到当前节点。
+                var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "standalone";
+                if (MvcChannelHandler.Clients != null)
+                {
+                    foreach (var kvp in MvcChannelHandler.Clients)
+                        if (!routes.ContainsKey(kvp.Key))
+                            routes[kvp.Key] = currentNodeId;
+                }
+
                 return Ok(new ApiResponse<Dictionary<string, string>>
                 {
                     Success = true,
@@ -120,19 +130,23 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
             try
             {
                 var clusterManager = GlobalClusterCenter.ClusterManager;
-                if (clusterManager == null || clusterManager.ConnectionRoutes == null)
+                var currentNodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "standalone";
+                var connectionIds = new List<string>();
+
+                if (clusterManager?.ConnectionRoutes != null)
                 {
-                    return Ok(new ApiResponse<List<string>>
-                    {
-                        Success = false,
-                        Error = "Cluster manager or connection routes not available"
-                    });
+                    connectionIds.AddRange(clusterManager.ConnectionRoutes
+                        .Where(kvp => kvp.Value == nodeId)
+                        .Select(kvp => kvp.Key));
                 }
 
-                var connectionIds = clusterManager.ConnectionRoutes
-                    .Where(kvp => kvp.Value == nodeId)
-                    .Select(kvp => kvp.Key)
-                    .ToList();
+                // Local connections belong to the current node in standalone mode.
+                if (nodeId == currentNodeId && MvcChannelHandler.Clients != null)
+                {
+                    foreach (var id in MvcChannelHandler.Clients.Keys)
+                        if (!connectionIds.Contains(id))
+                            connectionIds.Add(id);
+                }
 
                 return Ok(new ApiResponse<List<string>>
                 {
