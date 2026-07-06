@@ -509,6 +509,78 @@ namespace Cyaim.WebSocketServer.Tests
             await host.StopAsync();
         }
 
+        // 方案B: build a streaming-upload binary message:
+        // [4-byte magic "\0WSU"][4-byte BE header length][UTF8 JSON header][payload].
+        private static byte[] BuildUploadMessage(string headerJson, byte[] payload)
+        {
+            byte[] magic = { 0x00, (byte)'W', (byte)'S', (byte)'U' };
+            byte[] header = Encoding.UTF8.GetBytes(headerJson);
+            var msg = new byte[magic.Length + 4 + header.Length + payload.Length];
+            Array.Copy(magic, 0, msg, 0, magic.Length);
+            int p = magic.Length;
+            msg[p + 0] = (byte)(header.Length >> 24);
+            msg[p + 1] = (byte)(header.Length >> 16);
+            msg[p + 2] = (byte)(header.Length >> 8);
+            msg[p + 3] = (byte)header.Length;
+            Array.Copy(header, 0, msg, p + 4, header.Length);
+            Array.Copy(payload, 0, msg, p + 4 + header.Length, payload.Length);
+            return msg;
+        }
+
+        [Fact]
+        public async Task StreamingEndpoint_ReceivesUpload_BypassingBufferedGlobalLimit()
+        {
+            // Global buffered cap is tight (4 KiB); a 256 KiB streaming upload must still succeed because the
+            // streaming path never buffers the whole payload.
+            using var host = await StartHostAsync(CreateOption(o => o.MaxRequestReceiveDataLimit = 4096));
+            var socket = await ConnectAsync(host);
+            using var cts = new CancellationTokenSource(TestTimeout);
+
+            byte[] payload = new byte[256 * 1024];
+            for (int i = 0; i < payload.Length; i++) { payload[i] = (byte)(i & 0xFF); }
+            byte[] msg = BuildUploadMessage("{\"id\":\"u1\",\"target\":\"wstest.upload\"}", payload);
+
+            for (int off = 0; off < msg.Length; off += 8192)
+            {
+                int len = Math.Min(8192, msg.Length - off);
+                await socket.SendAsync(new ArraySegment<byte>(msg, off, len), WebSocketMessageType.Binary, off + len >= msg.Length, cts.Token);
+            }
+
+            string resp = await ReceiveFullMessageAsync(socket, cts.Token);
+            using (var doc = JsonDocument.Parse(resp))
+            {
+                Assert.Equal("u1", doc.RootElement.GetProperty("Id").GetString());
+                Assert.Equal("upload:262144", doc.RootElement.GetProperty("Body").GetString());
+            }
+
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+            await host.StopAsync();
+        }
+
+        [Fact]
+        public async Task StreamingEndpoint_OverMaxBytes_IsClosed()
+        {
+            // wstest.upload has MaxBytes = 1 MiB; a 2 MiB upload must be rejected (connection closed), not accepted.
+            using var host = await StartHostAsync(CreateOption());
+            var socket = await ConnectAsync(host);
+            using var cts = new CancellationTokenSource(TestTimeout);
+
+            byte[] payload = new byte[2 * 1024 * 1024];
+            byte[] msg = BuildUploadMessage("{\"id\":\"big\",\"target\":\"wstest.upload\"}", payload);
+            for (int off = 0; off < msg.Length; off += 8192)
+            {
+                int len = Math.Min(8192, msg.Length - off);
+                try { await socket.SendAsync(new ArraySegment<byte>(msg, off, len), WebSocketMessageType.Binary, off + len >= msg.Length, cts.Token); }
+                catch { break; } // server may abort mid-send once the cap is hit
+            }
+
+            var buf = new byte[1024];
+            await Task.WhenAny(socket.ReceiveAsync(new ArraySegment<byte>(buf), cts.Token), Task.Delay(TestTimeout));
+            Assert.NotEqual(WebSocketState.Open, socket.State);
+
+            try { await host.StopAsync(); } catch { }
+        }
+
         [Fact]
         public async Task DisconnectedEvent_FiresWhenClientCloses()
         {

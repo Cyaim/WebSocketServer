@@ -14,6 +14,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.IO;
+using System.IO.Pipelines;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Reflection;
@@ -417,6 +418,17 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                     }
                                     // Count为0但EndOfMessage为false的情况不应该发生，但为了安全继续等待
                                     continue;
+                                }
+
+                                // 方案B：二进制消息在本通道也用于普通 JSON 请求，故用魔数前缀区分流式上传。
+                                // JSON 永不以 0x00 开头，因此 "\0WSU" 前缀不会与普通请求冲突。首帧命中魔数→走流式。
+                                // 方案B: binary is also a valid transport for normal JSON requests here, so a magic prefix
+                                // distinguishes a streaming upload. JSON never starts with 0x00, so "\0WSU" can't collide.
+                                if (result.MessageType == WebSocketMessageType.Binary && wsReceiveReader.Length == 0 && singleFrameBuffer == null
+                                    && result.Count >= StreamUploadMagic.Length && StartsWithStreamMagic(buffer))
+                                {
+                                    await MvcStreamForward(webSocket, context, buffer, result, webSocketOption, logger, appLifetime.ApplicationStopping);
+                                    goto CONTINUE_RECEIVE;
                                 }
 
                                 // 请求大小限制：注意 wsReceiveReader.Length > (long?)null 在 C# 中恒为 false，
@@ -1298,6 +1310,215 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcDistributeAsync_EndPointNotFound + requestPath));
 
             return new MvcResponseScheme() { Id = request.Id, Status = 2, Target = request.Target, RequestTime = requestTime, CompleteTime = DateTime.UtcNow.Ticks };
+        }
+
+        /// <summary>
+        /// 方案B 流式上传的线格式（二进制消息）：
+        /// [4 字节魔数 "\0WSU"][4 字节大端 头部长度 N][N 字节 UTF8 JSON 头部][原始负载字节...]。
+        /// 魔数用于把流式上传与普通二进制 JSON 请求区分开（JSON 永不以 0x00 开头）。
+        /// Wire format of a streaming-upload binary message: magic + 4-byte BE header length + JSON header + payload.
+        /// </summary>
+        internal static readonly byte[] StreamUploadMagic = { 0x00, (byte)'W', (byte)'S', (byte)'U' };
+
+        /// <summary>Magic(4) + header-length prefix(4) preceding the JSON header. 魔数(4)+长度前缀(4)。</summary>
+        internal const int StreamUploadHeaderPrefixBytes = 8;
+
+        private static bool StartsWithStreamMagic(byte[] buffer)
+        {
+            return buffer[0] == StreamUploadMagic[0] && buffer[1] == StreamUploadMagic[1]
+                && buffer[2] == StreamUploadMagic[2] && buffer[3] == StreamUploadMagic[3];
+        }
+
+        /// <summary>
+        /// 方案B：识别到二进制流式上传后接管本条消息——解析头部、建 Pipe、调用端点并"边收边喂"，最后回响应。
+        /// 内存恒定：负载不整体缓冲，只在 Pipe 滑动窗口内暂存。超 MaxBytes 则 1009+Abort。
+        /// Streaming upload path: parse the header, set up a Pipe, invoke the endpoint, and feed frames to it
+        /// (constant memory — payload is never fully buffered), then send the response.
+        /// </summary>
+        private async Task MvcStreamForward(WebSocket webSocket, HttpContext context, byte[] buffer, WebSocketReceiveResult firstResult, WebSocketRouteOption webSocketOptions, ILogger<WebSocketRouteMiddleware> logger, CancellationToken connectionToken)
+        {
+            int count = firstResult.Count;
+            // 头部（长度前缀 + JSON）必须落在首帧内 / header (length prefix + JSON) must fit in the first frame
+            if (count < StreamUploadHeaderPrefixBytes)
+            {
+                await WebSocketReceiveMemoryGovernor.DrainOversizedAsync(webSocket, buffer, firstResult);
+                return;
+            }
+            // 头部长度前缀在魔数之后（偏移 4） / header-length prefix follows the 4-byte magic (offset 4)
+            int headerLen = (buffer[4] << 24) | (buffer[5] << 16) | (buffer[6] << 8) | buffer[7];
+            if (headerLen <= 0 || (long)StreamUploadHeaderPrefixBytes + headerLen > count)
+            {
+                logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, "Streaming upload header too large or split across frames."));
+                await WebSocketReceiveMemoryGovernor.DrainOversizedAsync(webSocket, buffer, firstResult);
+                return;
+            }
+
+            string target = null, id = null;
+            JsonNode meta = null;
+            try
+            {
+                var headerObj = JsonNode.Parse(buffer.AsSpan(StreamUploadHeaderPrefixBytes, headerLen).ToArray()) as JsonObject;
+                target = headerObj? ["target"]?.GetValue<string>();
+                id = headerObj? ["id"]?.GetValue<string>();
+                if (headerObj != null && headerObj.TryGetPropertyValue("meta", out var m)) { meta = m; }
+            }
+            catch
+            {
+                await WebSocketReceiveMemoryGovernor.DrainOversizedAsync(webSocket, buffer, firstResult);
+                return;
+            }
+
+            if (target == null || webSocketOptions.WatchAssemblyContext == null
+                || !webSocketOptions.WatchAssemblyContext.TryGetEndpointPolicy(target, out var pol) || !pol.IsStream)
+            {
+                // 二进制消息发到了非流式端点 / binary message to a non-streaming target — drain and keep the connection
+                logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, "Binary message targeted a non-streaming endpoint."));
+                await WebSocketReceiveMemoryGovernor.DrainOversizedAsync(webSocket, buffer, firstResult);
+                return;
+            }
+            long maxBytes = pol.MaxBytes;
+
+            var pipe = new Pipe();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(connectionToken);
+            Stream body = pipe.Reader.AsStream();
+            Task<MvcResponseScheme> invokeTask = MvcStreamDistributeAsync(webSocketOptions, context, webSocket, target, id, meta, body, cts.Token, logger);
+
+            long streamed = 0;
+            bool overCap = false;
+            Exception feedError = null;
+            try
+            {
+                int dataOff = StreamUploadHeaderPrefixBytes + headerLen;
+                int dataLen = count - dataOff;
+                if (dataLen > 0)
+                {
+                    streamed += dataLen;
+                    await pipe.Writer.WriteAsync(buffer.AsMemory(dataOff, dataLen), cts.Token);
+                }
+                var result = firstResult;
+                while (!(result.EndOfMessage || result.CloseStatus.HasValue))
+                {
+                    result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                    if (result.CloseStatus.HasValue) { break; }
+                    if (result.Count > 0)
+                    {
+                        streamed += result.Count;
+                        if (maxBytes > 0 && streamed > maxBytes)
+                        {
+                            overCap = true;
+                            feedError = new InvalidOperationException("Upload exceeds the endpoint MaxBytes cap.");
+                            break;
+                        }
+                        FlushResult fr = await pipe.Writer.WriteAsync(buffer.AsMemory(0, result.Count), cts.Token);
+                        if (fr.IsCompleted || fr.IsCanceled) { break; }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                feedError = ex;
+            }
+            finally
+            {
+                await pipe.Writer.CompleteAsync(feedError);
+            }
+
+            MvcResponseScheme resp;
+            try { resp = await invokeTask; }
+            catch (Exception ex) { resp = new MvcResponseScheme { Id = id, Target = target, Status = 1, Msg = ex.Message, CompleteTime = DateTime.UtcNow.Ticks }; }
+
+            if (overCap)
+            {
+                logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
+                try { if (webSocket.State == WebSocketState.Open) { await webSocket.CloseOutputAsync(WebSocketCloseStatus.MessageTooBig, "Upload exceeds size limit", CancellationToken.None); } } catch { }
+                webSocket.Abort();
+                return;
+            }
+            if (webSocket.State == WebSocketState.Open)
+            {
+                var bytes = JsonSerializer.SerializeToUtf8Bytes(resp, webSocketOptions.DefaultResponseJsonSerializerOptions);
+                await webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+            }
+        }
+
+        /// <summary>
+        /// 方案B 流式端点分发：不缓冲整条消息，把 body 作为 Stream 交给端点（调用方边收边喂）。
+        /// 形参按类型绑定：Stream→body，CancellationToken→ct，其余类/接口→从头部 meta 反序列化。
+        /// Streaming endpoint dispatch: binds the endpoint's parameters by type (Stream=body, CancellationToken=ct,
+        /// any other class/interface = deserialized from the header "meta"), then invokes it.
+        /// </summary>
+        private static async Task<MvcResponseScheme> MvcStreamDistributeAsync(WebSocketRouteOption webSocketOptions, HttpContext context, WebSocket webSocket, string target, string id, JsonNode meta, Stream body, CancellationToken cancellationToken, ILogger<WebSocketRouteMiddleware> logger)
+        {
+            long requestTime = DateTime.UtcNow.Ticks;
+            IServiceScope serviceScope = null;
+            try
+            {
+                webSocketOptions.WatchAssemblyContext.WatchMethods.TryGetValue(target, out MethodInfo method);
+                if (method == null) { goto NotFound; }
+                Type targetClass = webSocketOptions.WatchAssemblyContext.GetEndpointClass(target);
+                if (targetClass == null) { goto NotFound; }
+
+                webSocketOptions.WatchAssemblyContext.MaxConstructorParameters.TryGetValue(targetClass, out ConstructorParameter constructorParameter);
+                int ctorParamCount = constructorParameter.ParameterInfos?.Length ?? 0;
+                object[] instanceParmas = ctorParamCount == 0 ? Array.Empty<object>() : new object[ctorParamCount];
+                var serviceScopeFactory = _cachedScopeFactory ??= WebSocketRouteOption.ApplicationServices.GetService<IServiceScopeFactory>();
+                serviceScope = serviceScopeFactory.CreateScope();
+                var scopeIocProvider = serviceScope.ServiceProvider;
+                for (int i = 0; i < ctorParamCount; i++)
+                {
+                    instanceParmas[i] = scopeIocProvider.GetService(constructorParameter.ParameterInfos[i].ParameterType);
+                }
+                object inst = Activator.CreateInstance(targetClass, instanceParmas);
+                var injectorFactory = webSocketOptions.InjectorFactory ?? new EndpointInjectorFactory(webSocketOptions);
+                injectorFactory.GetOrCreateInjector(targetClass).Inject(inst, context, webSocket);
+
+                webSocketOptions.WatchAssemblyContext.MethodParameters.TryGetValue(method, out ParameterInfo[] methodParam);
+                methodParam ??= method.GetParameters();
+                object[] args = methodParam.Length == 0 ? Array.Empty<object>() : new object[methodParam.Length];
+                for (int i = 0; i < methodParam.Length; i++)
+                {
+                    Type pt = methodParam[i].ParameterType;
+                    if (typeof(Stream).IsAssignableFrom(pt)) { args[i] = body; }
+                    else if (pt == typeof(CancellationToken)) { args[i] = cancellationToken; }
+                    else if ((pt.IsClass || pt.IsInterface) && pt != typeof(string))
+                    {
+                        try { args[i] = meta?.Deserialize(pt, webSocketOptions.DefaultRequestJsonSerializerOptions); }
+                        catch { args[i] = null; }
+                    }
+                    else if (methodParam[i].HasDefaultValue) { args[i] = methodParam[i].DefaultValue; }
+                    else { args[i] = pt.IsValueType ? Activator.CreateInstance(pt) : null; }
+                }
+
+                object invokeResult;
+                object raw = method.Invoke(inst, args);
+                if (raw is Task task)
+                {
+                    await task.ConfigureAwait(false);
+                    if (method.ReturnType == typeof(Task)) { invokeResult = null; }
+                    else
+                    {
+                        Func<Task, object> taskResultGetter = null;
+                        webSocketOptions.WatchAssemblyContext.MethodTaskResultGetters?.TryGetValue(method, out taskResultGetter);
+                        invokeResult = taskResultGetter != null ? taskResultGetter(task) : null;
+                    }
+                }
+                else { invokeResult = raw; }
+
+                return new MvcResponseScheme { Id = id, Target = target, Status = 0, Body = invokeResult, RequestTime = requestTime, CompleteTime = DateTime.UtcNow.Ticks };
+            }
+            catch (Exception ex)
+            {
+                if (ex is TargetInvocationException tiEx && tiEx.InnerException != null) { ex = tiEx.InnerException; }
+                logger.LogInformation(ex, ex.Message);
+                return new MvcResponseScheme { Id = id, Target = target, Status = 1, Msg = ex.Message, RequestTime = requestTime, CompleteTime = DateTime.UtcNow.Ticks };
+            }
+            finally
+            {
+                serviceScope?.Dispose();
+            }
+
+        NotFound:
+            return new MvcResponseScheme { Id = id, Target = target, Status = 2, RequestTime = requestTime, CompleteTime = DateTime.UtcNow.Ticks };
         }
 
         /// <summary>

@@ -56,6 +56,21 @@ namespace Cyaim.WebSocketServer.Tests
             [Infrastructure.Attributes.WebSocket(MaxBytes = 8 * 1024 * 1024)]
             public string EchoBig(string text) => "echobig:" + (text?.Length.ToString() ?? "null");
 
+            // 方案B: streaming endpoint — receives the payload as a Stream (fed frame-by-frame), never fully
+            // buffered. Cap 1 MiB. Returns the total bytes read.
+            [Infrastructure.Attributes.WebSocket(Stream = true, MaxBytes = 1024 * 1024)]
+            public async Task<string> Upload(System.IO.Stream body, System.Threading.CancellationToken ct)
+            {
+                long total = 0;
+                var buf = new byte[16 * 1024];
+                int n;
+                while ((n = await body.ReadAsync(buf, 0, buf.Length, ct)) > 0)
+                {
+                    total += n;
+                }
+                return "upload:" + total;
+            }
+
             public int Add(int a, int b) => a + b;
 
             public string NoParams() => "noparams";
