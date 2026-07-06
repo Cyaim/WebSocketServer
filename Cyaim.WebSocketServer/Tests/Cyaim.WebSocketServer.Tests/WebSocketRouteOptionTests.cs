@@ -10,9 +10,12 @@ namespace Cyaim.WebSocketServer.Tests
             var option = new WebSocketRouteOption();
 
             Assert.Null(option.MaxConnectionLimit);
-            Assert.Null(option.MaxRequestReceiveDataLimit);
+            // MaxRequestReceiveDataLimit now defaults to a 4 MiB OOM/DoS safety cap (was null/unlimited).
+            Assert.Equal(4L * 1024 * 1024, option.MaxRequestReceiveDataLimit);
             Assert.Null(option.MaxConnectionParallelForwardLimit);
             Assert.Null(option.MaxEndPointParallelForwardLimit);
+            // The global receive-memory budget is opt-in (disabled by default).
+            Assert.Null(option.MaxTotalReceiveBufferBytes);
         }
 
         [Fact]

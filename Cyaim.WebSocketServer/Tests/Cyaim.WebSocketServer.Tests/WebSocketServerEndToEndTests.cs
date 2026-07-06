@@ -426,12 +426,14 @@ namespace Cyaim.WebSocketServer.Tests
         [Fact]
         public async Task RequestOverReceiveDataLimit_IsDropped_ConnectionStaysUsable()
         {
-            using var host = await StartHostAsync(CreateOption(o => o.MaxRequestReceiveDataLimit = 16));
+            // Limit sits between the small recovery request (~37 B) and the oversized one (~245 B):
+            // the oversized message is rejected (its remaining frames drained), the small one is served.
+            using var host = await StartHostAsync(CreateOption(o => o.MaxRequestReceiveDataLimit = 64));
             var socket = await ConnectAsync(host);
             using var cts = new CancellationTokenSource(TestTimeout);
 
-            // Oversized fragmented message: the second fragment trips the limit and the
-            // request is discarded without a response.
+            // Oversized fragmented message: it trips the size limit and is discarded without a response;
+            // the server drains its remaining frames so the connection is not left mid-message.
             byte[] big = Encoding.UTF8.GetBytes("{\"id\":\"1\",\"target\":\"wstest.echo\",\"body\":{\"text\":\"" + new string('x', 200) + "\"}}");
             await socket.SendAsync(new ArraySegment<byte>(big, 0, 100), WebSocketMessageType.Text, endOfMessage: false, cts.Token);
             await socket.SendAsync(new ArraySegment<byte>(big, 100, big.Length - 100), WebSocketMessageType.Text, endOfMessage: true, cts.Token);

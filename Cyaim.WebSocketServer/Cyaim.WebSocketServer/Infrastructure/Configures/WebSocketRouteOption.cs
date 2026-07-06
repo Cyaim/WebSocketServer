@@ -126,9 +126,23 @@ namespace Cyaim.WebSocketServer.Infrastructure.Configures
         public bool IsDevelopment { get; set; } = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
 
         /// <summary>
-        /// Maximum receive data limit per request,byte count
+        /// Maximum receive data limit per request, in bytes. Defaults to 4 MiB as an OOM/DoS safety cap;
+        /// a single (multi-frame) message exceeding this is rejected. Set to null for unlimited (accepts
+        /// the OOM risk). Raise it if your app legitimately sends larger messages.
+        /// 单条请求最大接收字节数，默认 4 MiB 作为 OOM/DoS 安全上限；超过则拒绝该(多帧)消息。
+        /// 设为 null 表示不限(自担 OOM 风险)；如确需更大消息请调高。
         /// </summary>
-        public long? MaxRequestReceiveDataLimit { get; set; }
+        public long? MaxRequestReceiveDataLimit { get; set; } = 4L * 1024 * 1024;
+
+        /// <summary>
+        /// Process-wide budget (bytes) for the total in-flight multi-frame receive buffers across ALL
+        /// connections (defence-in-depth against a coordinated burst of large messages OOM-ing the host).
+        /// Null/&lt;=0 disables it (default). When set, a frame that would push the global total over this
+        /// budget is rejected with a size-limit log. Single-frame messages are unaffected.
+        /// 所有连接在途多帧接收缓冲的进程级总预算(字节)——防止大量大消息同时到达把主机内存打爆。默认 null(禁用)。
+        /// 设置后，会使全局总量超预算的帧将被拒绝并记日志。单帧消息不受影响。
+        /// </summary>
+        public long? MaxTotalReceiveBufferBytes { get; set; }
 
         /// <summary>
         /// true if the all identical IDs are allowed to connect and forward, false if the only one connection with the same Connection id is allowed and forwarded

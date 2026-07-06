@@ -104,6 +104,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         public SemaphoreSlim ParallelForwardLimitSlim = null;
 
         /// <summary>
+        /// After processing a message, the per-connection receive stream keeps at most this capacity;
+        /// larger spikes are released so a one-off big multi-frame message doesn't retain peak memory
+        /// for the connection's lifetime. Small multi-frame connections keep their modest buffer (no churn).
+        /// 处理消息后，每连接接收流最多保留此容量；更大的尖峰会被释放，避免一次性大消息长期占用峰值内存。
+        /// </summary>
+        private const int MaxRetainedReceiveCapacity = 64 * 1024;
+
+        /// <summary>
         /// Cached scope factory (singleton) to avoid a service lookup per request.
         /// 缓存的 ScopeFactory（单例），避免每次请求做一次服务查找。
         /// </summary>
@@ -307,7 +315,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             try
             {
                 string wsCloseDesc = string.Empty;
-                using MemoryStream wsReceiveReader = new MemoryStream(ReceiveTextBufferSize);
+                // 应用全局接收内存预算（进程级、幂等）。
+                // Apply the process-wide receive-memory budget (idempotent).
+                WebSocketReceiveMemoryGovernor.MaxBytes = webSocketOptions.MaxTotalReceiveBufferBytes ?? 0;
+                // 初始容量 0：单帧消息走快路径、根本不写这个流，因此绝大多数连接不会分配接收缓冲。
+                // 多帧消息首次写入时才按需增长；处理后在 finally 里收缩大尖峰（见下）。
+                // Zero initial capacity: single-frame messages take the fast path and never write this
+                // stream, so the vast majority of connections allocate no receive buffer. Multi-frame
+                // messages grow it on first write; large spikes are shrunk in the finally below.
+                using MemoryStream wsReceiveReader = new MemoryStream();
                 bool connectionClosed = false;
                 do
                 {
@@ -322,6 +338,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     // the synchronous parse). Null => multi-frame MemoryStream reassembly path.
                     byte[] singleFrameBuffer = null;
                     int singleFrameCount = 0;
+                    // 本条消息在全局接收内存预算中已预留的字节（多帧累计），在本迭代 finally 中释放。
+                    // Bytes this message reserved from the global receive-memory budget (multi-frame), released in finally.
+                    long reservedReceiveBytes = 0;
                     try
                     {
                         // Connection level restrictions
@@ -395,11 +414,24 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                     continue;
                                 }
 
-                                // 请求大小限制
-                                if (wsReceiveReader.Length > webSocketOption.MaxRequestReceiveDataLimit)
+                                // 请求大小限制：注意 wsReceiveReader.Length > (long?)null 在 C# 中恒为 false，
+                                // 之前 limit 未配置(null)时该检查被静默禁用→单条(多帧)消息可无限增长直至 OOM。
+                                // 这里用模式匹配显式判定：limit 有值才限制；null 表示显式"不限"(需自担 OOM 风险)。
+                                // The old `Length > (long?)null` was always false, silently disabling the cap when
+                                // unset. Enforce only when a limit is present; null means explicitly unlimited.
+                                // 累计接收字节 = 已写入流的多帧数据 + 本帧(尚未写入)，避免超限后仍先写入再判断。
+                                long accumulatedLen = wsReceiveReader.Length + (result?.Count ?? 0);
+                                if (webSocketOption.MaxRequestReceiveDataLimit is long maxLen && accumulatedLen > maxLen)
                                 {
                                     logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
 
+                                    // 排空该超限消息的剩余帧(只读不存),避免残余帧被当作新消息误读；内存不增长。
+                                    // Drain the rest of the oversized message (read, don't store) so its remaining
+                                    // frames aren't misread as a new message. Memory does not grow while draining.
+                                    while (!(result.EndOfMessage || result.CloseStatus.HasValue))
+                                    {
+                                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                                    }
                                     goto CONTINUE_RECEIVE;
                                 }
 
@@ -451,6 +483,20 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                     messageComplete = true;
                                     break;
                                 }
+
+                                // 多帧：先向全局接收内存预算预留本帧字节；超预算则拒绝该消息（背压）。
+                                // Multi-frame: reserve this frame against the global receive budget; reject on over-budget.
+                                if (!WebSocketReceiveMemoryGovernor.TryReserve(result.Count))
+                                {
+                                    logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
+                                    // 排空该消息剩余帧,避免残余帧误读。 / Drain remaining frames of this rejected message.
+                                    while (!(result.EndOfMessage || result.CloseStatus.HasValue))
+                                    {
+                                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                                    }
+                                    goto CONTINUE_RECEIVE;
+                                }
+                                reservedReceiveBytes += result.Count;
 
                                 // 多帧：写入 MemoryStream 重组
                                 // Multi-frame: reassemble into the MemoryStream
@@ -672,6 +718,21 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         wsReceiveReader.SetLength(0);
                         wsReceiveReader.Seek(0, SeekOrigin.Begin);
                         wsReceiveReader.Position = 0;
+                        // 收缩大尖峰：一次大多帧消息后不再永久占用峰值内存。此时同步解析已完成、异步转发只引用 ctx，
+                        // 且 Length 已为 0（SetLength(0) 之后收缩 Capacity 不会抛），因此安全。单帧连接 Capacity 恒为 0，此处 no-op。
+                        // Shrink large spikes so one big multi-frame message doesn't retain peak memory for the
+                        // connection's lifetime. Safe here: reads of receivedData are done, Length is already 0.
+                        if (wsReceiveReader.Capacity > MaxRetainedReceiveCapacity)
+                        {
+                            wsReceiveReader.Capacity = 0;
+                        }
+                        // 释放本条消息在全局接收内存预算中预留的字节。
+                        // Release this message's reservation from the global receive-memory budget.
+                        if (reservedReceiveBytes > 0)
+                        {
+                            WebSocketReceiveMemoryGovernor.Release(reservedReceiveBytes);
+                            reservedReceiveBytes = 0;
+                        }
 
                         // 释放信号量
                         if (ParallelForwardLimitSlim != null)

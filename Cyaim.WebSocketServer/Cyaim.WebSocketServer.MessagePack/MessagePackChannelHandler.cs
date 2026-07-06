@@ -98,6 +98,12 @@ namespace Cyaim.WebSocketServer.MessagePack
         public SemaphoreSlim ParallelForwardLimitSlim = null;
 
         /// <summary>
+        /// Max capacity retained by the per-connection receive stream after a message; larger spikes are released.
+        /// 处理后每连接接收流最多保留的容量；更大的尖峰会被释放。
+        /// </summary>
+        private const int MaxRetainedReceiveCapacity = 64 * 1024;
+
+        /// <summary>
         /// MessagePack Channel entry
         /// </summary>
         /// <param name="context"></param>
@@ -424,7 +430,11 @@ namespace Cyaim.WebSocketServer.MessagePack
             try
             {
                 string wsCloseDesc = string.Empty;
-                using MemoryStream wsReceiveReader = new MemoryStream(ReceiveBinaryBufferSize);
+                // 应用全局接收内存预算（进程级、幂等）。
+                Cyaim.WebSocketServer.Infrastructure.WebSocketReceiveMemoryGovernor.MaxBytes = webSocketOption.MaxTotalReceiveBufferBytes ?? 0;
+                // 初始容量 0：单帧走快路径不写此流，绝大多数连接不分配接收缓冲；多帧首次写入才增长。
+                // Zero initial capacity: single-frame fast path never writes it, so most connections allocate none.
+                using MemoryStream wsReceiveReader = new MemoryStream();
                 do
                 {
                     long requestTime = DateTime.Now.Ticks;
@@ -435,6 +445,8 @@ namespace Cyaim.WebSocketServer.MessagePack
                     // ReceiveAsync (returned in the outer finally). Null => multi-frame reassembly path.
                     byte[] singleFrameBuffer = null;
                     int singleFrameCount = 0;
+                    // 本条消息在全局接收内存预算中已预留的字节（多帧累计），在本迭代 finally 中释放。
+                    long reservedReceiveBytes = 0;
                     try
                     {
                         // Connection level restrictions
@@ -462,10 +474,19 @@ namespace Cyaim.WebSocketServer.MessagePack
                         {
                             try
                             {
-                                // 请求大小限制
-                                if (wsReceiveReader.Length > webSocketOption.MaxRequestReceiveDataLimit)
+                                // 请求大小限制：Length > (long?)null 恒为 false，未配置时该检查被静默禁用。
+                                // 用模式匹配显式判定，并按累计字节(已写入+本帧)判断，超限即拒绝该多帧消息。
+                                // Enforce only when a limit is present (null == explicitly unlimited); check the
+                                // accumulated length so an over-limit message is rejected before further growth.
+                                long accumulatedLen = wsReceiveReader.Length + (result?.Count ?? 0);
+                                if (webSocketOption.MaxRequestReceiveDataLimit is long maxLen && accumulatedLen > maxLen)
                                 {
                                     logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
+                                    // 排空该超限消息剩余帧,避免残余帧误读。 / Drain the rest of the oversized message.
+                                    while (!(result.EndOfMessage || result.CloseStatus.HasValue))
+                                    {
+                                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                                    }
                                     goto CONTINUE_RECEIVE;
                                 }
 
@@ -509,6 +530,19 @@ namespace Cyaim.WebSocketServer.MessagePack
                                     singleFrameCount = result.Count;
                                     break;
                                 }
+
+                                // 多帧：先向全局接收内存预算预留本帧字节；超预算则拒绝该消息（背压）。
+                                if (!Cyaim.WebSocketServer.Infrastructure.WebSocketReceiveMemoryGovernor.TryReserve(result.Count))
+                                {
+                                    logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.ConnectionEntry_RequestSizeMaximumLimit));
+                                    // 排空该消息剩余帧。 / Drain remaining frames of this rejected message.
+                                    while (!(result.EndOfMessage || result.CloseStatus.HasValue))
+                                    {
+                                        result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                                    }
+                                    goto CONTINUE_RECEIVE;
+                                }
+                                reservedReceiveBytes += result.Count;
 
                                 // 多帧：写入 MemoryStream 重组
                                 await wsReceiveReader.WriteAsync(buffer.AsMemory(0, result.Count));
@@ -710,6 +744,18 @@ namespace Cyaim.WebSocketServer.MessagePack
                         wsReceiveReader.SetLength(0);
                         wsReceiveReader.Seek(0, SeekOrigin.Begin);
                         wsReceiveReader.Position = 0;
+                        // 收缩大尖峰，避免一次大多帧消息后长期占用峰值内存（Length 已为 0，收缩安全；单帧连接 Capacity 恒为 0）。
+                        // Release large spikes so one big message doesn't retain peak memory (Length is 0, so safe).
+                        if (wsReceiveReader.Capacity > MaxRetainedReceiveCapacity)
+                        {
+                            wsReceiveReader.Capacity = 0;
+                        }
+                        // 释放本条消息在全局接收内存预算中预留的字节。
+                        if (reservedReceiveBytes > 0)
+                        {
+                            Cyaim.WebSocketServer.Infrastructure.WebSocketReceiveMemoryGovernor.Release(reservedReceiveBytes);
+                            reservedReceiveBytes = 0;
+                        }
 
                         if (ParallelForwardLimitSlim != null)
                         {
