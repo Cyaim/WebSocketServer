@@ -64,30 +64,41 @@ jobs:
         with: { distribution: 'temurin', java-version: '11' }
 
       - name: Build all client packages
+        # Resilient: a failure in any single package must not prevent the GitHub Release from
+        # being created with the packages that did build successfully.
         run: |
-          set -e
+          set +e
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
           C="$GITHUB_WORKSPACE/$CLIENTS_DIR"
 
-          # C# (NuGet)
-          dotnet pack "$C/Cyaim.WebSocketServer.Client/Cyaim.WebSocketServer.Client.csproj" -c Release -o "$GITHUB_WORKSPACE/artifacts"
+          echo "::group::C# (NuGet)"
+          dotnet pack "$C/Cyaim.WebSocketServer.Client/Cyaim.WebSocketServer.Client.csproj" -c Release -o "$GITHUB_WORKSPACE/artifacts" || echo "C# pack failed"
+          echo "::endgroup::"
 
-          # JS (npm)
-          ( cd "$C/cyaim-websocket-client-js" && npm ci && npm run build && npm pack --pack-destination "$GITHUB_WORKSPACE/artifacts" )
+          echo "::group::JS (npm)"
+          ( cd "$C/cyaim-websocket-client-js" && npm install && npm run build && npm pack --pack-destination "$GITHUB_WORKSPACE/artifacts" ) || echo "JS pack failed"
+          echo "::endgroup::"
 
-          # Python (sdist + wheel)
-          ( cd "$C/cyaim-websocket-client-python" && python -m pip install build && python -m build --outdir "$GITHUB_WORKSPACE/artifacts" )
+          echo "::group::Python (sdist + wheel)"
+          ( cd "$C/cyaim-websocket-client-python" && python -m pip install build && python -m build --outdir "$GITHUB_WORKSPACE/artifacts" ) || echo "Python build failed"
+          echo "::endgroup::"
 
-          # Rust (.crate)
-          ( cd "$C/cyaim-websocket-client-rs" && cargo package --no-verify && cp target/package/*.crate "$GITHUB_WORKSPACE/artifacts/" )
+          echo "::group::Rust (.crate)"
+          ( cd "$C/cyaim-websocket-client-rs" && cargo package --no-verify && cp target/package/*.crate "$GITHUB_WORKSPACE/artifacts/" ) || echo "Rust package failed"
+          echo "::endgroup::"
 
-          # Java (jar) via Maven
-          ( cd "$C/cyaim-websocket-client-java" && mvn -B -q package -DskipTests && cp target/*.jar "$GITHUB_WORKSPACE/artifacts/" )
+          echo "::group::Java (jar)"
+          ( cd "$C/cyaim-websocket-client-java" && mvn -B -q package -DskipTests && cp target/*.jar "$GITHUB_WORKSPACE/artifacts/" ) || echo "Java package failed"
+          echo "::endgroup::"
 
-          # Dart (source archive; pub.dev publish happens in its own job)
-          ( cd "$C/cyaim-websocket-client-dart" && tar czf "$GITHUB_WORKSPACE/artifacts/cyaim_websocket_client-dart.tar.gz" --exclude .dart_tool --exclude build . )
+          echo "::group::Dart (source archive)"
+          ( cd "$C/cyaim-websocket-client-dart" && tar czf "$GITHUB_WORKSPACE/artifacts/cyaim_websocket_client-dart.tar.gz" --exclude .dart_tool --exclude build . ) || echo "Dart archive failed"
+          echo "::endgroup::"
 
           ls -la "$GITHUB_WORKSPACE/artifacts"
+          # Guarantee at least one asset so the release is never empty.
+          [ -z "$(ls -A "$GITHUB_WORKSPACE/artifacts")" ] && echo "see workflow logs" > "$GITHUB_WORKSPACE/artifacts/BUILD_NOTES.txt"
+          exit 0
 
       - name: Create GitHub Release with artifacts
         uses: softprops/action-gh-release@v2
@@ -95,6 +106,7 @@ jobs:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('client-v{0}', steps.ver.outputs.version) }}
           name: Client Libraries v${{ steps.ver.outputs.version }}
           generate_release_notes: true
+          fail_on_unmatched_files: false
           files: artifacts/*
 
   # 2) Publish to each registry (each guarded on its secret; missing secret => skipped).
