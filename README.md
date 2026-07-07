@@ -18,6 +18,8 @@
 - ✅ **Multi-node Cluster** - Raft-based consensus protocol
 - ✅ **Multi-language Clients** - C#, TypeScript, Rust, Java, Dart, Python
 - ✅ **Automatic Endpoint Discovery** - Client SDKs auto-discover server endpoints
+- ✅ **Streaming Upload** - `[WebSocket(Stream = true)]` streams large files with constant server memory / 大文件流式上传，服务端内存恒定
+- ✅ **Receive Memory Control** - Per-connection / per-endpoint / global receive caps, safe by default / 三级接收内存封顶，默认即安全
 - ✅ **Dashboard** - Real-time monitoring and statistics
 
 # QuickStart
@@ -32,7 +34,7 @@ Install-Package Cyaim.WebSocketServer
 dotnet add package Cyaim.WebSocketServer
 
 # PackageReference
-<PackageReference Include="Cyaim.WebSocketServer" Version="1.7.8" />
+<PackageReference Include="Cyaim.WebSocketServer" Version="2.0.0" />
 ```
 
 ## 2. Configure WebSocket Server / 配置 WebSocket 服务器
@@ -261,12 +263,12 @@ Request body will be deserialized and passed to the method parameter.
 
 We provide multi-language client SDKs with automatic endpoint discovery:
 
-- **C#** - [Cyaim.WebSocketServer.Client](./Clients/Cyaim.WebSocketServer.Client/README.md)
-- **TypeScript/JavaScript** - [@cyaim/websocket-client](./Clients/cyaim-websocket-client-js/README.md)
-- **Rust** - [cyaim-websocket-client](./Clients/cyaim-websocket-client-rs/README.md)
-- **Java** - [websocket-client](./Clients/cyaim-websocket-client-java/README.md)
-- **Dart** - [cyaim_websocket_client](./Clients/cyaim-websocket-client-dart/README.md)
-- **Python** - [cyaim-websocket-client](./Clients/cyaim-websocket-client-python/README.md)
+- **C#** - [Cyaim.WebSocketServer.Client](./Cyaim.WebSocketServer/Clients/Cyaim.WebSocketServer.Client/README.md)
+- **TypeScript/JavaScript** - [@cyaim/websocket-client](./Cyaim.WebSocketServer/Clients/cyaim-websocket-client-js/README.md)
+- **Rust** - [cyaim-websocket-client](./Cyaim.WebSocketServer/Clients/cyaim-websocket-client-rs/README.md)
+- **Java** - [websocket-client](./Cyaim.WebSocketServer/Clients/cyaim-websocket-client-java/README.md)
+- **Dart** - [cyaim_websocket_client](./Cyaim.WebSocketServer/Clients/cyaim-websocket-client-dart/README.md)
+- **Python** - [cyaim-websocket-client](./Cyaim.WebSocketServer/Clients/cyaim-websocket-client-python/README.md)
 
 ### Quick Example / 快速示例
 
@@ -295,6 +297,35 @@ const forecasts = await client.getForecasts();
 
 
 
+
+## Streaming Upload & Memory Control / 流式上传与接收内存控制
+
+Ordinary endpoints buffer each message (default cap **4 MiB**, configurable via `MaxRequestReceiveDataLimit`
+or per-endpoint `[WebSocket(MaxBytes = N)]`). To transfer large files, mark the endpoint `Stream = true` — the
+payload is fed to your endpoint as a `Stream` **without buffering**, so server memory stays constant.  
+普通端点会整条缓冲消息（默认上限 **4 MiB**，可用 `MaxRequestReceiveDataLimit` 或端点级 `[WebSocket(MaxBytes = N)]` 调整）。要传大文件，把端点标成 `Stream = true`，负载会作为 `Stream` **边收边喂**给端点，服务端内存恒定。
+
+```csharp
+// Server: a streaming upload endpoint / 服务端：流式上传端点
+[WebSocket("file.upload", Stream = true, MaxBytes = 2L * 1024 * 1024 * 1024)]
+public async Task<object> Upload(UploadMeta meta, Stream body, CancellationToken ct)
+{
+    await using var fs = File.Create(Path.Combine(dir, meta.FileName));
+    await body.CopyToAsync(fs, ct);          // constant memory, end-to-end backpressure
+    return new { bytes = fs.Length };
+}
+```
+
+```typescript
+// Client: upload with the uploadStream helper (all 6 SDKs provide one) / 客户端：uploadStream 帮助方法
+const res = await client.uploadStream("file.upload", fs.createReadStream("big.bin"), { fileName: "big.bin" });
+```
+
+> ⚠️ **2.0 behaviour change**: `MaxRequestReceiveDataLimit` now defaults to **4 MiB** (was unlimited). If you
+> send single messages larger than 4 MiB through ordinary endpoints, raise it (or set `null`), or use a
+> streaming endpoint. / **2.0 行为变更**：该上限默认从"不限"改为 4 MiB，大消息需显式调大或改用流式端点。
+
+> **For more details, see**: [Streaming Upload & Memory Control](./Cyaim.WebSocketServer/docs/en/STREAMING_UPLOAD.md) | [流式上传与内存控制](./Cyaim.WebSocketServer/docs/zh-cn/STREAMING_UPLOAD.md)
 
 ## Cluster / 集群
 
@@ -388,6 +419,7 @@ var clusterOption = new ClusterOption
 
 - **[Quick Start Guide](./Cyaim.WebSocketServer/docs/zh-cn/QUICK_START.md)** - Get started in 5 minutes / 5 分钟快速上手
 - **[Core Library](./Cyaim.WebSocketServer/docs/zh-cn/CORE.md)** - Core features and routing / 核心功能和路由
+- **[Streaming Upload & Memory Control](./Cyaim.WebSocketServer/docs/zh-cn/STREAMING_UPLOAD.md)** - Large-file streaming upload & receive caps / 大文件流式上传与接收内存控制
 - **[Configuration Guide](./Cyaim.WebSocketServer/docs/zh-cn/CONFIGURATION.md)** - Configuration options / 配置选项
 - **[API Reference](./Cyaim.WebSocketServer/docs/zh-cn/API_REFERENCE.md)** - Complete API documentation / 完整 API 文档
 - **[Dashboard](./Cyaim.WebSocketServer/docs/zh-cn/DASHBOARD.md)** - Monitoring and statistics / 监控和统计

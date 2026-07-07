@@ -9,6 +9,7 @@
 - **[快速开始](./QUICK_START.md)** - 5 分钟快速上手
 - **[核心库文档](./CORE.md)** - 核心功能、路由系统、处理器详解
 - **[配置指南](./CONFIGURATION.md)** - 详细配置选项和最佳实践
+- **[流式上传与内存控制](./STREAMING_UPLOAD.md)** - 大文件流式上传（内存恒定）、接收内存三级封顶、客户端 `uploadStream`
 - **[API 参考](./API_REFERENCE.md)** - 完整的 API 文档
 
 ### 功能模块
@@ -55,6 +56,12 @@
 2. 选择您偏好的语言（C#、TypeScript、Rust、Java、Dart、Python）
 3. 按照对应语言的快速开始指南
 
+### 我需要传大文件 / 控制接收内存
+
+1. 阅读 [流式上传与内存控制](./STREAMING_UPLOAD.md) 了解流式端点与三级接收上限
+2. 把上传端点标记为 `[WebSocket(Stream = true)]`，用客户端 `uploadStream` 上传
+3. 注意 2.0 起 `MaxRequestReceiveDataLimit` 默认 4 MiB（大消息需显式调大或改流式）
+
 ## 📦 项目结构
 
 ```
@@ -92,6 +99,8 @@ Cyaim.WebSocketServer/
 - ✅ **全双工通信** - 支持客户端和服务器双向通信
 - ✅ **多路复用** - 单个连接支持多个请求/响应
 - ✅ **管道处理** - 支持中间件管道模式
+- ✅ **流式上传** - `[WebSocket(Stream = true)]` 端点大文件流式接收，服务端内存恒定、端到端背压
+- ✅ **接收内存控制** - 按连接/端点/全局三级封顶接收字节，默认即安全防 OOM/DoS
 
 ### 集群功能
 
@@ -122,10 +131,11 @@ Cyaim.WebSocketServer/
 - .NET 7.0
 - .NET 8.0
 - .NET 9.0
+- .NET 10.0
 
 ## 📝 版本信息
 
-当前版本：**1.7.8**
+当前版本：**2.0.0**
 
 查看 [CHANGELOG.md](../../CHANGELOG.md) 了解版本历史。
 

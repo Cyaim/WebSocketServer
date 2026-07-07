@@ -16,6 +16,7 @@ Welcome to the Cyaim.WebSocketServer documentation center. This documentation pr
 - **[Quick Start](./en/QUICK_START.md)** - Get started in 5 minutes
 - **[Core Library](./en/CORE.md)** - Core features, routing system, handlers
 - **[Configuration Guide](./en/CONFIGURATION.md)** - Detailed configuration options and best practices
+- **[Streaming Upload & Memory Control](./en/STREAMING_UPLOAD.md)** - Constant-memory large-file upload, 3-level receive caps, client `uploadStream` ([中文](./zh-cn/STREAMING_UPLOAD.md))
 - **[API Reference](./en/API_REFERENCE.md)** - Complete API documentation
 
 ### Feature Modules
@@ -95,6 +96,8 @@ Cyaim.WebSocketServer/
 - ✅ **Full Duplex Communication** - Supports bidirectional communication
 - ✅ **Multiplexing** - Single connection supports multiple requests/responses
 - ✅ **Pipeline Processing** - Supports middleware pipeline pattern
+- ✅ **Streaming Upload** - `[WebSocket(Stream = true)]` endpoints stream large files with constant server memory
+- ✅ **Receive Memory Control** - Per-connection / per-endpoint / global receive caps; safe-by-default OOM/DoS guard
 
 ### Cluster Features
 
@@ -125,10 +128,11 @@ Cyaim.WebSocketServer/
 - .NET 7.0
 - .NET 8.0
 - .NET 9.0
+- .NET 10.0
 
 ## 📝 Version Information
 
-Current Version: **1.7.8**
+Current Version: **2.0.0**
 
 Check [CHANGELOG.md](../CHANGELOG.md) for version history.
 

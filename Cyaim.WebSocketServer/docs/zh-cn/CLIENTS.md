@@ -137,6 +137,19 @@ const forecasts = await client.getForecasts();
 - **验证**: 可选验证所有方法都有对应的 endpoint
 - **错误处理**: 可配置的错误处理行为
 
+### 5. 流式文件上传 `uploadStream`
+
+6 个客户端均提供上传帮助方法（`uploadStream` / `UploadStreamAsync` / `upload_stream`），向服务端流式端点
+（`[WebSocket(Stream = true)]`）上传大文件，响应关联方式与普通请求一致：
+
+```typescript
+// JS/TS：source 支持 Uint8Array / Node Readable / (异步)可迭代字节块
+const res = await client.uploadStream("file.upload", fs.createReadStream("big.bin"), { fileName: "big.bin" });
+```
+
+JS / Python / C# / Java 走真正的帧级分片，客户端内存不随文件增大；Dart / Rust 受各自库限制客户端侧缓冲，
+但服务端接收始终是流式的。详见 [流式上传与内存控制](./STREAMING_UPLOAD.md)。
+
 ## 快速开始示例
 
 ### C#

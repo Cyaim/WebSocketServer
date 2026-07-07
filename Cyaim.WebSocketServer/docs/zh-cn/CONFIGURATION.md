@@ -35,6 +35,27 @@ builder.Services.ConfigureWebSocketRoute(x =>
 });
 ```
 
+### 接收内存控制（防 OOM/DoS）
+
+| 选项 | 默认 | 说明 |
+|---|---|---|
+| `MaxRequestReceiveDataLimit` | **4 MiB** | 单条消息最多缓冲的字节；`null` = 不限（自担 OOM 风险）。 |
+| `MaxTotalReceiveBufferBytes` | `null`（禁用） | 所有连接"在途多帧接收缓冲"字节总预算（纵深防御）。 |
+| `MaxConnectionLimit` | `null` | 最大并发连接数。 |
+
+```csharp
+builder.Services.AddWebSocketServer(x =>
+{
+    x.MaxRequestReceiveDataLimit = 4L * 1024 * 1024;   // 默认 4 MiB；null=不限
+    x.MaxTotalReceiveBufferBytes = 512L * 1024 * 1024; // 可选：全局在途接收缓冲总预算
+});
+```
+
+端点级覆盖：`[WebSocket("bulk.import", MaxBytes = 32 * 1024 * 1024)]`（缓冲式端点单条上限）。
+大文件请改用流式端点 `[WebSocket(Stream = true)]`（内存恒定）。
+
+> ⚠️ **2.0 行为变更**：`MaxRequestReceiveDataLimit` 默认从"不限"改为 **4 MiB**。若现有业务经普通端点收发大于 4 MiB 的单条消息，请显式调大或设 `null`，或改用流式端点。详见 [流式上传与内存控制](./STREAMING_UPLOAD.md)。
+
 ## WebSocket 配置
 
 ### WebSocketOptions
