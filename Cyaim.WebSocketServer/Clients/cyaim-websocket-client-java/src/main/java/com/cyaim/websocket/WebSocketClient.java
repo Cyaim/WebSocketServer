@@ -150,6 +150,93 @@ public class WebSocketClient {
         return future;
     }
 
+    /**
+     * Stream a large payload (e.g. a file) to a streaming endpoint ({@code [WebSocket(Stream = true)]})
+     * without buffering it all in memory. Framed as a binary message:
+     * [4-byte magic "\0WSU"][4-byte big-endian header length][UTF8 JSON header {id,target,meta}][raw bytes...].
+     * The response is correlated by id, like {@link #sendRequest}.
+     * 向流式端点上传大负载（如文件），负载不整体缓冲；响应按 id 关联。
+     */
+    public <TResponse> CompletableFuture<TResponse> uploadStream(
+            String target, java.io.InputStream source, Object meta, int chunkSize, Class<TResponse> responseType) {
+        if (webSocket == null || !webSocket.isOpen()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("WebSocket is not connected. Call connect() first."));
+        }
+
+        String requestId = java.util.UUID.randomUUID().toString();
+        CompletableFuture<TResponse> future = new CompletableFuture<>();
+        pendingResponses.put(requestId, new CompletableFuture<MvcResponseScheme>() {
+            @Override
+            public boolean complete(MvcResponseScheme value) {
+                if (value.status != 0) {
+                    future.completeExceptionally(
+                        new RuntimeException(value.msg != null ? value.msg : "Unknown error"));
+                } else {
+                    try {
+                        future.complete(value.body != null
+                            ? gson.fromJson(gson.toJsonTree(value.body), responseType) : null);
+                    } catch (Exception e) {
+                        future.completeExceptionally(e);
+                    }
+                }
+                return super.complete(value);
+            }
+        });
+
+        try {
+            int size = chunkSize <= 0 ? 256 * 1024 : chunkSize;
+            java.util.Map<String, Object> headerMap = new java.util.HashMap<>();
+            headerMap.put("id", requestId);
+            headerMap.put("target", target);
+            headerMap.put("meta", meta);
+            byte[] header = gson.toJson(headerMap).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+            // frame 1: magic + header-length (big-endian) + header
+            java.nio.ByteBuffer first = java.nio.ByteBuffer.allocate(8 + header.length);
+            first.put((byte) 0x00).put((byte) 'W').put((byte) 'S').put((byte) 'U');
+            first.putInt(header.length);
+            first.put(header);
+            first.flip();
+            webSocket.sendFragmentedFrame(org.java_websocket.enums.Opcode.BINARY, first, false);
+
+            // payload frames with one-chunk read-ahead so the FINAL frame carries fin=true
+            byte[] buf = new byte[size];
+            byte[] next = new byte[size];
+            int read = source.read(buf);
+            if (read <= 0) {
+                webSocket.sendFragmentedFrame(org.java_websocket.enums.Opcode.BINARY, java.nio.ByteBuffer.allocate(0), true);
+            } else {
+                while (true) {
+                    int nextRead = source.read(next);
+                    boolean isLast = nextRead <= 0;
+                    webSocket.sendFragmentedFrame(org.java_websocket.enums.Opcode.BINARY,
+                        java.nio.ByteBuffer.wrap(java.util.Arrays.copyOfRange(buf, 0, read)), isLast);
+                    if (isLast) {
+                        break;
+                    }
+                    byte[] tmp = buf; buf = next; next = tmp; read = nextRead;
+                }
+            }
+        } catch (Exception e) {
+            pendingResponses.remove(requestId);
+            future.completeExceptionally(e);
+            return future;
+        }
+
+        // Timeout after 5 minutes
+        java.util.concurrent.ScheduledExecutorService scheduler =
+            java.util.concurrent.Executors.newScheduledThreadPool(1);
+        scheduler.schedule(() -> {
+            if (pendingResponses.containsKey(requestId)) {
+                pendingResponses.remove(requestId);
+                future.completeExceptionally(new RuntimeException("Upload timeout"));
+            }
+        }, 5, java.util.concurrent.TimeUnit.MINUTES);
+
+        return future;
+    }
+
     private void handleTextMessage(String message) {
         if (options.protocol != SerializationProtocol.Json) {
             return;

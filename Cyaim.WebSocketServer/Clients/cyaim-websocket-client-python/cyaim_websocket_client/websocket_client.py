@@ -123,6 +123,77 @@ class WebSocketClient:
         finally:
             self.pending_responses.pop(request_id, None)
 
+    async def upload_stream(self, target: str, source: Any, meta: Optional[Any] = None,
+                            chunk_size: int = 256 * 1024, timeout: float = 300.0) -> Any:
+        """Stream a large payload (e.g. a file) to a streaming endpoint ([WebSocket(Stream = True)]) without
+        buffering it all in memory. Framed as a binary message:
+        [4-byte magic \\x00WSU][4-byte big-endian header length][UTF8 JSON header {id,target,meta}][raw bytes...].
+        The response is correlated by id, like send_request.
+        向流式端点上传大负载（如文件），负载不整体缓冲；响应按 id 关联。
+        `source` may be bytes, a file-like object (with .read), or a (sync/async) iterable of byte chunks.
+        """
+        if not self.websocket:
+            raise RuntimeError("WebSocket is not connected. Call connect() first.")
+
+        request_id = str(uuid.uuid4())
+        header = json.dumps({"id": request_id, "target": target, "meta": meta}).encode("utf-8")
+        prefix = b"\x00WSU" + len(header).to_bytes(4, "big")
+
+        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        self.pending_responses[request_id] = future
+
+        async def _frames():
+            # frame 1: magic + header-length + header; then payload frames (never buffers the whole payload)
+            yield prefix + header
+            async for chunk in self._chunk_source(source, chunk_size):
+                if chunk:
+                    yield bytes(chunk)
+
+        try:
+            # websockets sends an (async) iterable as a single fragmented binary message
+            await self.websocket.send(_frames())
+            response = await asyncio.wait_for(future, timeout=timeout)
+            if response.get('status', 0) != 0:
+                raise RuntimeError(response.get('msg') or 'Unknown error')
+            return response.get('body')
+        except asyncio.TimeoutError:
+            self.pending_responses.pop(request_id, None)
+            raise RuntimeError("Upload timeout")
+        finally:
+            self.pending_responses.pop(request_id, None)
+
+    @staticmethod
+    async def _chunk_source(source: Any, chunk_size: int):
+        """Normalize any supported upload source into byte chunks no larger than chunk_size."""
+        if isinstance(source, (bytes, bytearray, memoryview)):
+            data = bytes(source)
+            for off in range(0, len(data), chunk_size):
+                yield data[off:off + chunk_size]
+            return
+        read = getattr(source, "read", None)
+        if callable(read):
+            while True:
+                chunk = read(chunk_size)
+                if asyncio.iscoroutine(chunk):
+                    chunk = await chunk
+                if not chunk:
+                    break
+                yield chunk
+            return
+        if hasattr(source, "__aiter__"):
+            async for part in source:
+                data = bytes(part)
+                for off in range(0, len(data), chunk_size):
+                    yield data[off:off + chunk_size]
+            return
+        if hasattr(source, "__iter__"):
+            for part in source:
+                data = bytes(part)
+                for off in range(0, len(data), chunk_size):
+                    yield data[off:off + chunk_size]
+            return
+        raise TypeError("Unsupported upload source: expected bytes, a file-like object, or an iterable of bytes.")
+
     async def disconnect(self):
         """Disconnect from server"""
         if self._listen_task:

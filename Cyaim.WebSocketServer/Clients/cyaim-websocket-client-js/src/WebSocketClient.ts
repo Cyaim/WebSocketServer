@@ -161,6 +161,130 @@ export class WebSocketClient {
         }
 
         /**
+         * Stream a large payload (e.g. a file) to a streaming endpoint ([WebSocket(Stream = true)]) without
+         * buffering it all in memory. The payload is framed as a binary message:
+         *   [4-byte magic "\0WSU"][4-byte big-endian header length N][UTF8 JSON header {id,target,meta}][raw bytes...]
+         * The response is correlated by id, exactly like sendRequest.
+         * 向流式端点上传大负载（如文件），负载不整体缓冲；响应按 id 关联，用法同 sendRequest。
+         *
+         * @param source A Uint8Array/Buffer, a Node Readable stream, or any (async) iterable of byte chunks.
+         */
+        async uploadStream<TResponse = any>(
+                target: string,
+                source:
+                        | Uint8Array
+                        | NodeJS.ReadableStream
+                        | AsyncIterable<Uint8Array>
+                        | Iterable<Uint8Array>,
+                meta?: any,
+                options?: { chunkSize?: number; timeoutMs?: number }
+        ): Promise<TResponse> {
+                if (
+                        !this.webSocket ||
+                        this.webSocket.readyState !== WebSocket.OPEN
+                ) {
+                        throw new Error(
+                                "WebSocket is not connected. Call connect() first."
+                        );
+                }
+
+                const requestId = this.generateId();
+                const headerBytes = Buffer.from(
+                        JSON.stringify({ id: requestId, target, meta: meta ?? null }),
+                        "utf8"
+                );
+                const prefix = Buffer.alloc(8);
+                // magic "\0WSU"
+                prefix[0] = 0x00;
+                prefix[1] = 0x57;
+                prefix[2] = 0x53;
+                prefix[3] = 0x55;
+                prefix.writeUInt32BE(headerBytes.length, 4);
+                const chunkSize = options?.chunkSize ?? 256 * 1024;
+                const timeoutMs = options?.timeoutMs ?? 300000;
+
+                const promise = new Promise<TResponse>((resolve, reject) => {
+                        this.pendingResponses.set(requestId, { resolve, reject });
+                        setTimeout(() => {
+                                if (this.pendingResponses.has(requestId)) {
+                                        this.pendingResponses.delete(requestId);
+                                        reject(new Error("Upload timeout"));
+                                }
+                        }, timeoutMs);
+                });
+
+                try {
+                        // frame 1: magic + header-length + header — start of the fragmented binary message
+                        await this.sendFrame(
+                                Buffer.concat([prefix, headerBytes]),
+                                false
+                        );
+                        // payload frames (never buffers the whole payload)
+                        for await (const chunk of WebSocketClient.chunkSource(
+                                source,
+                                chunkSize
+                        )) {
+                                if (chunk.length > 0) {
+                                        await this.sendFrame(chunk, false);
+                                }
+                        }
+                        // terminator: an empty final frame closes the message
+                        await this.sendFrame(Buffer.alloc(0), true);
+                } catch (err) {
+                        this.pendingResponses.delete(requestId);
+                        throw err;
+                }
+                return promise;
+        }
+
+        /** Send one binary frame; resolves once the frame is written (natural backpressure). */
+        private sendFrame(data: Uint8Array, fin: boolean): Promise<void> {
+                return new Promise((resolve, reject) => {
+                        this.webSocket!.send(
+                                data,
+                                { binary: true, fin },
+                                (err?: Error) => (err ? reject(err) : resolve())
+                        );
+                });
+        }
+
+        /** Normalize any supported source into byte chunks no larger than chunkSize. */
+        private static async *chunkSource(
+                source: any,
+                chunkSize: number
+        ): AsyncGenerator<Uint8Array> {
+                const emit = function* (buf: Uint8Array): Generator<Uint8Array> {
+                        for (let off = 0; off < buf.length; off += chunkSize) {
+                                yield buf.subarray(
+                                        off,
+                                        Math.min(off + chunkSize, buf.length)
+                                );
+                        }
+                };
+                if (source instanceof Uint8Array) {
+                        yield* emit(source);
+                        return;
+                }
+                if (
+                        source &&
+                        (typeof source[Symbol.asyncIterator] === "function" ||
+                                typeof source[Symbol.iterator] === "function")
+                ) {
+                        for await (const part of source as AsyncIterable<any>) {
+                                const buf =
+                                        part instanceof Uint8Array
+                                                ? part
+                                                : Buffer.from(part);
+                                yield* emit(buf);
+                        }
+                        return;
+                }
+                throw new Error(
+                        "Unsupported upload source: expected Uint8Array, Readable stream, or (async) iterable of bytes."
+                );
+        }
+
+        /**
          * Handle incoming message / 处理接收到的消息
          */
         private handleMessage(data: WebSocket.Data): void {

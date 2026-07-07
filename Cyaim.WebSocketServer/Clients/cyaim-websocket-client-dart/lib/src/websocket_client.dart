@@ -97,6 +97,65 @@ class WebSocketClient {
     return jsonDecode(jsonEncode(response.body)) as T;
   }
 
+  /// Upload a payload (e.g. a file) to a streaming endpoint ([WebSocket(Stream = true)]). Framed as one
+  /// binary message: [magic "\0WSU"][4-byte big-endian header length][UTF8 JSON header {id,target,meta}][payload].
+  /// The server streams the payload without buffering it. Note: web_socket_channel sends one message per add,
+  /// so the client collects [source] into memory first (WebSocket-library limitation).
+  /// 向流式端点上传负载；服务端流式处理、不整体缓冲。本客户端受 WebSocket 库限制会先把 [source] 收进内存拼成一条消息。
+  /// [source] may be a List<int>, a Future<List<int>>, or a Stream<List<int>>.
+  Future<T> uploadStream<T>(String target, dynamic source, {dynamic meta}) async {
+    if (_channel == null) {
+      throw StateError('WebSocket is not connected. Call connect() first.');
+    }
+    final payload = await _collectBytes(source);
+    final requestId = '${DateTime.now().millisecondsSinceEpoch}_${Uri.encodeComponent(target)}';
+    final header = utf8.encode(jsonEncode(<String, dynamic>{'id': requestId, 'target': target, 'meta': meta}));
+    final msg = Uint8List(8 + header.length + payload.length);
+    msg[0] = 0x00; // magic "\0WSU"
+    msg[1] = 0x57;
+    msg[2] = 0x53;
+    msg[3] = 0x55;
+    msg[4] = (header.length >> 24) & 0xff;
+    msg[5] = (header.length >> 16) & 0xff;
+    msg[6] = (header.length >> 8) & 0xff;
+    msg[7] = header.length & 0xff;
+    msg.setRange(8, 8 + header.length, header);
+    msg.setRange(8 + header.length, msg.length, payload);
+
+    final completer = CompletableFuture<MvcResponseScheme>();
+    _pendingResponses[requestId] = completer;
+    _channel!.sink.add(msg);
+
+    Timer(const Duration(minutes: 5), () {
+      if (_pendingResponses.containsKey(requestId)) {
+        _pendingResponses.remove(requestId);
+        completer.completeError(Exception('Upload timeout'));
+      }
+    });
+
+    final response = await completer.future;
+    if (response.status != 0) {
+      throw Exception(response.msg ?? 'Unknown error');
+    }
+    if (response.body == null) return null as T;
+    if (response.body is T) return response.body as T;
+    return jsonDecode(jsonEncode(response.body)) as T;
+  }
+
+  static Future<List<int>> _collectBytes(dynamic source) async {
+    if (source is Uint8List) return source;
+    if (source is List<int>) return source;
+    if (source is Future<List<int>>) return await source;
+    if (source is Stream<List<int>>) {
+      final builder = BytesBuilder(copy: false);
+      await for (final part in source) {
+        builder.add(part);
+      }
+      return builder.takeBytes();
+    }
+    throw ArgumentError('Unsupported upload source: expected List<int>, Future<List<int>>, or Stream<List<int>>.');
+  }
+
   void handleTextMessage(String message) {
     if (options.protocol != SerializationProtocol.json) {
       return;

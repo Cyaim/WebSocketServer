@@ -151,6 +151,85 @@ namespace Cyaim.WebSocketServer.Client
         }
 
         /// <summary>
+        /// Stream a large payload (e.g. a file) to a streaming endpoint ([WebSocket(Stream = true)]) without
+        /// buffering it all in memory. Framed as a binary message:
+        /// [4-byte magic "\0WSU"][4-byte big-endian header length][UTF8 JSON header {id,target,meta}][raw bytes...].
+        /// The response is correlated by id, like <see cref="SendRequestAsync{TRequest, TResponse}"/>.
+        /// 向流式端点上传大负载（如文件），负载不整体缓冲；响应按 id 关联。
+        /// </summary>
+        public async Task<TResponse> UploadStreamAsync<TResponse>(
+            string target,
+            Stream source,
+            object? meta = null,
+            int chunkSize = 256 * 1024,
+            CancellationToken cancellationToken = default)
+        {
+            if (_webSocket == null || _webSocket.State != WebSocketState.Open)
+            {
+                throw new InvalidOperationException("WebSocket is not connected. Call ConnectAsync first.");
+            }
+
+            var requestId = Guid.NewGuid().ToString();
+            var headerBytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { id = requestId, target, meta }));
+            var first = new byte[8 + headerBytes.Length];
+            first[0] = 0x00; first[1] = (byte)'W'; first[2] = (byte)'S'; first[3] = (byte)'U'; // magic "\0WSU"
+            first[4] = (byte)(headerBytes.Length >> 24);
+            first[5] = (byte)(headerBytes.Length >> 16);
+            first[6] = (byte)(headerBytes.Length >> 8);
+            first[7] = (byte)headerBytes.Length;
+            Buffer.BlockCopy(headerBytes, 0, first, 8, headerBytes.Length);
+
+            // frame 1: magic + header-length + header (start of the fragmented binary message)
+            await _webSocket.SendAsync(new ArraySegment<byte>(first), WebSocketMessageType.Binary, false, cancellationToken);
+
+            // payload frames — never buffers the whole payload. Read one chunk ahead so the FINAL data frame
+            // carries endOfMessage=true (ClientWebSocket does not reliably emit a standalone empty end frame).
+            int size = chunkSize <= 0 ? 256 * 1024 : chunkSize;
+            var buffer = new byte[size];
+            var next = new byte[size];
+            int read = await source.ReadAsync(buffer, 0, size, cancellationToken);
+            if (read == 0)
+            {
+                // empty payload — close the message with an empty final frame
+                await _webSocket.SendAsync(new ArraySegment<byte>(Array.Empty<byte>()), WebSocketMessageType.Binary, true, cancellationToken);
+            }
+            else
+            {
+                while (true)
+                {
+                    int nextRead = await source.ReadAsync(next, 0, size, cancellationToken);
+                    bool isLast = nextRead == 0;
+                    await _webSocket.SendAsync(new ArraySegment<byte>(buffer, 0, read), WebSocketMessageType.Binary, isLast, cancellationToken);
+                    if (isLast)
+                    {
+                        break;
+                    }
+                    (buffer, next) = (next, buffer);
+                    read = nextRead;
+                }
+            }
+
+            var response = await ReceiveResponseAsync(requestId, cancellationToken);
+            if (response.Status != 0)
+            {
+                throw new Exception($"Upload failed: {response.Msg ?? "Unknown error"}");
+            }
+            if (response.Body == null)
+            {
+                return default!;
+            }
+            if (response.Body is TResponse direct)
+            {
+                return direct;
+            }
+            if (response.Body is JsonElement jsonElement)
+            {
+                return JsonSerializer.Deserialize<TResponse>(jsonElement.GetRawText())!;
+            }
+            return JsonSerializer.Deserialize<TResponse>(JsonSerializer.Serialize(response.Body))!;
+        }
+
+        /// <summary>
         /// Receive response from server / 从服务器接收响应
         /// </summary>
         private async Task<MvcResponseScheme> ReceiveResponseAsync(string requestId, CancellationToken cancellationToken)
