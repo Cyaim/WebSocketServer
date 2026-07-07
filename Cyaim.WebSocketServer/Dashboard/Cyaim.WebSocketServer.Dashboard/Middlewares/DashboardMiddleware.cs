@@ -89,13 +89,27 @@ namespace Cyaim.WebSocketServer.Dashboard.Middlewares
             try
             {
                 // Get file from wwwroot / 从 wwwroot 获取文件
-                var wwwrootPath = Path.Combine(
-                    AppDomain.CurrentDomain.BaseDirectory,
-                    "wwwroot",
-                    filePath);
+                var wwwrootDir = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot"));
+                var wwwrootPath = Path.GetFullPath(Path.Combine(wwwrootDir, filePath));
+
+                // Path-traversal guard: the resolved path must stay inside wwwroot.
+                // 路径穿越防护：解析后的路径必须仍在 wwwroot 内。
+                if (!wwwrootPath.StartsWith(wwwrootDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.StatusCode = 404;
+                    return;
+                }
 
                 if (!File.Exists(wwwrootPath))
                 {
+                    // SPA fallback: deep links like /dashboard/overview have no file on disk —
+                    // serve the app shell (index.html) and let the client router take over.
+                    // SPA 回退：/dashboard/overview 这类深链在磁盘上没有文件，返回应用壳由前端路由接管。
+                    if (!Path.HasExtension(filePath))
+                    {
+                        await ServeDashboardHtml(context);
+                        return;
+                    }
                     context.Response.StatusCode = 404;
                     return;
                 }
@@ -135,6 +149,11 @@ namespace Cyaim.WebSocketServer.Dashboard.Middlewares
                 ".ico" => "image/x-icon",
                 ".html" => "text/html",
                 ".map" => "application/json",
+                ".woff" => "font/woff",
+                ".woff2" => "font/woff2",
+                ".ttf" => "font/ttf",
+                ".txt" => "text/plain",
+                ".webmanifest" => "application/manifest+json",
                 _ => "application/octet-stream"
             };
         }
@@ -145,11 +164,20 @@ namespace Cyaim.WebSocketServer.Dashboard.Middlewares
         /// <returns>HTML content / HTML 内容</returns>
         private string GetDashboardHtml()
         {
-            // Allow overriding with a custom wwwroot/public/index.html if one is deployed;
-            // otherwise serve the self-contained embedded console (works as a NuGet library).
-            // 若部署了自定义 index.html 则用之，否则提供自包含的内嵌控制台（作为 NuGet 库也可用）。
+            // Prefer the built SPA shell (wwwroot/index.html, produced by websocketserver-dashboard),
+            // then a custom wwwroot/public/index.html, and finally the self-contained embedded console
+            // so the dashboard still works when no static build is deployed (e.g. bare NuGet usage).
+            // 优先使用构建产物 wwwroot/index.html（websocketserver-dashboard 构建输出），
+            // 其次自定义 wwwroot/public/index.html，最后回退到内嵌控制台（未部署静态产物时仍可用）。
             try
             {
+                var spaShell = System.IO.Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory, "wwwroot", "index.html");
+                if (System.IO.File.Exists(spaShell))
+                {
+                    return System.IO.File.ReadAllText(spaShell);
+                }
+
                 var htmlPath = System.IO.Path.Combine(
                     AppDomain.CurrentDomain.BaseDirectory, "wwwroot", "public", "index.html");
                 if (System.IO.File.Exists(htmlPath))

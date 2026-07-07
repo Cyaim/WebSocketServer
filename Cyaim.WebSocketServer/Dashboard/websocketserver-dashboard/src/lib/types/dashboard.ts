@@ -58,10 +58,20 @@ export interface DataFlowMessage {
 	connectionId: string;
 	nodeId: string;
 	direction: 'Inbound' | 'Outbound';
-	messageType: 'Text' | 'Binary';
+	// '-' when the recording layer only knows sizes / 记录层只拿得到字节数时为 '-'
+	messageType: 'Text' | 'Binary' | '-';
 	size: number;
 	content: string;
 	timestamp: string;
+}
+
+export interface MetricsSample {
+	timestamp: string;
+	connections: number;
+	bytesSentPerSecond: number;
+	bytesReceivedPerSecond: number;
+	messagesSentPerSecond: number;
+	messagesReceivedPerSecond: number;
 }
 
 export interface SendMessageRequest {

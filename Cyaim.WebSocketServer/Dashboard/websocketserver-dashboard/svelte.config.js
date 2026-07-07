@@ -7,7 +7,12 @@ const config = {
 	// Consult https://svelte.dev/docs/kit/integrations
 	// for more information about preprocessors
 	preprocess: [vitePreprocess(), mdsvex()],
-	kit: { adapter: adapter() },
+	kit: {
+		// SPA build served by the backend DashboardMiddleware at /dashboard.
+		// 以 SPA 形式构建，由后端 DashboardMiddleware 挂在 /dashboard 下提供服务。
+		adapter: adapter({ fallback: 'index.html' }),
+		paths: { base: '/dashboard' }
+	},
 	extensions: ['.svelte', '.svx']
 };
 

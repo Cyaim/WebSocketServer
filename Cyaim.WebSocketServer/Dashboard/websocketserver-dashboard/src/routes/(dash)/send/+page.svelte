@@ -1,14 +1,16 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { getClients, sendMessage } from '$lib/api/dashboard';
+	import { getClients, sendMessage, broadcastMessage } from '$lib/api/dashboard';
 	import type { ClientConnectionInfo, SendMessageRequest } from '$lib/types/dashboard';
 	import { m } from '$lib/paraglide/messages';
 
 	let connectionId = '';
 	let message = '';
 	let messageType: 'Text' | 'Binary' = 'Text';
+	// Broadcast mode sends to every connection instead of one. 广播模式发给所有连接。
+	let broadcast = false;
 	let loading = false;
-	let result: { success: boolean; error?: string } | null = null;
+	let result: { success: boolean; error?: string; info?: string } | null = null;
 	let clients: ClientConnectionInfo[] = [];
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -24,12 +26,12 @@
 	};
 
 	const handleSend = async () => {
-		if (!connectionId || !message) {
+		if ((!broadcast && !connectionId) || !message) {
 			result = {
 				success: false,
-				error: !connectionId
-					? m.dashboard_send_connectionIdRequired()
-					: m.dashboard_send_contentRequired()
+				error: !message
+					? m.dashboard_send_contentRequired()
+					: m.dashboard_send_connectionIdRequired()
 			};
 			return;
 		}
@@ -38,19 +40,27 @@
 			loading = true;
 			result = null;
 
-			const request: SendMessageRequest = {
-				connectionId,
-				content: message,
-				messageType
-			};
+			if (broadcast) {
+				const response = await broadcastMessage(message, messageType);
+				result = {
+					success: response.success || false,
+					error: response.error,
+					info: response.success ? `(${response.data ?? 0})` : undefined
+				};
+			} else {
+				const request: SendMessageRequest = {
+					connectionId,
+					content: message,
+					messageType
+				};
+				const response = await sendMessage(request);
+				result = {
+					success: response.success || false,
+					error: response.error
+				};
+			}
 
-			const response = await sendMessage(request);
-			result = {
-				success: response.success || false,
-				error: response.error
-			};
-
-			if (response.success) {
+			if (result.success) {
 				message = '';
 			}
 		} catch (err) {
@@ -80,24 +90,31 @@
 
 	<!-- Send Form -->
 	<div class="bg-white rounded-lg shadow p-6 space-y-4">
-		<div>
-			<label for="connectionId" class="block text-sm font-medium text-gray-700 mb-2">
-				{m.dashboard_send_connectionId()}
-			</label>
-			<input
-				id="connectionId"
-				type="text"
-				bind:value={connectionId}
-				placeholder={m.dashboard_send_connectionIdPlaceholder()}
-				list="client-list"
-				class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-			/>
-			<datalist id="client-list">
-				{#each clients as client}
-					<option value={client.connectionId} />
-				{/each}
-			</datalist>
-		</div>
+		<label class="flex items-center gap-2">
+			<input type="checkbox" bind:checked={broadcast} class="rounded" />
+			<span class="text-sm font-medium text-gray-700">{m.dashboard_send_broadcast()}</span>
+		</label>
+
+		{#if !broadcast}
+			<div>
+				<label for="connectionId" class="block text-sm font-medium text-gray-700 mb-2">
+					{m.dashboard_send_connectionId()}
+				</label>
+				<input
+					id="connectionId"
+					type="text"
+					bind:value={connectionId}
+					placeholder={m.dashboard_send_connectionIdPlaceholder()}
+					list="client-list"
+					class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+				/>
+				<datalist id="client-list">
+					{#each clients as client}
+						<option value={client.connectionId}></option>
+					{/each}
+				</datalist>
+			</div>
+		{/if}
 
 		<div>
 			<label for="messageType" class="block text-sm font-medium text-gray-700 mb-2">
@@ -128,10 +145,10 @@
 
 		<button
 			onclick={handleSend}
-			disabled={loading || !connectionId || !message}
+			disabled={loading || (!broadcast && !connectionId) || !message}
 			class="w-full px-6 py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
 		>
-			{loading ? m.dashboard_send_sending() : m.dashboard_send_send()}
+			{loading ? m.dashboard_send_sending() : broadcast ? m.dashboard_send_broadcastSend() : m.dashboard_send_send()}
 		</button>
 
 		{#if result}
@@ -140,7 +157,7 @@
 					? 'bg-green-50 border border-green-200 text-green-800'
 					: 'bg-red-50 border border-red-200 text-red-800'}"
 			>
-				{result.success ? '✓ ' + m.dashboard_send_success() : '✗ ' + m.dashboard_send_error() + ': ' + (result.error || 'Unknown error')}
+				{result.success ? '✓ ' + m.dashboard_send_success() + (result.info ? ' ' + result.info : '') : '✗ ' + m.dashboard_send_error() + ': ' + (result.error || 'Unknown error')}
 			</div>
 		{/if}
 	</div>
@@ -155,9 +172,10 @@
 		{:else}
 			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 				{#each clients as client}
-					<div
+					<button
+						type="button"
 						onclick={() => (connectionId = client.connectionId)}
-						class="p-4 border-2 rounded-lg cursor-pointer transition-all {connectionId === client.connectionId
+						class="p-4 border-2 rounded-lg cursor-pointer transition-all text-left w-full {connectionId === client.connectionId
 							? 'border-purple-500 bg-purple-50'
 							: 'border-gray-200 hover:border-purple-300'}"
 					>
@@ -174,7 +192,7 @@
 							</span>
 							<span class="text-gray-600">{client.nodeId}</span>
 						</div>
-					</div>
+					</button>
 				{/each}
 			</div>
 		{/if}

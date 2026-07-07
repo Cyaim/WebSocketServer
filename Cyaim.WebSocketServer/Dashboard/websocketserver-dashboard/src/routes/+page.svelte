@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	
-	// Redirect to dashboard overview
+	import { base } from '$app/paths';
+
+	// Redirect to dashboard overview / 跳转到看板概览
 	onMount(() => {
-		goto('/dashboard/overview');
+		goto(`${base}/overview`, { replaceState: true });
 	});
 </script>
 

@@ -64,6 +64,59 @@ namespace Cyaim.WebSocketServer.Dashboard.Tests
             Assert.All(hist, s => Assert.True(s.Timestamp != default));
         }
 
+        [Fact]
+        public void RecordBytes_AppendsDataFlowEvents_WithDirectionAndSize()
+        {
+            using var svc = NewSvc();
+            svc.RecordBytesReceived("c1", 100);
+            svc.RecordBytesSent("c1", 30);
+
+            var flow = svc.GetRecentMessages();
+            Assert.Equal(2, flow.Count);
+            Assert.Equal("Inbound", flow[0].Direction);
+            Assert.Equal(100, flow[0].Size);
+            Assert.Equal("Outbound", flow[1].Direction);
+            Assert.Equal(30, flow[1].Size);
+            Assert.All(flow, m => Assert.Equal("c1", m.ConnectionId));
+            Assert.All(flow, m => Assert.False(string.IsNullOrEmpty(m.MessageId)));
+        }
+
+        [Fact]
+        public void GetRecentMessages_SinceId_ReturnsOnlyNewer_AndHonorsMax()
+        {
+            using var svc = NewSvc();
+            for (int i = 0; i < 10; i++)
+            {
+                svc.RecordBytesReceived("c1", 1 + i);
+            }
+
+            var all = svc.GetRecentMessages();
+            Assert.Equal(10, all.Count);
+
+            // incremental poll: only events after the 6th / 增量：只取第 6 条之后
+            long since = long.Parse(all[5].MessageId);
+            var newer = svc.GetRecentMessages(since);
+            Assert.Equal(4, newer.Count);
+            Assert.All(newer, m => Assert.True(long.Parse(m.MessageId) > since));
+
+            // max keeps the NEWEST entries / max 保留最新的
+            var capped = svc.GetRecentMessages(0, 3);
+            Assert.Equal(3, capped.Count);
+            Assert.Equal(all[^1].MessageId, capped[^1].MessageId);
+        }
+
+        [Fact]
+        public void DataFlowBuffer_IsBounded()
+        {
+            using var svc = NewSvc();
+            for (int i = 0; i < 700; i++)
+            {
+                svc.RecordBytesReceived("c1", 1);
+            }
+            // Capacity is 500; the buffer must not grow unbounded. 容量 500，不允许无界增长。
+            Assert.True(svc.GetRecentMessages(0, int.MaxValue).Count <= 500);
+        }
+
         private static DashboardStatisticsService NewSvc() => new DashboardStatisticsService(T.Log<DashboardStatisticsService>());
     }
 
@@ -248,6 +301,49 @@ namespace Cyaim.WebSocketServer.Dashboard.Tests
             Assert.True(resp.Success);
             var n = Assert.Single(resp.Data);
             Assert.Equal("standalone", n.NodeId);
+        }
+    }
+
+    [Collection("DashboardStatic")]
+    public class MessageControllerTests
+    {
+        [Fact]
+        public void GetRecent_ReturnsRecordedFlow_AndSupportsIncrementalPoll()
+        {
+            T.ResetStandalone();
+            using var svc = new DashboardStatisticsService(T.Log<DashboardStatisticsService>());
+            var c = new MessageController(T.Log<MessageController>(), svc, new DashboardHelperService());
+
+            svc.RecordBytesReceived("c1", 64);
+            svc.RecordBytesSent("c1", 16);
+
+            var resp = T.Unwrap(c.GetRecent());
+            Assert.True(resp.Success);
+            Assert.Equal(2, resp.Data.Count);
+            Assert.Equal("Inbound", resp.Data[0].Direction);
+            Assert.Equal("Outbound", resp.Data[1].Direction);
+
+            // Incremental poll from the last seen id returns nothing new. 从最后一条增量拉取应为空。
+            long last = long.Parse(resp.Data[^1].MessageId);
+            var next = T.Unwrap(c.GetRecent(last));
+            Assert.True(next.Success);
+            Assert.Empty(next.Data);
+        }
+
+        [Fact]
+        public async Task Broadcast_CountsSuccessfulSends()
+        {
+            // Regression: the count must unwrap Ok()-wrapped ActionResult values (Value is null there),
+            // otherwise it always reports 0 even though every client received the message.
+            // 回归：Ok() 包装的 ActionResult 其 .Value 为 null，计数必须从 .Result 解包，否则恒为 0。
+            T.ResetStandalone();
+            T.Seed("b1", "b2", "b3");
+            using var svc = new DashboardStatisticsService(T.Log<DashboardStatisticsService>());
+            var c = new MessageController(T.Log<MessageController>(), svc, new DashboardHelperService());
+
+            var resp = T.Unwrap(await c.Broadcast(new BroadcastMessageRequest { Content = "hi", MessageType = "Text" }));
+            Assert.True(resp.Success);
+            Assert.Equal(3, resp.Data);
         }
     }
 }

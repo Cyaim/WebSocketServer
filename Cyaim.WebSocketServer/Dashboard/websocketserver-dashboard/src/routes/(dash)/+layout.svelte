@@ -1,16 +1,19 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
+	import { base } from '$app/paths';
 	import { m } from '$lib/paraglide/messages';
-	
+
 	let { children } = $props();
-	
+
+	// Route paths are base-relative; `base` (/dashboard) is prepended for URLs.
+	// 路由为相对 base 的路径；URL 前会拼上 base（/dashboard）。
 	const navItems = [
-		{ path: '/dashboard/overview', label: m.dashboard_nav_overview(), icon: '📊' },
-		{ path: '/dashboard/nodes', label: m.dashboard_nav_nodes(), icon: '🖥️' },
-		{ path: '/dashboard/clients', label: m.dashboard_nav_clients(), icon: '👥' },
-		{ path: '/dashboard/bandwidth', label: m.dashboard_nav_bandwidth(), icon: '📈' },
-		{ path: '/dashboard/dataflow', label: m.dashboard_nav_dataflow(), icon: '🔄' },
-		{ path: '/dashboard/send', label: m.dashboard_nav_send(), icon: '📤' }
+		{ path: `${base}/overview`, label: m.dashboard_nav_overview(), icon: '📊' },
+		{ path: `${base}/nodes`, label: m.dashboard_nav_nodes(), icon: '🖥️' },
+		{ path: `${base}/clients`, label: m.dashboard_nav_clients(), icon: '👥' },
+		{ path: `${base}/bandwidth`, label: m.dashboard_nav_bandwidth(), icon: '📈' },
+		{ path: `${base}/dataflow`, label: m.dashboard_nav_dataflow(), icon: '🔄' },
+		{ path: `${base}/send`, label: m.dashboard_nav_send(), icon: '📤' }
 	];
 </script>
 

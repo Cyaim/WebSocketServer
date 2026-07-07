@@ -39,6 +39,46 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
         }
 
         /// <summary>
+        /// Unwrap an ActionResult&lt;ApiResponse&lt;bool&gt;&gt; regardless of whether the action returned the
+        /// value directly or wrapped it in Ok()/ObjectResult (in which case .Value is null).
+        /// 解包 ActionResult：控制器用 Ok() 返回时 .Value 为 null，需从 .Result 取。
+        /// </summary>
+        private static bool SendSucceeded(ActionResult<ApiResponse<bool>> result)
+        {
+            var resp = result.Value ?? (result.Result as ObjectResult)?.Value as ApiResponse<bool>;
+            return resp?.Success == true && resp.Data;
+        }
+
+        /// <summary>
+        /// Get recent data-flow message events (incremental poll via sinceId).
+        /// 获取最近的数据流消息事件（用 sinceId 增量轮询）。
+        /// </summary>
+        /// <param name="sinceId">Only return events with id greater than this / 只返回 id 大于此值的事件</param>
+        /// <param name="max">Max events to return / 最多返回条数</param>
+        [HttpGet("recent")]
+        public ActionResult<ApiResponse<List<DataFlowMessage>>> GetRecent([FromQuery] long sinceId = 0, [FromQuery] int max = 200)
+        {
+            try
+            {
+                var messages = _statisticsService.GetRecentMessages(sinceId, max);
+                return Ok(new ApiResponse<List<DataFlowMessage>>
+                {
+                    Success = true,
+                    Data = messages
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting recent data-flow messages");
+                return StatusCode(500, new ApiResponse<List<DataFlowMessage>>
+                {
+                    Success = false,
+                    Error = ex.Message
+                });
+            }
+        }
+
+        /// <summary>
         /// Send message to connection / 向连接发送消息
         /// </summary>
         /// <param name="request">Send message request / 发送消息请求</param>
@@ -230,7 +270,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                     };
 
                     var sendResult = await Send(sendRequest);
-                    if (sendResult.Value?.Success == true && sendResult.Value.Data)
+                    if (SendSucceeded(sendResult))
                     {
                         successCount++;
                     }
@@ -292,7 +332,7 @@ namespace Cyaim.WebSocketServer.Dashboard.Controllers
                     };
 
                     var sendResult = await Send(sendRequest);
-                    if (sendResult.Value?.Success == true && sendResult.Value.Data)
+                    if (SendSucceeded(sendResult))
                     {
                         successCount++;
                     }

@@ -14,7 +14,9 @@ export default defineConfig({
 	],
 	server: {
 		proxy: {
-			'/api': {
+			// Dashboard controllers live under /ws_server/api on the backend.
+			// 后端 Dashboard 控制器挂在 /ws_server/api 下。
+			'/ws_server': {
 				target: 'http://localhost:5000', // 后端 API 地址 / Backend API address
 				changeOrigin: true,
 				secure: false

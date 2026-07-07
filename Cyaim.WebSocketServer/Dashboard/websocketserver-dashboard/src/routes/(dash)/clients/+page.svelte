@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { getClients } from '$lib/api/dashboard';
+	import { getClients, disconnectClient } from '$lib/api/dashboard';
 	import type { ClientConnectionInfo } from '$lib/types/dashboard';
 	import { m } from '$lib/paraglide/messages';
 
@@ -43,6 +43,22 @@
 		const sizes = ['B', 'KB', 'MB', 'GB'];
 		const i = Math.floor(Math.log(bytes) / Math.log(k));
 		return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+	};
+
+	// Management operation: close a connection from the dashboard. 管理操作：从看板断开连接。
+	let disconnecting: string | null = null;
+	const onDisconnect = async (connectionId: string) => {
+		if (!confirm(m.dashboard_clients_confirmDisconnect())) return;
+		try {
+			disconnecting = connectionId;
+			const response = await disconnectClient(connectionId);
+			if (!response.success) {
+				error = response.error || 'Failed to disconnect client';
+			}
+			await fetchClients();
+		} finally {
+			disconnecting = null;
+		}
 	};
 </script>
 
@@ -93,6 +109,9 @@
 							<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
 								{m.dashboard_clients_messagesReceived()}
 							</th>
+							<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+								{m.dashboard_clients_actions()}
+							</th>
 						</tr>
 					</thead>
 					<tbody class="bg-white divide-y divide-gray-200">
@@ -124,6 +143,15 @@
 								</td>
 								<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
 									{client.messagesReceived}
+								</td>
+								<td class="px-6 py-4 whitespace-nowrap">
+									<button
+										onclick={() => onDisconnect(client.connectionId)}
+										disabled={disconnecting === client.connectionId}
+										class="px-3 py-1 text-xs font-semibold text-red-600 border border-red-300 rounded hover:bg-red-50 disabled:opacity-50 transition-colors"
+									>
+										{m.dashboard_clients_disconnect()}
+									</button>
 								</td>
 							</tr>
 						{/each}

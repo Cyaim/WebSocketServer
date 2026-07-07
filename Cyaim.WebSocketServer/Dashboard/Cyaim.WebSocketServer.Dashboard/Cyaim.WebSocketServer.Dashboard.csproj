@@ -53,4 +53,14 @@
             <PackagePath />
         </None>
     </ItemGroup>
+
+    <!-- Built dashboard SPA (websocketserver-dashboard `pnpm build` output). Copied to the consuming
+         app's output so DashboardMiddleware can serve it from <app>/wwwroot at /dashboard.
+         Dashboard 前端构建产物：复制到宿主应用输出目录，供 DashboardMiddleware 在 /dashboard 下提供服务。 -->
+    <ItemGroup>
+        <Content Include="wwwroot\**">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <PackageCopyToOutput>true</PackageCopyToOutput>
+        </Content>
+    </ItemGroup>
 </Project>

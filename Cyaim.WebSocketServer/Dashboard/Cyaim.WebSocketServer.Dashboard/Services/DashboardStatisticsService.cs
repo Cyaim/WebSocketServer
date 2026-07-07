@@ -33,6 +33,13 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
         private const int HistoryCapacity = 180; // ~3 minutes at 1s
         private readonly ConcurrentQueue<MetricsSample> _history = new ConcurrentQueue<MetricsSample>();
 
+        // Bounded ring buffer of recent per-message flow events for the data-flow monitor page.
+        // Each recorded send/receive appends one entry with a monotonically increasing id, so the
+        // frontend can poll incrementally with `sinceId`. 数据流页的每消息事件环形缓冲（有界、自增 id 支持增量拉取）。
+        private const int DataFlowCapacity = 500;
+        private long _dataFlowSeq;
+        private readonly ConcurrentQueue<DataFlowMessage> _dataFlow = new ConcurrentQueue<DataFlowMessage>();
+
         /// <summary>
         /// Constructor / 构造函数
         /// </summary>
@@ -59,11 +66,12 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
                 return;
 
             var stats = _connectionStats.GetOrAdd(connectionId, _ => new ClientConnectionStats { ConnectionId = connectionId });
-            
+
             // Use lock-free operations with Interlocked for better performance / 使用无锁的 Interlocked 操作以获得更好的性能
             // Interlocked.Add supports long, so we use long internally and convert to ulong when reading / Interlocked.Add 支持 long，所以内部使用 long，读取时转换为 ulong
             Interlocked.Add(ref stats._bytesSentLong, bytes);
             Interlocked.Increment(ref stats._messagesSentLong);
+            RecordFlow(connectionId, bytes, inbound: false);
         }
 
         /// <summary>
@@ -77,11 +85,61 @@ namespace Cyaim.WebSocketServer.Dashboard.Services
                 return;
 
             var stats = _connectionStats.GetOrAdd(connectionId, _ => new ClientConnectionStats { ConnectionId = connectionId });
-            
+
             // Use lock-free operations with Interlocked for better performance / 使用无锁的 Interlocked 操作以获得更好的性能
             // Interlocked.Add supports long, so we use long internally and convert to ulong when reading / Interlocked.Add 支持 long，所以内部使用 long，读取时转换为 ulong
             Interlocked.Add(ref stats._bytesReceivedLong, bytes);
             Interlocked.Increment(ref stats._messagesReceivedLong);
+            RecordFlow(connectionId, bytes, inbound: true);
+        }
+
+        /// <summary>
+        /// Append one per-message flow event to the bounded data-flow buffer.
+        /// 向有界数据流缓冲追加一条消息事件。
+        /// </summary>
+        private void RecordFlow(string connectionId, int bytes, bool inbound)
+        {
+            var id = Interlocked.Increment(ref _dataFlowSeq);
+            _dataFlow.Enqueue(new DataFlowMessage
+            {
+                MessageId = id.ToString(),
+                ConnectionId = connectionId,
+                NodeId = GlobalClusterCenter.ClusterContext?.NodeId ?? "standalone",
+                Direction = inbound ? "Inbound" : "Outbound",
+                // The statistics recorder interface only carries sizes; the payload type/content is not
+                // available at this layer. 统计接口只带字节数，此层拿不到负载类型/内容。
+                MessageType = "-",
+                Size = bytes,
+                Content = string.Empty,
+                Timestamp = DateTime.UtcNow
+            });
+            while (_dataFlow.Count > DataFlowCapacity && _dataFlow.TryDequeue(out _)) { }
+        }
+
+        /// <summary>
+        /// Get recent data-flow events with id greater than <paramref name="sinceId"/> (oldest first).
+        /// 获取 id 大于 sinceId 的最近数据流事件（最旧在前），供前端增量轮询。
+        /// </summary>
+        public List<DataFlowMessage> GetRecentMessages(long sinceId = 0, int max = 200)
+        {
+            if (max <= 0)
+            {
+                max = 200;
+            }
+            var result = new List<DataFlowMessage>();
+            foreach (var m in _dataFlow)
+            {
+                if (long.TryParse(m.MessageId, out var id) && id > sinceId)
+                {
+                    result.Add(m);
+                }
+            }
+            // Keep only the newest `max`, oldest first. 只保留最新 max 条，最旧在前。
+            if (result.Count > max)
+            {
+                result.RemoveRange(0, result.Count - max);
+            }
+            return result;
         }
 
         /// <summary>
