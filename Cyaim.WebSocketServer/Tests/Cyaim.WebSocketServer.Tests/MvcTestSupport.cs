@@ -71,20 +71,6 @@ namespace Cyaim.WebSocketServer.Tests
                 return "upload:" + total;
             }
 
-            // Streaming endpoint with no size cap — used by the throughput tests. Reads and discards.
-            [Infrastructure.Attributes.WebSocket(Stream = true)]
-            public async Task<string> UploadFast(System.IO.Stream body, System.Threading.CancellationToken ct)
-            {
-                long total = 0;
-                var buf = new byte[64 * 1024];
-                int n;
-                while ((n = await body.ReadAsync(buf, 0, buf.Length, ct)) > 0)
-                {
-                    total += n;
-                }
-                return "upload:" + total;
-            }
-
             public int Add(int a, int b) => a + b;
 
             public string NoParams() => "noparams";
