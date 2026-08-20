@@ -68,7 +68,7 @@ namespace Cyaim.WebSocketServer.Tests
             var closed = new TestWebSocket(WebSocketState.Closed);
             using var ms = new MemoryStream(new byte[] { 1, 2, 3 });
             await InvokePrivateStatic("SendStreamCoreAsync",
-                closed, (Stream)ms, WebSocketMessageType.Binary, true, (uint)4096, CancellationToken.None);
+                closed, (Stream)ms, WebSocketMessageType.Binary, true, (uint)4096, (TimeSpan?)null, CancellationToken.None);
             Assert.Empty(closed.Frames);
         }
 
@@ -116,14 +116,21 @@ namespace Cyaim.WebSocketServer.Tests
         }
 
         [Fact]
-        public async Task SendStreamCoreChunks_CapturedFramesShowChunking()
+        public async Task SendStreamCore_SmallStream_IsMaterializedIntoOneFrame()
         {
+            // sendBufferSize 现在是「读块大小」，不再是分帧阈值：7 字节远低于物化上限与帧上限，
+            // 所以整条载荷先读进内存、再一帧发出。读源失败时一帧未发，这正是不变式的来源。
+            // sendBufferSize is the read chunk size now, not a framing threshold: 7 bytes is far below both
+            // the materialization and frame caps, so the payload is read into memory and sent as one frame.
+            // A failing source writes nothing — which is where the invariant comes from.
             var ws = new TestWebSocket();
             using var ms = new MemoryStream(new byte[] { 1, 2, 3, 4, 5, 6, 7 });
             await WebSocketManager.SendLocalAsync((Stream)ms, WebSocketMessageType.Binary, CancellationToken.None,
                 timeout: null, sendAtOnce: false, sendBufferSize: 3, sockets: ws);
-            // 7 bytes over a 3-byte window -> at least 3 data frames + a terminating empty frame.
-            Assert.True(ws.Frames.Count >= 3);
+
+            var frame = Assert.Single(ws.Frames);
+            Assert.True(frame.EndOfMessage);
+            Assert.Equal(new byte[] { 1, 2, 3, 4, 5, 6, 7 }, frame.Payload);
         }
 
         [Fact]

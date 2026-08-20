@@ -55,11 +55,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                     return false;
                 }
 
-                await webSocket.SendAsync(
-                    new ArraySegment<byte>(data),
-                    messageType,
-                    true,
-                    cancellationToken);
+                // 必须走 WebSocketManager：直接 SendAsync 会绕过 per-socket 发送门闩，插进别人正在发的多帧消息中间，
+                // 造出一条带结束标志、内容却是别人前半截的消息——正是发送不变式要消灭的东西。
+                // Must go through WebSocketManager: a raw SendAsync bypasses the per-socket send gate and can inject
+                // itself into someone else's multi-frame message, producing one that carries the end flag while holding
+                // another message's opening bytes — exactly what the send invariant exists to prevent.
+                await WebSocketManager.SendLocalAsync(
+                    data.AsMemory(), messageType, sendAtOnce: true,
+                    cancellationToken, timeout: null, sockets: webSocket);
 
                 return true;
             }

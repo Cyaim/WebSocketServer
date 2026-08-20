@@ -128,6 +128,34 @@ namespace Cyaim.WebSocketServer.Infrastructure
         public static string ConnectionEntry_DisconnectedInternalExceptions = "Connection disconnected due to one or more internal exceptions." + Environment.NewLine;
         public static string ConnectionEntry_ConnectionDenied = "Connection denied:request header error.";
         public static string ConnectionEntry_RequestSizeMaximumLimit = "Request size exceeds maximum limit.";
+
+        /// <summary>源流在读完声明的长度之前就结束了——绝不能把这种情况当成正常 EOF 发出收尾帧。</summary>
+        public static string Send_SourceStreamEndedEarly(long read, long expected)
+            => $"The source stream ended after {read:N0} of {expected:N0} bytes. Nothing was written to the socket.";
+
+        /// <summary>发送载荷超过物化上限时的说明。第一个问题永远是「连接还在吗」，所以先回答它。</summary>
+        public static string Send_PayloadTooLarge(long? payloadBytes, long limitBytes)
+        {
+            string size = payloadBytes is { } n
+                ? $"payload is {n:N0} bytes, over the {limitBytes:N0}-byte send materialization limit"
+                : $"payload exceeded the {limitBytes:N0}-byte send materialization limit (the source stream does not report a length, so the exact size is unknown)";
+
+            return $"Cannot send: {size}. Nothing was written to the socket and the connection is unaffected. "
+                 + "Either raise WebSocketRouteOption.MaxSendMaterializeBytes, or allow the chunked fallback "
+                 + "(AllowChunkedSendAboveMaterializeLimit = true) — it sends without buffering, but terminates "
+                 + "the connection if the source stream fails mid-send.";
+        }
+
+        /// <summary>扇出路径无法降级流式：一条流只能读一次。</summary>
+        public static string Send_TooLargeFanOutSuffix =
+            " Fan-out to multiple sockets cannot fall back to chunked streaming (a stream can only be read once); raise the limit.";
+
+        /// <summary>有限超时会让发送脱离等待，此时借用调用方的流是不安全的。</summary>
+        public static string Send_TooLargeFiniteTimeoutSuffix =
+            " A finite timeout detaches the send, which cannot safely borrow the caller's stream above the limit; pass timeout: null or raise the limit.";
+
+        /// <summary>连接被终结的原因文本，会作为 Close 帧的描述发给对端。</summary>
+        public static string Send_PayloadSourceFailedMidStream = "payload source failed mid-stream";
         public static string ConnectionEntry_ReceivingClientDataException = "An exception occurred while receiving client data.";
         public static string ConnectionEntry_AbortedReceivingData = "Aborted receiving data." + Environment.NewLine;
         public static string MvcForwardSendData_RequestParsingError = "Request parsing error." + Environment.NewLine;

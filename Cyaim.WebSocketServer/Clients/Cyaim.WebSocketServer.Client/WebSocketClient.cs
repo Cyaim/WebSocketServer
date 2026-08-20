@@ -261,26 +261,69 @@ namespace Cyaim.WebSocketServer.Client
             }
             else
             {
-                // 使用 JSON 反序列化
-                var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                response = JsonSerializer.Deserialize<MvcResponseScheme>(
-                    message,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                ) ?? throw new Exception("Failed to deserialize response");
+                // 必须按 EndOfMessage 重组：一条消息可能跨多个帧，而 ReceiveAsync 一次只给一帧。
+                // 之前这里只读一次 4096 字节就反序列化，任何超过接收缓冲区的响应都会解析失败——
+                // 与服务端怎么分帧无关，10 KB 的单帧响应同样会被截成 4096 字节。
+                // Reassemble on EndOfMessage: one message may span several frames and ReceiveAsync hands
+                // back one at a time. This used to deserialize a single 4096-byte read, so any response
+                // larger than the receive buffer failed to parse — regardless of server-side framing, a
+                // 10 KB single-frame response was cut to 4096 bytes just the same.
+                response = await ReceiveJsonResponseAsync(result, buffer, cancellationToken);
 
                 // Wait for matching response ID / 等待匹配的响应 ID
                 while (response.Id != requestId)
                 {
                     result = await _webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
-                    message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    response = JsonSerializer.Deserialize<MvcResponseScheme>(
-                        message,
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-                    ) ?? throw new Exception("Failed to deserialize response");
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        throw new Exception("WebSocket connection closed");
+                    }
+
+                    response = await ReceiveJsonResponseAsync(result, buffer, cancellationToken);
                 }
             }
 
             return response;
+        }
+
+        /// <summary>
+        /// Reassembles one complete JSON message, then deserializes it.
+        /// 按 EndOfMessage 重组出一条完整的 JSON 消息后再反序列化。
+        /// </summary>
+        /// <remarks>
+        /// 判断「消息到齐了」的唯一依据是 <c>EndOfMessage</c>，而不是「这次读回来多少字节」。
+        /// 服务端保证：只要这个标志出现，内容就一定完整。
+        /// The only signal that a message has arrived whole is <c>EndOfMessage</c>, never how many bytes a
+        /// single read returned. The server guarantees that once that flag appears, the content is complete.
+        /// </remarks>
+        private async Task<MvcResponseScheme> ReceiveJsonResponseAsync(
+            WebSocketReceiveResult initialResult,
+            byte[] buffer,
+            CancellationToken cancellationToken)
+        {
+            using var ms = new MemoryStream();
+
+            var current = initialResult;
+            while (true)
+            {
+                ms.Write(buffer, 0, current.Count);
+                if (current.EndOfMessage)
+                {
+                    break;
+                }
+
+                current = await _webSocket!.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
+                if (current.MessageType == WebSocketMessageType.Close)
+                {
+                    throw new Exception("WebSocket connection closed");
+                }
+            }
+
+            var message = Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
+            return JsonSerializer.Deserialize<MvcResponseScheme>(
+                message,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+            ) ?? throw new Exception("Failed to deserialize response");
         }
 
         /// <summary>

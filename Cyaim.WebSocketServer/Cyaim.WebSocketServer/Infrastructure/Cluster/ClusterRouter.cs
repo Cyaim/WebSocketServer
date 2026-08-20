@@ -1004,17 +1004,35 @@ namespace Cyaim.WebSocketServer.Infrastructure.Cluster
                                             offset += kvp.Value.Length;
                                         }
 
-                                        // Send to WebSocket / 发送到 WebSocket
+                                        // 必须走 WebSocketManager，而不是直接打在 socket 上：
+                                        // 直接调 SendAsync 会绕过 per-socket 发送门闩，与门闩内的发送撞车时，
+                                        // .NET 会因「同一实例只允许一个未完成的 SendAsync」抛异常——而在新的失败
+                                        // 收场下，那会去终结一条本来健康的连接。
+                                        // Go through WebSocketManager rather than the socket directly: a raw SendAsync
+                                        // bypasses the per-socket send gate, and colliding with a gated send makes .NET
+                                        // throw ("only one outstanding SendAsync per instance") — which, under the new
+                                        // failure handling, would terminate a perfectly healthy connection.
+                                        // Task.Run 保留（这段在 lock 体内，不能 await），但发送本身必须走
+                                        // WebSocketManager 而不是直接打在 socket 上：直接 SendAsync 会绕过
+                                        // per-socket 发送门闩，与门闩内的发送撞车时 .NET 会因「同一实例只允许一个
+                                        // 未完成的 SendAsync」抛异常——在新的失败收场下，那会去终结一条本来健康的连接。
+                                        // Task.Run stays (this sits inside a lock and cannot await), but the send itself
+                                        // must go through WebSocketManager rather than straight at the socket: a raw
+                                        // SendAsync bypasses the per-socket send gate, and colliding with a gated send
+                                        // makes .NET throw ("only one outstanding SendAsync per instance") — which, under
+                                        // the new failure handling, would terminate a perfectly healthy connection.
                                         _ = Task.Run(async () =>
                                         {
                                             try
                                             {
                                                 var wsMessageType = (WebSocketMessageType)buffer.MessageType;
-                                                await webSocket.SendAsync(
-                                                    new ArraySegment<byte>(streamData),
+                                                await WebSocketManager.SendLocalAsync(
+                                                    streamData.AsMemory(),
                                                     wsMessageType,
-                                                    true,
-                                                    CancellationToken.None);
+                                                    sendAtOnce: true,
+                                                    CancellationToken.None,
+                                                    timeout: null,
+                                                    sockets: webSocket);
 
                                                 _logger.LogDebug($"Successfully forwarded stream to local connection {buffer.ConnectionId}, streamId: {forwardStream.StreamId}");
                                             }

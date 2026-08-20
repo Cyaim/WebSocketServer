@@ -229,6 +229,49 @@ var webSocketOptions = new WebSocketOptions()
 };
 ```
 
+## Send Integrity and Memory Control
+
+**Invariant: whenever a message goes out carrying the `endOfMessage` flag, its content is complete.**
+
+That WebSocket-level flag is a client's only means of deciding a message arrived whole. If the server could
+emit a message carrying it with the tail missing, **every** client would need its own truncation detection —
+the server's correctness problem pushed onto all of them. So this library terminates the connection rather
+than emit one.
+
+A failure has two endings, never a third:
+
+| Situation | Ending | What the peer sees |
+|---|---|---|
+| Payload within the materialization limit, source fails | **Nothing written**, the caller gets the exception | Nothing received; the connection stays usable |
+| Payload above the limit (streaming), fails mid-send | **Connection terminated** (Close 1011, Abort fallback) | A protocol error or a close — never a "complete" message |
+
+| Option | Default | Meaning |
+|---|---|---|
+| `MaxSendMaterializeBytes` | **4 MiB** | Largest payload read into memory before sending; `null` = unlimited. **Stream overloads only** — a buffer handed in by the caller is never subject to it. |
+| `MaxSendFrameBytes` | **256 KiB - 16** | Largest single WebSocket frame; `0` = never split. |
+| `MaxTotalSendMaterializeBytes` | `null` (disabled) | Process-wide budget for concurrent materialisation. Over budget the send **degrades to streaming rather than queueing** — waiting on a budget a stalled peer may never release would starve healthy connections. |
+| `AllowChunkedSendAboveMaterializeLimit` | `true` | Whether payloads over the limit fall back to streaming (default) or raise `WebSocketMessageTooLargeException`. |
+
+**Why the minus 16**: the implementation rents "payload + header (up to 14 bytes)" from `ArrayPool`, so a
+clean 2^n lands in the 2^(n+1) bucket and wastes half of it.
+
+**Framing is unrelated to completeness.** For a payload already in memory the only possible failure is a
+write failure, which always terminates the connection and so cannot produce a short message carrying the end
+flag. The frame cap bounds three other things: peak memory during fan-out, how long an out-of-band control
+frame waits behind a payload, and the window a cancellation is exposed to.
+
+**Pool retention (a counter-intuitive cost)**: materialisation uses `ArrayPool`, so the historical peak of
+concurrent materialised bytes stays resident in the process. This is a deliberate trade — plain allocation
+costs orders of magnitude more in GC pauses. Note the receive side's 4 MiB uses an ordinary `MemoryStream`
+and carries no such cost: **the numbers are symmetric, the memory profiles are not**.
+
+> **Behaviour change**: multi-frame messages no longer end with a redundant empty terminator frame (the last
+> data frame carries the flag), so **frame counts changed** — per-frame bandwidth accounting needs
+> rechecking. `sendAtOnce` and `sendBufferSize` no longer affect how an in-memory buffer is framed (that is
+> `MaxSendFrameBytes` alone); on the Stream path `sendBufferSize` now means the read chunk size. A seekable
+> stream that short-reads silently (`Read` returns 0 with the source unfinished) now throws
+> `EndOfStreamException` with nothing written, instead of quietly emitting a truncated message.
+
 ## Request and Response
 
 ### Request Format

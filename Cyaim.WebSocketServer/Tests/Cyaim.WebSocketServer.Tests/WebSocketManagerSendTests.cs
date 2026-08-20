@@ -47,26 +47,69 @@ namespace Cyaim.WebSocketServer.Tests
         }
 
         [Fact]
-        public async Task SendLocalAsync_Buffer_LargeBuffer_IsChunked_WithFinalEndOfMessageFrame()
+        public async Task SendLocalAsync_Buffer_IsFramedByMaxSendFrameBytes_LastFrameCarriesEndOfMessage()
         {
-            var ws = new TestWebSocket();
-            byte[] payload = new byte[10_000];
-            new Random(42).NextBytes(payload);
+            // 分帧由 MaxSendFrameBytes 决定，与 sendAtOnce / sendBufferSize 无关——后两者对已在内存里的
+            // buffer 不再影响分帧。最后一帧自己带结束标志，不再多发一个空收尾帧。
+            // Framing is decided by MaxSendFrameBytes alone; sendAtOnce and sendBufferSize no longer affect
+            // how an in-memory buffer is framed. The last data frame carries the end flag — no extra empty
+            // terminator frame.
+            int previous = WebSocketManager.MaxSendFrameBytes;
+            WebSocketManager.MaxSendFrameBytes = 4096;
+            try
+            {
+                var ws = new TestWebSocket();
+                byte[] payload = new byte[10_000];
+                new Random(42).NextBytes(payload);
 
-            await WebSocketManager.SendLocalAsync(payload.AsMemory(), WebSocketMessageType.Binary, sendAtOnce: false, CancellationToken.None, sendBufferSize: 4096, sockets: ws);
+                await WebSocketManager.SendLocalAsync(payload.AsMemory(), WebSocketMessageType.Binary, sendAtOnce: false, CancellationToken.None, sendBufferSize: 4096, sockets: ws);
 
-            var frames = ws.Frames;
-            Assert.Equal(4, frames.Count);
-            Assert.Equal(4096, frames[0].Payload.Length);
-            Assert.Equal(4096, frames[1].Payload.Length);
-            Assert.Equal(1808, frames[2].Payload.Length);
-            Assert.False(frames[0].EndOfMessage);
-            Assert.False(frames[1].EndOfMessage);
-            Assert.False(frames[2].EndOfMessage);
-            // Final frame is an empty end-of-message marker
-            Assert.Empty(frames[3].Payload);
-            Assert.True(frames[3].EndOfMessage);
-            Assert.Equal(payload, ws.AllPayloadBytes);
+                var frames = ws.Frames;
+                Assert.Equal(3, frames.Count);
+                Assert.Equal(4096, frames[0].Payload.Length);
+                Assert.Equal(4096, frames[1].Payload.Length);
+                Assert.Equal(1808, frames[2].Payload.Length);
+                Assert.False(frames[0].EndOfMessage);
+                Assert.False(frames[1].EndOfMessage);
+                Assert.True(frames[2].EndOfMessage);
+                Assert.Equal(payload, ws.AllPayloadBytes);
+            }
+            finally
+            {
+                WebSocketManager.MaxSendFrameBytes = previous;
+            }
+        }
+
+        [Fact]
+        public async Task SendLocalAsync_Buffer_FramingIgnoresSendAtOnceAndSendBufferSize()
+        {
+            // 三种传法必须产生完全相同的帧序列：这两个参数不再是分帧开关。
+            // All three must produce an identical frame sequence: neither parameter is a framing switch now.
+            int previous = WebSocketManager.MaxSendFrameBytes;
+            WebSocketManager.MaxSendFrameBytes = 4096;
+            try
+            {
+                byte[] payload = new byte[10_000];
+                new Random(7).NextBytes(payload);
+
+                var a = new TestWebSocket();
+                var b = new TestWebSocket();
+                var c = new TestWebSocket();
+
+                await WebSocketManager.SendLocalAsync(payload.AsMemory(), WebSocketMessageType.Binary, sendAtOnce: true, CancellationToken.None, sendBufferSize: 4096, sockets: a);
+                await WebSocketManager.SendLocalAsync(payload.AsMemory(), WebSocketMessageType.Binary, sendAtOnce: false, CancellationToken.None, sendBufferSize: 4096, sockets: b);
+                await WebSocketManager.SendLocalAsync(payload.AsMemory(), WebSocketMessageType.Binary, sendAtOnce: false, CancellationToken.None, sendBufferSize: 1 << 20, sockets: c);
+
+                Assert.Equal(a.Frames.Count, b.Frames.Count);
+                Assert.Equal(a.Frames.Count, c.Frames.Count);
+                Assert.Equal(payload, a.AllPayloadBytes);
+                Assert.Equal(payload, b.AllPayloadBytes);
+                Assert.Equal(payload, c.AllPayloadBytes);
+            }
+            finally
+            {
+                WebSocketManager.MaxSendFrameBytes = previous;
+            }
         }
 
         [Fact]
