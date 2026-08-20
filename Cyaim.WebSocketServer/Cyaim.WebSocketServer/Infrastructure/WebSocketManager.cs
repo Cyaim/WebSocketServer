@@ -41,6 +41,12 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// </summary>
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<WebSocket, SemaphoreSlim> SendLocks = new System.Runtime.CompilerServices.ConditionalWeakTable<WebSocket, SemaphoreSlim>();
 
+        /// <summary>
+        /// Send buffer size used by the connection-id send paths, matching <see cref="SendLocalAsync"/>'s default.
+        /// 按连接 ID 发送时使用的缓冲区大小，与 SendLocalAsync 的默认值一致。
+        /// </summary>
+        private const uint DefaultSendBufferSize = 4 * 1024;
+
         private static SemaphoreSlim GetSendLock(WebSocket socket)
         {
             return SendLocks.GetValue(socket, static _ => new SemaphoreSlim(1, 1));
@@ -53,7 +59,15 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// so multi-frame sends never interleave with other senders.
         /// 向单个 socket 发送缓冲区数据，整条消息期间持有该 socket 的发送门闩，避免多帧交叠。
         /// </summary>
-        private static async Task SendBufferCoreAsync(WebSocket socket, ReadOnlyMemory<byte> buffer, WebSocketMessageType messageType, bool sendAtOnce, uint sendBufferSize, CancellationToken cancellationToken)
+        /// <returns>
+        /// True when the payload was written; false when the socket was no longer open by the time
+        /// the gate was acquired. Callers that report per-connection outcomes need to tell those
+        /// apart — a socket that closed while queued behind another send was never written to, and
+        /// saying otherwise would report a delivery that did not happen.
+        /// 返回是否真的写出：排在别的发送后面时连接可能已经关闭，那种情况下什么都没发出去，
+        /// 需要逐连接汇报结果的调用方必须能区分这两者。
+        /// </returns>
+        private static async Task<bool> SendBufferCoreAsync(WebSocket socket, ReadOnlyMemory<byte> buffer, WebSocketMessageType messageType, bool sendAtOnce, uint sendBufferSize, CancellationToken cancellationToken)
         {
             var gate = GetSendLock(socket);
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -61,7 +75,7 @@ namespace Cyaim.WebSocketServer.Infrastructure
             {
                 if (socket.State != WebSocketState.Open)
                 {
-                    return;
+                    return false;
                 }
                 if (sendAtOnce || buffer.Length <= sendBufferSize)
                 {
@@ -71,6 +85,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 {
                     await SendBufferedDataInBatchesAsync(socket, messageType, buffer, sendBufferSize, cancellationToken).ConfigureAwait(false);
                 }
+
+                return true;
             }
             finally
             {
@@ -616,7 +632,27 @@ namespace Cyaim.WebSocketServer.Infrastructure
             else
             {
                 // Use local WebSocket / 使用本地 WebSocket
-                var results = new Dictionary<string, bool>();
+                //
+                // Two things this must get right, and both were wrong before:
+                //
+                // 1. Sends go through SendBufferCoreAsync, which holds the per-socket send gate.
+                //    A WebSocket permits exactly one outstanding SendAsync per instance, and this
+                //    is the API an application uses to push to a client it did not hear from — a
+                //    message arriving, a presence change, a notification. Those are produced by
+                //    unrelated things happening at once, so two calls landing on one connection is
+                //    the normal case, not the edge case. Calling socket.SendAsync directly here
+                //    made the framework throw InvalidOperationException on exactly that case.
+                //    走 SendBufferCoreAsync 是为了持有 per-socket 发送门闩：WebSocket 同一实例只允许
+                //    一个未完成的发送，而按连接 ID 推送本来就会被互不相关的来源同时调用到同一个连接。
+                //
+                // 2. A result is recorded after the send resolves, not when it is queued. The
+                //    return type promises a per-connection outcome; recording true up front and
+                //    then letting Task.WhenAll throw on the first failure gave the caller an
+                //    exception and no idea which of the others were delivered. A fan-out to a room
+                //    always races a disconnect, so that is the common path, not the rare one.
+                //    结果在发送完成后才记录：返回值承诺的是逐连接结果，先写 true 再让 WhenAll 抛异常，
+                //    等于把其余人的投递结果一并丢掉——而群发撞上掉线是常态，不是罕见情况。
+                var results = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>();
                 var tasks = new List<Task>();
                 foreach (var connectionId in connectionIds)
                 {
@@ -624,26 +660,56 @@ namespace Cyaim.WebSocketServer.Infrastructure
                     {
                         continue;
                     }
-                    var webSocket = GetLocalWebSocket(connectionId);
-                    if (webSocket != null && webSocket.State == WebSocketState.Open)
-                    {
-                        Task task = webSocket.SendAsync(
-                             new ArraySegment<byte>(data),
-                             messageType,
-                             true,
-                             CancellationToken.None);
-                        tasks.Add(task);
 
-                        results[connectionId] = true;
-                    }
-                    else
+                    var webSocket = GetLocalWebSocket(connectionId);
+                    if (webSocket == null || webSocket.State != WebSocketState.Open)
                     {
                         results[connectionId] = false;
+                        continue;
                     }
+
+                    tasks.Add(SendToConnectionAsync(connectionId, webSocket, data, messageType, results));
                 }
 
-                await Task.WhenAll(tasks);
-                return results;
+                await Task.WhenAll(tasks).ConfigureAwait(false);
+                return new Dictionary<string, bool>(results);
+            }
+        }
+
+        /// <summary>
+        /// Sends to one connection under its send gate and records the outcome, never throwing.
+        /// 在该连接的发送门闩保护下发送并记录结果，不会抛出异常。
+        /// </summary>
+        /// <remarks>
+        /// Failure is recorded rather than propagated because the caller is fanning out: the socket
+        /// closing between the state check above and the write is an ordinary race that says nothing
+        /// about the other recipients. The result is what the gated send reports, so a socket that
+        /// closed while queued behind another send is reported as false rather than as a delivery.
+        /// 失败被记录而不是抛出：状态检查与真正写入之间连接关闭是常态竞争，与其他收件人无关。
+        /// 结果取自门闩内的实际发送，因此"排队期间已关闭"会如实报 false，而不是谎称已投递。
+        /// </remarks>
+        private static async Task SendToConnectionAsync(
+            string connectionId,
+            WebSocket webSocket,
+            byte[] data,
+            WebSocketMessageType messageType,
+            System.Collections.Concurrent.ConcurrentDictionary<string, bool> results)
+        {
+            try
+            {
+                results[connectionId] = await SendBufferCoreAsync(
+                    webSocket,
+                    data.AsMemory(),
+                    messageType,
+                    sendAtOnce: true,
+                    sendBufferSize: DefaultSendBufferSize,
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // The connection went away mid-send. That is a per-connection outcome, not a batch
+                // failure — see the remarks.
+                results[connectionId] = false;
             }
         }
 
