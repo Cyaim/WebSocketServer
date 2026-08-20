@@ -146,6 +146,62 @@ namespace Cyaim.WebSocketServer.Infrastructure
         }
 
         /// <summary>
+        /// 只把字节计入端点桶，不碰通道桶和连接桶。
+        /// Charge bytes to the endpoint bucket only, leaving the channel and connection buckets alone.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 用于补记「收到时还不知道端点」的那部分字节。一条消息的 target 在 JSON 里的位置由客户端决定，
+        /// 可能落在第二帧甚至最后一帧；在解析出来之前到达的帧只能先按无端点计入通道桶和连接桶。
+        /// 如果不补这一刀，客户端只要把 target 放到 payload 末尾，端点级限额就形同不存在——
+        /// 而这恰恰是端点限额最需要生效的场景（大上传）。
+        /// Used to settle the bytes that arrived before the endpoint was known. Where `target` sits in the
+        /// JSON is the client's choice; it may land in the second frame or the last. Frames that arrive
+        /// before it is parsed can only be charged to the channel and connection buckets. Without this
+        /// catch-up a client bypasses per-endpoint limits entirely by putting `target` at the end of the
+        /// payload — which is exactly the case those limits exist for.
+        /// </para>
+        /// <para>
+        /// 刻意不复用 <see cref="WaitForBandwidthAsync"/>：那个方法对通道桶和连接桶是无条件计费的，
+        /// 拿它来补记会把同一批字节在这两个桶上计第二遍。
+        /// Deliberately not <see cref="WaitForBandwidthAsync"/>: that one charges the channel and
+        /// connection buckets unconditionally, so using it to settle would count those bytes twice there.
+        /// </para>
+        /// <para>
+        /// 只补记、不等待。这些字节已经收下了，此刻再 delay 也退不回去；真正的限速由后续帧承担
+        /// （端点桶已被记满，下一帧的 CalculateWaitTime 会算出该等多久）。
+        /// Records without waiting. The bytes are already in; delaying now cannot un-receive them. The
+        /// throttling lands on the frames that follow, which now see a full endpoint bucket.
+        /// </para>
+        /// </remarks>
+        public void RecordEndPointBytes(string endPoint, long dataSize)
+        {
+            if (!_policy.Enabled || dataSize <= 0 || string.IsNullOrEmpty(endPoint))
+            {
+                return;
+            }
+
+            try
+            {
+                var endPointTracker = _endPointTrackers.GetOrAdd(endPoint, _ => new EndPointBandwidthTracker(endPoint, _policy));
+
+                // RecordData 取 int；超大补记按 int.MaxValue 分批，避免溢出成负数把桶清空。
+                // RecordData takes an int; settle oversized catch-ups in chunks so the cast cannot
+                // overflow into a negative and silently empty the bucket.
+                while (dataSize > 0)
+                {
+                    int chunk = dataSize > int.MaxValue ? int.MaxValue : (int)dataSize;
+                    endPointTracker.RecordData(chunk);
+                    dataSize -= chunk;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, $"端点补记计费失败: EndPoint={endPoint}");
+            }
+        }
+
+        /// <summary>
         /// 计算需要等待的时间
         /// </summary>
         private TimeSpan CalculateWaitTime(
