@@ -47,6 +47,15 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// </summary>
         private const uint DefaultSendBufferSize = 4 * 1024;
 
+        /// <summary>
+        /// 补发收尾帧的时间上限。超出即认定该连接不可用并 Abort。
+        /// 它守的是 per-socket 发送门闩：这次写在门闩内进行，写不动就等于整条连接的发送路径死锁。
+        /// How long the terminating frame may take before the connection is declared unusable and aborted.
+        /// This bounds the per-socket send gate: the write happens while the gate is held, so a write that
+        /// never completes deadlocks every later send on that connection.
+        /// </summary>
+        private static readonly TimeSpan TerminatorTimeout = TimeSpan.FromSeconds(5);
+
         private static SemaphoreSlim GetSendLock(WebSocket socket)
         {
             return SendLocks.GetValue(socket, static _ => new SemaphoreSlim(1, 1));
@@ -232,6 +241,105 @@ namespace Cyaim.WebSocketServer.Infrastructure
         }
 
         /// <summary>
+        /// 发一帧；写失败就中止连接，绝不留下状态不明的分帧。
+        /// Sends one frame; aborts the connection on failure rather than leaving framing in an unknown state.
+        /// </summary>
+        /// <remarks>
+        /// 写失败之后，线上到底有没有字节、有几个字节，是无法知道的：帧可能一个字节没发，也可能发了一半。
+        /// 被撕断的帧用一个空的收尾帧救不回来——对端还在等这一帧剩余的载荷，收尾帧的字节会被它当载荷吞掉，
+        /// 分帧照样是坏的。所以这里不猜，直接 Abort：让客户端重连，好过留一个分帧已坏的连接继续服务。
+        /// After a failed write there is no way to know whether any bytes reached the wire, or how many: the
+        /// frame may have gone out whole, in part, or not at all. A torn frame cannot be repaired by an empty
+        /// terminator — the peer is still waiting for that frame's remaining payload and would swallow the
+        /// terminator's bytes as payload, leaving framing broken anyway. So this does not guess: it aborts,
+        /// because a client that reconnects beats a connection whose framing is silently wrong.
+        /// </remarks>
+        private static async Task SendFrameOrAbortAsync(WebSocket socket, ReadOnlyMemory<byte> frame, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await socket.SendAsync(frame, messageType, endOfMessage, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                try { socket.Abort(); } catch { }
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// 一条多帧消息已经开了头却发不完时，把它收尾，避免该 socket 的分帧永久错乱。
+        /// Closes a multi-frame message that was started but cannot be finished, so the socket's framing
+        /// does not stay broken forever.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 分批发送是「若干 endOfMessage:false 帧 + 一个 endOfMessage:true 收尾帧」。中途抛异常时，
+        /// 收尾帧永远不会发出，而门闩照常释放——于是这条消息在协议上一直没有结束，
+        /// <b>下一个发送者的帧会被对端当作它的延续帧</b>。之后每一条消息都被粘在这条残消息后面，
+        /// 该连接的分帧就此永久错乱，且服务端一行日志都没有。
+        /// Batched sending is "N frames with endOfMessage:false, then a terminating frame". If it throws
+        /// partway, the terminator never goes out while the send gate is released anyway — the message
+        /// stays open at the protocol level and <b>the next sender's frames become continuation frames of
+        /// it</b>. Every later message is glued onto the truncated one: framing is broken for the life of
+        /// the connection, with nothing logged.
+        /// </para>
+        /// <para>
+        /// 补一个收尾帧的结果是对端收到一条被截断的消息——它解不开、会丢弃并（通常）记一条日志。
+        /// 那是可见且可恢复的；静默的永久错乱不是。收尾帧发不出去说明 socket 本身已经不可用，
+        /// 此时 Abort 让客户端重连，好过留一个分帧已坏的连接继续服务。
+        /// Terminating the message leaves the peer with a truncated one: it fails to parse, drops it and
+        /// usually logs. That is visible and recoverable; silent permanent corruption is not. If even the
+        /// terminator cannot be sent the socket is already unusable, and aborting so the client reconnects
+        /// beats leaving a connection whose framing is broken.
+        /// </para>
+        /// <para>
+        /// 刻意不接受取消令牌：走到这里往往正是因为调用方的令牌被取消了，而收尾恰恰是这种时候最该做的事。
+        /// Deliberately takes no cancellation token: reaching here often means the caller's token was
+        /// cancelled, which is exactly when the message most needs closing.
+        /// </para>
+        /// </remarks>
+        private static async Task CloseOpenMessageAsync(WebSocket socket, WebSocketMessageType messageType)
+        {
+            // 收尾帧必须有界。它是在 per-socket 发送门闩**之内**被等待的（gate.Release() 在更外层的
+            // finally），所以一次写不动就意味着门闩永远不释放——该连接此后任何发送都排不进去，
+            // 而 socket.State 仍是 Open、没有 Abort、没有日志。那比原本的分帧错乱更难恢复。
+            // 对端不排空时这次写确实会无限阻塞（实测），所以这里给它自己的有界令牌，
+            // 而不是调用方的令牌（走到这里往往正是因为调用方的令牌被取消了）。
+            // The terminator must be bounded. It is awaited INSIDE the per-socket send gate (gate.Release()
+            // lives in an outer finally), so a write that never completes means the gate is never released:
+            // nothing can be sent on this connection again, while State stays Open with no abort and no log
+            // — harder to recover from than the framing corruption this exists to prevent. Against a peer
+            // that is not draining, this write does block indefinitely (measured), so it gets its own
+            // bounded token rather than the caller's (which has often already been cancelled).
+            try
+            {
+                // CloseReceived 也是合法的发送状态（.NET 的 s_validSendStates 就是 {Open, CloseReceived}），
+                // 此时消息同样还开着，同样需要收尾。
+                // CloseReceived is a valid send state too (.NET's s_validSendStates is {Open, CloseReceived});
+                // the message is just as open there and needs closing just the same.
+                if (socket.State == WebSocketState.Open || socket.State == WebSocketState.CloseReceived)
+                {
+                    using var terminatorTimeout = new CancellationTokenSource(TerminatorTimeout);
+                    await socket.SendAsync(Memory<byte>.Empty, messageType, endOfMessage: true, terminatorTimeout.Token)
+                        .ConfigureAwait(false);
+                    return;
+                }
+            }
+            catch
+            {
+                // 落到下面的 Abort。
+            }
+
+            // 收尾发不出去（写不动、被拒、socket 已不在可发送状态）：这个连接已经没救了。
+            // 中止它，让客户端重连，好过留一个分帧已坏、或门闩已被占死的 socket 继续服务。
+            // The terminator could not go out (blocked, refused, socket no longer sendable): this connection
+            // is beyond saving. Abort so the client reconnects, rather than leaving a socket whose framing is
+            // broken or whose send gate is wedged.
+            try { socket.Abort(); } catch { }
+        }
+
+        /// <summary>
         /// Send data in batches from the stream
         /// 从流中分批发送数据
         /// </summary>
@@ -244,21 +352,47 @@ namespace Cyaim.WebSocketServer.Infrastructure
         private static async Task SendStreamDataInBatchesAsync(WebSocket webSocket, WebSocketMessageType messageType, Stream stream, uint bufferSize, CancellationToken cancellationToken)
         {
             var buffer = ArrayPool<byte>.Shared.Rent((int)bufferSize);
+            // 已经有非结束帧成功上线、这条消息尚未收尾。只在「读流失败」这条路径上用得到：
+            // 写失败一律 Abort，不需要它。
+            // A non-final frame has gone out and the message is not terminated yet. Only the read-failure
+            // path consults it; a send failure aborts unconditionally and does not need it.
+            bool messageOpen = false;
             try
             {
-                int bytesRead;
-                // 按请求的 bufferSize 读取，租借的缓冲区可能大于请求大小
-                // Read at the requested bufferSize: the rented buffer may be larger than requested
-                while ((bytesRead = await stream.ReadAsync(buffer, 0, (int)bufferSize, cancellationToken)) > 0)
+                while (true)
                 {
-                    await webSocket.SendAsync(buffer.AsMemory(0, bytesRead), messageType, endOfMessage: false, cancellationToken);
+                    int bytesRead;
+                    try
+                    {
+                        // 按请求的 bufferSize 读取，租借的缓冲区可能大于请求大小
+                        // Read at the requested bufferSize: the rented buffer may be larger than requested
+                        bytesRead = await stream.ReadAsync(buffer, 0, (int)bufferSize, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // 读流失败（调用方 Dispose 了它、IO 错误、被取消）。socket 本身没问题，
+                        // 已上线的帧也都是完整帧，所以补一个收尾帧就能让分帧闭合。
+                        // The read failed (the caller disposed the stream, an IO error, cancellation). The socket
+                        // itself is fine and every frame already sent was whole, so a terminator closes the framing.
+                        if (messageOpen)
+                        {
+                            await CloseOpenMessageAsync(webSocket, messageType).ConfigureAwait(false);
+                        }
+
+                        throw;
+                    }
+
+                    if (bytesRead <= 0)
+                    {
+                        break;
+                    }
+
+                    await SendFrameOrAbortAsync(webSocket, buffer.AsMemory(0, bytesRead), messageType, endOfMessage: false, cancellationToken).ConfigureAwait(false);
+                    messageOpen = true;
                 }
 
-                await webSocket.SendAsync(Memory<byte>.Empty, messageType, endOfMessage: true, cancellationToken);
-            }
-            catch (Exception)
-            {
-                throw;
+                await SendFrameOrAbortAsync(webSocket, Memory<byte>.Empty, messageType, endOfMessage: true, cancellationToken).ConfigureAwait(false);
+                messageOpen = false;
             }
             finally
             {
@@ -278,24 +412,16 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// <returns></returns>
         private static async Task SendBufferedDataInBatchesAsync(WebSocket webSocket, WebSocketMessageType messageType, ReadOnlyMemory<byte> buffer, uint batchSize, CancellationToken cancellationToken)
         {
-            try
+            int offset = 0;
+
+            while (offset < buffer.Length)
             {
-                int offset = 0;
-
-                while (offset < buffer.Length)
-                {
-                    int count = Math.Min((int)batchSize, buffer.Length - offset);
-                    await webSocket.SendAsync(buffer.Slice(offset, count), messageType, endOfMessage: false, CancellationToken.None);
-                    offset += count;
-                }
-
-                await webSocket.SendAsync(Memory<byte>.Empty, messageType, endOfMessage: true, cancellationToken);
+                int count = Math.Min((int)batchSize, buffer.Length - offset);
+                await SendFrameOrAbortAsync(webSocket, buffer.Slice(offset, count), messageType, endOfMessage: false, CancellationToken.None).ConfigureAwait(false);
+                offset += count;
             }
-            catch (Exception)
-            {
 
-                throw;
-            }
+            await SendFrameOrAbortAsync(webSocket, Memory<byte>.Empty, messageType, endOfMessage: true, cancellationToken).ConfigureAwait(false);
         }
         #endregion
 
@@ -335,6 +461,26 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 sendTask = SendStreamToManyAsync(sockets, sendStream, messageType, sendAtOnce, sendBufferSize, cancellationToken);
             }
 
+            // 超时仍是「不再等待」而不是「取消发送」，与内存重载保持一致。
+            //
+            // 曾经考虑过在这里改成取消：调用方几乎总是 `using` 这个流，脱离后后台还在读它。
+            // 但那会让 timeout 失去「调用方等待时长上界」这个硬保证——只重写同步 Read 的流会完全无视
+            // 取消令牌，取消打在飞行中的帧上还会让真实的 ManagedWebSocket 直接 Abort 整条连接，
+            // 排队等门闩期间超时更会让整条消息一帧未发就被静默丢弃。代价远大于收益。
+            //
+            // 真正的危险从来不是「后台还在读」，而是「读失败后消息没收尾」。那一点已经在
+            // SendStreamDataInBatchesAsync 里解决了：调用方 Dispose 后台读就抛，抛就补收尾帧，
+            // 分帧闭合。所以这里不需要改语义。
+            //
+            // The timeout still means "stop waiting", not "cancel the send", matching the memory overload.
+            // Cancelling here was considered — the caller almost always has the stream in a `using`, and a
+            // detached send keeps reading it. But that costs the hard guarantee that `timeout` bounds how
+            // long the caller waits: a stream overriding only synchronous Read ignores the token entirely,
+            // cancelling an in-flight frame makes the real ManagedWebSocket abort the whole connection, and
+            // a timeout while queueing for the send gate drops the message without a single frame going out.
+            // The danger was never "still reading" but "the message was left unterminated after the read
+            // failed" — and that is handled in SendStreamDataInBatchesAsync: the caller's Dispose makes the
+            // read throw, the throw terminates the message, framing stays closed. No semantic change needed.
             await AwaitWithTimeoutAsync(sendTask, timeout, cancellationToken).ConfigureAwait(false);
         }
 
