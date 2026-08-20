@@ -314,10 +314,24 @@ namespace Cyaim.WebSocketServer.Infrastructure
             var maxAssConstrParm = new Dictionary<Type, ConstructorParameter>();
             foreach (var item in assConstrParm)
             {
-                var pg = item.Value.GroupBy(x => x.ParameterInfos.Length);
-                var maxKey = pg.Select(x => x.Key).Max();
-                var temp = pg.FirstOrDefault(x => x.Key == maxKey).FirstOrDefault();
-                maxAssConstrParm.Add(item.Key, temp);
+                // A scanned type can legitimately have no public instance constructor: an abstract
+                // base class shared by several endpoint classes, a static helper, a type whose only
+                // constructor is private. Max() over that empty sequence throws
+                // InvalidOperationException("Sequence contains no elements") and takes the whole
+                // host down at startup — for a type that was never going to be instantiated.
+                // Skipping it is safe: the dispatcher reads this map with TryGetValue, and
+                // ConstructorParameter is a struct, so a miss yields ParameterInfos == null, which
+                // the activation path already treats as "no constructor arguments".
+                // 被扫描到的类型完全可能没有公开实例构造函数（抽象基类、静态帮助类、私有构造）。
+                // 对空序列取 Max() 会抛异常并让宿主启动失败，而这些类型本来就不会被实例化。
+                // 跳过是安全的：分发端用 TryGetValue 读取，取不到时结构体默认值即"无构造参数"。
+                if (item.Value.Length == 0)
+                {
+                    continue;
+                }
+
+                var maxKey = item.Value.Max(x => x.ParameterInfos.Length);
+                maxAssConstrParm.Add(item.Key, item.Value.First(x => x.ParameterInfos.Length == maxKey));
             }
             wsrOptions.WatchAssemblyContext.MaxConstructorParameters = maxAssConstrParm;
 
