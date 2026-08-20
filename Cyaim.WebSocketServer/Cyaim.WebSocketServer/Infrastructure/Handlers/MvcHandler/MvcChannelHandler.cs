@@ -1067,6 +1067,33 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
                 object[] args = Array.Empty<object>();
                 object invokeResult = default;
+
+                // A CancellationToken is supplied by the connection, never by the caller, so it is
+                // not something the request body can bind. Counting it as a bindable parameter is
+                // what made Handler(TRequest req, CancellationToken ct) fall out of whole-body
+                // binding: the dispatcher took the by-name path, found no "req" property in the
+                // body, and passed null — so every such endpoint failed on every call. The
+                // streaming dispatcher (WebSocketStreamInvoker) already binds CancellationToken
+                // from the connection; this brings the MVC path in line with it.
+                // CancellationToken 由连接提供而非调用方传入，不参与请求体绑定。此前它被算作可绑定形参，
+                // 导致 Handler(TRequest req, CancellationToken ct) 退出"整体绑定"、req 恒为 null。
+                // 流式分发器早已按类型注入连接令牌，这里与之对齐。
+                int bindableParamCount = 0;
+                int firstBindableParam = -1;
+                for (int i = 0; i < methodParam.Length; i++)
+                {
+                    if (methodParam[i].ParameterType == typeof(CancellationToken))
+                    {
+                        continue;
+                    }
+
+                    bindableParamCount++;
+                    if (firstBindableParam < 0)
+                    {
+                        firstBindableParam = i;
+                    }
+                }
+
                 if (requestBody == null || requestBody.Count <= 0)
                 {
                     // 如果目标是有参方法，设置默认值
@@ -1078,6 +1105,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         for (int i = 0; i < methodParam.Length; i++)
                         {
                             ParameterInfo item = methodParam[i];
+                            if (item.ParameterType == typeof(CancellationToken))
+                            {
+                                args[i] = context.RequestAborted;
+                                continue;
+                            }
                             if (item.HasDefaultValue)
                             {
                                 args[i] = item.DefaultValue;
@@ -1102,10 +1134,23 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     // 有参方法
                     //object[] args = new object[methodParam.Length];
                     args = new object[methodParam.LongLength];
-                    // 如果目标方法只有1个参数并且是对象或者接口
-                    if (methodParam.Length == 1 && (methodParam[0].ParameterType.IsClass || methodParam[0].ParameterType.IsInterface))
+                    // 如果目标方法只有1个可绑定参数并且是对象或者接口（CancellationToken 不计入）
+                    // Whole-body binding when exactly one parameter can come from the body.
+                    if (bindableParamCount == 1
+                        && (methodParam[firstBindableParam].ParameterType.IsClass
+                            || methodParam[firstBindableParam].ParameterType.IsInterface))
                     {
-                        ParameterInfo targetBindParam = methodParam[0];
+                        // Any CancellationToken alongside it still gets the connection's token.
+                        for (int i = 0; i < methodParam.Length; i++)
+                        {
+                            if (methodParam[i].ParameterType == typeof(CancellationToken))
+                            {
+                                args[i] = context.RequestAborted;
+                            }
+                        }
+
+                        int targetBindIndex = firstBindableParam;
+                        ParameterInfo targetBindParam = methodParam[targetBindIndex];
                         // 先是直接按形参参数名提取，从Json提取不到则进行参数展开
                         bool hasVal = requestBody.TryGetPropertyValue(targetBindParam.Name, out JsonNode jProp);
                         if (!hasVal)
@@ -1117,7 +1162,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         }
                         if (hasVal)
                         {
-                            args[0] = targetBindParam.ParameterType.ConvertTo(jProp);
+                            args[targetBindIndex] = targetBindParam.ParameterType.ConvertTo(jProp);
                         }
                         else
                         {
@@ -1142,7 +1187,7 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                     propInfo.SetValue(targetPropInst, propInfo.PropertyType.ConvertTo(jProp));
                                 }
                             }
-                            args[0] = targetPropInst;
+                            args[targetBindIndex] = targetPropInst;
                         }
 
                     }
@@ -1151,6 +1196,15 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         for (int i = 0; i < methodParam.Length; i++)
                         {
                             ParameterInfo item = methodParam[i];
+
+                            // Supplied by the connection, not by the body — and looking for a JSON
+                            // property named "ct" would only ever find nothing.
+                            // 由连接提供，而不是从请求体里按名字找。
+                            if (item.ParameterType == typeof(CancellationToken))
+                            {
+                                args[i] = context.RequestAborted;
+                                continue;
+                            }
 
                             // 检测方法中的参数是否是C#定义的基本类型
                             object parmVal = null;
