@@ -157,6 +157,19 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// running detached (previous channel-based behavior) and its exception, if any, is observed.
         /// 等待发送完成，支持可选超时。超时后发送继续在后台执行（与旧的通道行为一致），异常会被观察以防进程崩溃。
         /// </summary>
+        /// <remarks>
+        /// <b>超时分支会让发送脱离等待并在后台继续运行。</b>调用方若把**借来的**内存（ArrayPool 租用缓冲、
+        /// 复用缓冲区）交给了这个发送，就不能在本方法返回后立即归还或复用它：脱离的发送仍在读那段内存，
+        /// 而下一个租用者会把它覆盖掉，结果是已发出的帧被写坏——而且没有任何异常。
+        /// 只有在 <paramref name="timeout"/> 为 null 或 <see cref="Timeout.InfiniteTimeSpan"/> 时，
+        /// 发送才保证在本方法返回前结束，此时借用内存是安全的。
+        /// <b>The timeout branch detaches the send and lets it keep running.</b> A caller that lent
+        /// <i>borrowed</i> memory (a pooled rental, a reused buffer) to that send must not return or
+        /// reuse it once this method comes back: the detached send is still reading it, the next
+        /// renter overwrites it, and the frame already on the wire is corrupted — silently. Only when
+        /// <paramref name="timeout"/> is null or <see cref="Timeout.InfiniteTimeSpan"/> is the send
+        /// guaranteed to be finished on return, which is the only case where lending is safe.
+        /// </remarks>
         private static async Task AwaitWithTimeoutAsync(Task sendTask, TimeSpan? timeout, CancellationToken cancellationToken)
         {
             if (timeout == null || timeout.Value == Timeout.InfiniteTimeSpan)
@@ -411,9 +424,29 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 return;
             }
             encoding ??= DefaultEncoding;
-            // 编码到租用缓冲区，避免为每次发送分配一个 byte[]。租用缓冲区在整个异步发送期间存活，发送后归还。
-            // Encode into a pooled buffer to avoid a per-send byte[] allocation; the rental lives across
-            // the whole async send and is returned afterwards.
+
+            // 有限超时会让发送脱离等待并在后台继续读这段内存（见 AwaitWithTimeoutAsync 的 remarks）。
+            // 池化缓冲一旦在此处归还，就可能被下一个租用者覆盖，而那条帧还在发送途中——收到的是乱码，
+            // 且没有任何异常。因此只有"发送必定在返回前结束"的无超时路径才借用池化内存；
+            // 传了超时就编码到一个独占数组，把所有权直接交给可能脱离的发送。
+            // A finite timeout detaches the send, which keeps reading this memory (see the remarks on
+            // AwaitWithTimeoutAsync). Returning a pooled buffer here lets the next renter overwrite a
+            // frame that is still on its way out — corruption, silently. So the pooled fast path is
+            // used only when no timeout can detach the send; with a timeout we encode into a private
+            // array and hand its ownership to the send that may outlive this call.
+            bool canDetach = timeout != null && timeout.Value != Timeout.InfiniteTimeSpan;
+
+            if (canDetach)
+            {
+                byte[] owned = encoding.GetBytes(data);
+                await SendLocalAsync(owned.AsMemory(), messageType, owned.Length <= 4 * 1024, cancellationToken: cancellationToken, timeout, sendBufferSize: (uint)sendBufferSize, sockets: socket);
+                return;
+            }
+
+            // 编码到租用缓冲区，避免为每次发送分配一个 byte[]。无超时路径下发送必定在 await 返回前结束，
+            // 此时归还是安全的。
+            // Encode into a pooled buffer to avoid a per-send byte[] allocation. On the no-timeout path
+            // the send is guaranteed finished when the await returns, so returning it here is safe.
             int rentSize = encoding.GetMaxByteCount(data.Length);
             var rented = ArrayPool<byte>.Shared.Rent(rentSize);
             try

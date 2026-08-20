@@ -450,6 +450,14 @@ namespace Cyaim.WebSocketServer.MessagePack
                     // 端点级上限：解析出 target 后把生效上限从全局默认切到端点 MaxBytes（0=沿用全局）。
                     long effectiveReceiveLimit = webSocketOption.MaxRequestReceiveDataLimit ?? 0;
                     bool endpointPolicyResolved = false;
+                    // 从头部解析出的 target，解析一次后供端点大小策略与逐帧带宽限速共用。
+                    // The target parsed from the header, resolved once and shared by the endpoint size policy
+                    // and the per-frame bandwidth throttle.
+                    string resolvedTarget = null;
+                    // target 解析出来之前已收下、只能按"无端点"计费的字节，消息收完后补进端点桶。
+                    // Bytes received before the target was known and therefore charged without an endpoint;
+                    // settled into the endpoint bucket once the message is complete.
+                    long endpointUnattributedBytes = 0;
                     try
                     {
                         // Connection level restrictions
@@ -495,7 +503,10 @@ namespace Cyaim.WebSocketServer.MessagePack
 
                                 // 端点级上限：从头部解析 target（MessagePack 需首帧收齐），命中端点策略则切换生效上限。
                                 // Per-endpoint cap: resolve target (MessagePack needs the first frame complete) and switch the cap.
-                                if (!endpointPolicyResolved && webSocketOption.WatchAssemblyContext != null)
+                                // 头部只解析一次，端点大小策略与带宽限速共用结果（与 MVC 通道同构）。
+                                // Resolve the header once and share it between the size policy and the bandwidth
+                                // throttle, mirroring the MVC channel.
+                                if (!endpointPolicyResolved && (webSocketOption.WatchAssemblyContext != null || bandwidthLimitManager != null))
                                 {
                                     ReadOnlySpan<byte> headerSpan = wsReceiveReader.Length > 0
                                         ? wsReceiveReader.GetBuffer().AsSpan(0, (int)wsReceiveReader.Length)
@@ -504,7 +515,9 @@ namespace Cyaim.WebSocketServer.MessagePack
                                     try { tgt = FindTargetFromMessagePack(headerSpan); } catch { /* header not complete yet */ }
                                     if (tgt != null)
                                     {
-                                        if (webSocketOption.WatchAssemblyContext.TryGetEndpointPolicy(tgt, out var pol) && pol.MaxBytes > 0)
+                                        resolvedTarget = tgt;
+                                        if (webSocketOption.WatchAssemblyContext != null
+                                            && webSocketOption.WatchAssemblyContext.TryGetEndpointPolicy(tgt, out var pol) && pol.MaxBytes > 0)
                                         {
                                             effectiveReceiveLimit = pol.MaxBytes;
                                         }
@@ -520,20 +533,21 @@ namespace Cyaim.WebSocketServer.MessagePack
                                     goto CONTINUE_RECEIVE;
                                 }
 
-                                // 应用带宽限速策略
+                                // 逐帧限速。端点取自上面解析出的 target。此前这里只读 wsReceiveReader，
+                                // 而该限速点位于「把本帧写入 wsReceiveReader」之前，所以每条消息的第一帧
+                                // （单帧消息则全程）Length 都是 0，唯一带头部的那一帧永远解析不出端点。
+                                // 而且它传的是未按 Length 切片的 GetBuffer()，空闲区可能残留上一条消息的字节。
+                                // Per-frame throttling, endpoint taken from the target resolved above. This site sits
+                                // before the frame is written into wsReceiveReader, so its Length is 0 on every message's
+                                // first frame (and throughout a single-frame message) — the one frame carrying the header
+                                // never resolved an endpoint. It also passed an unsliced GetBuffer(), whose slack can hold
+                                // bytes left over from the previous message.
                                 if (bandwidthLimitManager != null && result.Count > 0)
                                 {
-                                    string endPoint = null;
-                                    if (wsReceiveReader.Length > 0)
+                                    string endPoint = resolvedTarget;
+                                    if (endPoint == null)
                                     {
-                                        try
-                                        {
-                                            endPoint = FindTargetFromMessagePack(wsReceiveReader.GetBuffer());
-                                        }
-                                        catch
-                                        {
-                                            // 如果无法解析，忽略端点信息
-                                        }
+                                        endpointUnattributedBytes += result.Count;
                                     }
 
                                     await bandwidthLimitManager.WaitForBandwidthAsync(
@@ -633,27 +647,24 @@ namespace Cyaim.WebSocketServer.MessagePack
                         byte[] msgArray = singleFrameBuffer ?? wsReceiveReader.GetBuffer();
                         int msgLen = singleFrameBuffer != null ? singleFrameCount : (int)wsReceiveReader.Length;
 
-                        // 在接收完数据后，应用端点级别的限速策略
-                        string endpoint = null;
-                        if (bandwidthLimitManager != null && msgLen > 0)
+                        // 通道桶与连接桶已在循环内逐帧计过，这里不能再调 WaitForBandwidthAsync（它对这两个桶
+                        // 无条件计费，再调一次就是同一批字节计两遍）。只把 target 解析出来之前那些帧的字节
+                        // 补进端点桶，否则把 target 放到 payload 末尾就能让端点级限额收不到字节。
+                        // The channel and connection buckets were already charged per frame, so WaitForBandwidthAsync
+                        // must not run again here (it charges those two unconditionally — a second call double-counts).
+                        // Only the bytes that arrived before the target was known are settled into the endpoint bucket;
+                        // without that, putting `target` at the end of the payload hides them from the endpoint limit.
+                        string endpoint = resolvedTarget;
+                        if (bandwidthLimitManager != null && endpointUnattributedBytes > 0 && msgLen > 0)
                         {
-                            try
+                            if (string.IsNullOrEmpty(endpoint))
                             {
-                                endpoint = FindTargetFromMessagePack(msgArray.AsSpan(0, msgLen));
-                                if (!string.IsNullOrEmpty(endpoint))
-                                {
-                                    await bandwidthLimitManager.WaitForBandwidthAsync(
-                                        context.Request.Path,
-                                        context.Connection.Id,
-                                        endpoint,
-                                        msgLen,
-                                        context.Connection.RemoteIpAddress?.ToString(),
-                                        CancellationToken.None);
-                                }
+                                try { endpoint = FindTargetFromMessagePack(msgArray.AsSpan(0, msgLen)); } catch { /* not decodable */ }
                             }
-                            catch
+
+                            if (!string.IsNullOrEmpty(endpoint))
                             {
-                                // 如果无法解析端点，忽略
+                                bandwidthLimitManager.RecordEndPointBytes(endpoint, endpointUnattributedBytes);
                             }
                         }
 
