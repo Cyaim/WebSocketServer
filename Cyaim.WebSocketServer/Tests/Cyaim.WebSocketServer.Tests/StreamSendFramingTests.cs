@@ -5,135 +5,263 @@ using Cyaim.WebSocketServer.Infrastructure;
 namespace Cyaim.WebSocketServer.Tests
 {
     /// <summary>
-    /// 分批发送时，消息分帧必须始终收敛到一个确定状态：要么收尾，要么中止连接。
-    /// A batched send must always leave framing in a decided state: message terminated, or connection aborted.
+    /// 发送侧的核心不变式：**只要发出过 <c>endOfMessage: true</c>，这条消息的内容就一定完整。**
+    /// The send-side invariant: <b>whenever <c>endOfMessage: true</c> goes out, the message is complete.</b>
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 分批发送的形状是「若干 <c>endOfMessage:false</c> 帧 + 一个 <c>endOfMessage:true</c> 收尾帧」。
-    /// 中途失败而不收尾，这条消息在 WebSocket 协议层就一直没有结束，<b>下一个发送者的帧会被对端当作
-    /// 它的延续帧</b>——此后每条消息都被粘在这条残消息后面。该连接的分帧永久错乱，服务端零日志：
-    /// 每一次发送调用看起来都成功了。
-    /// Batched sending is "N frames with endOfMessage:false, then a terminator". Failing partway without
-    /// terminating leaves the message open at the protocol level, so <b>the next sender's frames become
-    /// continuation frames of it</b>. Every later message is glued onto the truncated one: framing is broken
-    /// for the life of the connection with nothing logged — each send still looks successful.
+    /// 这条不变式存在的理由是产品性的：客户端判断「一条消息到齐了」的唯一依据，就是 WebSocket 层的
+    /// 结束标志。如果服务端可能发出一条带着结束标志、内容却少了一截的消息，那么**每一个**客户端都得
+    /// 自己去实现截断检测——把服务端的正确性问题变成所有客户端的负担。所以库宁可终结连接，也绝不
+    /// 发出这样的消息。
+    /// The invariant exists for a product reason: a client's only means of deciding a message arrived whole
+    /// is the WebSocket end-of-message flag. If the server could emit a message carrying that flag with its
+    /// tail missing, <b>every</b> client would need its own truncation detection — the server's correctness
+    /// problem pushed onto all of them. So the library terminates the connection rather than emit one.
     /// </para>
     /// <para>
-    /// 失败来自哪里决定了怎么处理，两者不能混为一谈：
-    /// <list type="bullet">
-    /// <item><b>读流失败</b>（调用方 Dispose 了流、IO 错误）：socket 是好的，已上线的都是完整帧 →
-    /// 补一个收尾帧，对端收到一条被截断的消息，解不开就丢掉，连接继续可用。</item>
-    /// <item><b>写 socket 失败</b>：线上有没有字节、有几个字节都无从得知，帧可能被撕断 →
-    /// 空收尾帧救不回来（对端还在等这一帧剩余载荷），只能 Abort。</item>
+    /// 两条收场，没有第三条：
+    /// <list type="number">
+    /// <item><b>一帧未发</b>：载荷在写第一帧之前就已全部读进内存，读源失败时调用方拿到异常，
+    /// 对端什么都没收到，连接毫发无伤。这是绝大多数消息走的路。</item>
+    /// <item><b>终结连接</b>：载荷大到无法物化时才边读边发，中途失败就留下一条永不收尾的消息并关闭
+    /// 连接（Close 1011 优先，Abort 兜底）。对端看到的是协议错误或连接关闭，而不是一条「完整」消息。</item>
     /// </list>
-    /// Where the failure came from decides the response, and the two must not be conflated: a failed read
-    /// leaves a healthy socket and whole frames (terminate), while a failed write leaves the wire in an
-    /// unknown state that an empty terminator cannot repair (abort).
+    /// Two endings, never a third: nothing written and the caller gets an exception (the common path), or
+    /// the connection is terminated with the message deliberately left unterminated.
     /// </para>
     /// </remarks>
-    public class StreamSendFramingTests
+    public class StreamSendFramingTests : IDisposable
     {
         private const int Chunk = 4096;
 
-        [Fact]
-        public async Task A_failed_read_closes_the_message_so_the_socket_stays_usable()
+        private readonly long _materializeLimit = WebSocketManager.MaxSendMaterializeBytes;
+        private readonly int _frameBytes = WebSocketManager.MaxSendFrameBytes;
+        private readonly bool _allowChunked = WebSocketManager.AllowChunkedSendAboveMaterializeLimit;
+
+        public void Dispose()
         {
+            WebSocketManager.MaxSendMaterializeBytes = _materializeLimit;
+            WebSocketManager.MaxSendFrameBytes = _frameBytes;
+            WebSocketManager.AllowChunkedSendAboveMaterializeLimit = _allowChunked;
+        }
+
+        // ---------------------------------------------------------------- 收场一：一帧未发
+
+        [Fact]
+        public async Task A_failing_source_below_the_limit_writes_nothing_and_leaves_the_connection_intact()
+        {
+            // 物化的全部意义：读源失败时第一帧都还没写，所以没有任何东西需要善后。
+            // The whole point of materialising: the source fails before the first frame, so there is
+            // nothing to clean up.
             var socket = new RecordingWebSocket();
             var stream = new FailsAfterFirstReadStream(Chunk);
 
             await Assert.ThrowsAnyAsync<Exception>(() => SendStreamAsync(stream, socket));
 
-            Assert.True(socket.LastFrameEndsMessage, "the message was left open for the next sender to continue");
-            Assert.False(socket.Aborted, "a healthy socket must not be aborted just because the stream went away");
+            Assert.Empty(socket.Frames);
+            Assert.Equal(WebSocketState.Open, socket.State);
+            Assert.False(socket.Aborted);
+            Assert.False(socket.CloseOutputCalled);
         }
 
         [Fact]
-        public async Task The_socket_is_reusable_after_a_failed_read()
+        public async Task A_silent_short_read_is_caught_before_anything_is_written()
         {
-            // 补收尾帧的意义就在这里：连接还能用。对端丢掉一条截断消息是可恢复的；
-            // 后续帧被静默粘上去不是。
-            // This is the point of terminating: the connection keeps working. A peer discarding one truncated
-            // message is recoverable; later frames silently glued onto it are not.
+            // 最阴险的一种：流声明了长度，却在读到一半时返回 0 而不抛异常（网络文件系统抖动就是这样）。
+            // 不校验总量的话，它会变成一条语法完整、内容却少了一截的消息，而两端都不知道。
+            // The nastiest case: the stream declares a length but returns 0 midway without throwing, as a
+            // flaky network filesystem does. Without a total check it becomes a syntactically complete
+            // message quietly missing its tail, with neither end the wiser.
             var socket = new RecordingWebSocket();
-            await Assert.ThrowsAnyAsync<Exception>(() => SendStreamAsync(new FailsAfterFirstReadStream(Chunk), socket));
+            var stream = new ShortReadStream(declaredLength: 65536, actualBytes: 20000);
 
-            byte[] next = Encoding.UTF8.GetBytes("the next message");
-            await WebSocketManager.SendLocalAsync(
-                next.AsMemory(), WebSocketMessageType.Text, sendAtOnce: true, CancellationToken.None, sockets: socket);
+            await Assert.ThrowsAsync<EndOfStreamException>(() => SendStreamAsync(stream, socket));
 
-            var messages = socket.CompletedMessages();
-            Assert.Equal(2, messages.Count);
-            Assert.Equal(next, messages[1]);
+            Assert.Empty(socket.Frames);
+            Assert.Equal(WebSocketState.Open, socket.State);
         }
 
         [Fact]
-        public async Task A_failed_write_aborts_instead_of_guessing_what_reached_the_wire()
+        public async Task A_stream_positioned_midway_sends_only_the_remainder()
         {
-            // 写失败后帧可能被撕断，空收尾帧救不回来 —— 只能中止。
-            var socket = new RecordingWebSocket { FailSendAfter = 1 };
-            var stream = new FixedChunksStream(Chunk, chunks: 4);
+            // Length 而非 Length - Position 会让剩余量算多，进而误报短读。
+            // Using Length instead of Length - Position overstates the remainder and false-alarms as a short read.
+            var socket = new RecordingWebSocket();
+            var payload = new byte[4096];
+            new Random(3).NextBytes(payload);
+            using var stream = new MemoryStream(payload) { Position = 3000 };
+
+            await SendStreamAsync(stream, socket);
+
+            Assert.Equal(payload.AsSpan(3000).ToArray(), Assert.Single(socket.CompletedMessages()));
+        }
+
+        // ---------------------------------------------------------------- 收场二：终结连接
+
+        [Fact]
+        public async Task A_failing_source_above_the_limit_never_terminates_the_message()
+        {
+            // 超过物化上限只能边读边发。中途失败时**绝不**补收尾帧——那正是会被客户端误当成完整消息的东西。
+            // Above the limit the send must stream. A mid-stream failure must never terminate the message —
+            // that is precisely what a client would mistake for a complete one.
+            WebSocketManager.MaxSendMaterializeBytes = 1024;
+            var socket = new RecordingWebSocket();
+            var stream = new FailsAfterFirstReadStream(Chunk, seekable: false);
 
             await Assert.ThrowsAnyAsync<Exception>(() => SendStreamAsync(stream, socket));
 
-            Assert.True(socket.Aborted, "a torn frame cannot be repaired by a terminator; the connection must be aborted");
+            Assert.DoesNotContain(socket.Frames, f => f.EndOfMessage);
+            Assert.True(socket.CloseOutputCalled || socket.Aborted, "the connection must be terminated");
         }
 
         [Fact]
-        public async Task A_terminator_that_cannot_be_written_aborts_rather_than_wedging_the_send_gate()
+        public async Task A_silent_short_read_above_the_limit_never_terminates_the_message()
         {
-            // 这是本修复最危险的一条自伤路径：收尾帧是在 per-socket 发送门闩之内写的。
-            // 若它无限阻塞，门闩永不释放 —— 该连接此后任何发送都排不进去，而 State 仍是 Open、
-            // 没有 Abort、没有日志。那比原本的分帧错乱更难恢复，所以收尾帧必须有界。
-            // The self-inflicted failure this fix must not have: the terminator is written while the
-            // per-socket send gate is held. If it blocked forever the gate would never be released — nothing
-            // could ever be sent on this connection again, with State still Open and nothing logged. Worse
-            // than the framing corruption it exists to prevent, so the terminator has to be bounded.
-            var socket = new RecordingWebSocket { BlockTerminator = true };
-            var stream = new FailsAfterFirstReadStream(Chunk);
+            WebSocketManager.MaxSendMaterializeBytes = 1024;
+            var socket = new RecordingWebSocket();
+            var stream = new ShortReadStream(declaredLength: 8192, actualBytes: 3000);
 
-            var send = SendStreamAsync(stream, socket);
+            await Assert.ThrowsAsync<EndOfStreamException>(() => SendStreamAsync(stream, socket));
 
-            // 这个断言本身就是「门闩没被占死」的证明：收尾帧是在门闩内 await 的，
-            // 若它无限阻塞，这个任务永远不会完成，gate.Release() 所在的 finally 也永远不会执行。
-            // 能在有界时间内完成，就说明收尾帧确实有上限。
-            // This assertion is itself the proof that the gate is not wedged: the terminator is awaited while
-            // the gate is held, so if it blocked forever this task would never complete and the finally
-            // holding gate.Release() would never run. Completing within a bound means the terminator is bounded.
-            var finished = await Task.WhenAny(send, Task.Delay(TimeSpan.FromSeconds(20)));
-            Assert.Same(send, finished);
-            await Assert.ThrowsAnyAsync<Exception>(() => send);
-
-            Assert.True(socket.Aborted, "an unwritable terminator must abort the connection");
+            Assert.DoesNotContain(socket.Frames, f => f.EndOfMessage);
+            Assert.True(socket.CloseOutputCalled || socket.Aborted);
         }
 
         [Fact]
-        public async Task A_message_still_open_in_CloseReceived_is_terminated()
+        public async Task Termination_prefers_a_graceful_close_so_delivered_messages_survive()
         {
-            // .NET 的合法发送状态是 {Open, CloseReceived}：对端发了 Close 但我们还没发，
-            // 消息同样开着，同样需要收尾。守卫只判 Open 会漏掉这一格。
-            // .NET's valid send states are {Open, CloseReceived}: the peer sent Close but we have not, the
-            // message is just as open and still needs terminating. A guard checking only Open misses it.
-            var socket = new RecordingWebSocket { StateAfterFirstSend = WebSocketState.CloseReceived };
-            var stream = new FailsAfterFirstReadStream(Chunk);
+            // Close 是有序关闭：对端缓冲区里那些已经完整送达的消息仍会交付给它的应用。
+            // Abort 是 RST，会把它们一并丢掉——所以只在 Close 失败时才用。
+            // A close is orderly: messages already fully delivered still reach the peer's application.
+            // An Abort is an RST that discards them, so it is only the fallback.
+            WebSocketManager.MaxSendMaterializeBytes = 1024;
+            var socket = new RecordingWebSocket();
 
-            await Assert.ThrowsAnyAsync<Exception>(() => SendStreamAsync(stream, socket));
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                SendStreamAsync(new FailsAfterFirstReadStream(Chunk, seekable: false), socket));
 
-            Assert.True(socket.LastFrameEndsMessage, "the message was left open in CloseReceived");
+            Assert.True(socket.CloseOutputCalled);
+            Assert.False(socket.Aborted);
+            Assert.Equal(WebSocketCloseStatus.InternalServerError, socket.CloseStatusSent);
+        }
+
+        [Fact]
+        public async Task Termination_falls_back_to_Abort_when_the_close_cannot_be_sent()
+        {
+            // 被取消或失败的 CloseOutputAsync 不会替你中止连接，必须自己兜底。
+            // A cancelled or failed CloseOutputAsync does not abort for you; the fallback must be explicit.
+            WebSocketManager.MaxSendMaterializeBytes = 1024;
+            var socket = new RecordingWebSocket { FailCloseOutput = true };
+
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                SendStreamAsync(new FailsAfterFirstReadStream(Chunk, seekable: false), socket));
+
+            Assert.True(socket.Aborted);
+        }
+
+        [Fact]
+        public async Task Termination_leaves_a_connection_that_is_already_closing_alone()
+        {
+            // 已经在关闭流程里再发 RST，只会白丢对端缓冲区里那些好消息。
+            // An RST on a connection already closing only discards good messages still in the peer's buffer.
+            WebSocketManager.MaxSendMaterializeBytes = 1024;
+            var socket = new RecordingWebSocket { StateAfterFirstSend = WebSocketState.CloseSent };
+
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                SendStreamAsync(new FailsAfterFirstReadStream(Chunk, seekable: false), socket));
+
+            Assert.False(socket.Aborted);
+            Assert.False(socket.CloseOutputCalled);
+        }
+
+        // ---------------------------------------------------------------- 上限与降级
+
+        [Fact]
+        public async Task Above_the_limit_without_the_chunked_fallback_refuses_before_writing_anything()
+        {
+            WebSocketManager.MaxSendMaterializeBytes = 1024;
+            WebSocketManager.AllowChunkedSendAboveMaterializeLimit = false;
+            var socket = new RecordingWebSocket();
+            using var stream = new MemoryStream(new byte[8192]);
+
+            var ex = await Assert.ThrowsAsync<WebSocketMessageTooLargeException>(() => SendStreamAsync(stream, socket));
+
+            Assert.Equal(8192, ex.PayloadBytes);
+            Assert.Equal(1024, ex.LimitBytes);
+            Assert.Empty(socket.Frames);
+            Assert.Equal(WebSocketState.Open, socket.State);
+        }
+
+        [Fact]
+        public async Task Above_the_limit_a_finite_timeout_still_sends_rather_than_refusing()
+        {
+            // 曾经在这里拒绝过：有限超时会让发送脱离等待，调用方的 using 随即 Dispose 流，而后台还在读它。
+            // 但那是**回归**——旧实现在同样调用下会把整条流发出去，而且默认配置就会触发。
+            // 更重要的是：放行并不破坏不变式。流被 Dispose 后读失败，已上线的帧不会被收尾，连接被终结，
+            // 对端拿不到任何「完整」消息。既然正确性不依赖拒绝，就不该拿掉一个既有能力。
+            // This used to refuse: a finite timeout detaches the send while the caller's `using` disposes the
+            // stream under it. But refusing was a regression — the old implementation sent the whole stream
+            // for the same call, and the default configuration triggers it. More to the point, allowing it
+            // does not break the invariant: the disposed stream fails the read, the frames already out are
+            // never terminated, the connection is, and the peer receives nothing that looks complete. With
+            // correctness not resting on the refusal, removing a working capability was not justified.
+            WebSocketManager.MaxSendMaterializeBytes = 1024;
+            WebSocketManager.MaxSendFrameBytes = 1024;
+            var socket = new RecordingWebSocket();
+            var payload = new byte[8192];
+            new Random(13).NextBytes(payload);
+            using var stream = new MemoryStream(payload);
+
+            await WebSocketManager.SendLocalAsync(stream, WebSocketMessageType.Binary, CancellationToken.None,
+                timeout: TimeSpan.FromSeconds(30), sendAtOnce: false, sendBufferSize: Chunk, sockets: socket);
+
+            Assert.Equal(payload, Assert.Single(socket.CompletedMessages()));
+        }
+
+        [Fact]
+        public async Task Above_the_limit_the_chunked_fallback_still_delivers_the_whole_payload()
+        {
+            // 加上限不能等于砍掉「能发大流」这个能力。
+            // Adding a limit must not amount to removing the ability to send large streams.
+            WebSocketManager.MaxSendMaterializeBytes = 4096;
+            WebSocketManager.MaxSendFrameBytes = 1024;
+            var socket = new RecordingWebSocket();
+            var payload = new byte[20_000];
+            new Random(11).NextBytes(payload);
+            using var stream = new MemoryStream(payload);
+
+            await SendStreamAsync(stream, socket);
+
+            Assert.Equal(payload, Assert.Single(socket.CompletedMessages()));
+            Assert.True(socket.Frames.Count > 1, "the payload should have been streamed in frames");
+            Assert.All(socket.Frames.Take(socket.Frames.Count - 1), f => Assert.False(f.EndOfMessage));
+        }
+
+        // ---------------------------------------------------------------- 结构性护栏
+
+        [Fact]
+        public void The_message_terminating_helper_is_permanently_gone()
+        {
+            // 回归护栏：CloseOpenMessageAsync 是全仓唯一能制造「截断但语法完整」消息的函数。
+            // Regression guard: CloseOpenMessageAsync was the only function able to emit a message that is
+            // truncated yet syntactically complete.
+            var revived = typeof(WebSocketManager).GetMethod(
+                "CloseOpenMessageAsync",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+            Assert.Null(revived);
         }
 
         [Fact]
         public async Task A_completed_stream_send_is_unaffected()
         {
-            // 阳性对照：正常路径不能被上面任何一条改变。
             var socket = new RecordingWebSocket();
-            byte[] payload = new byte[10_000];
+            var payload = new byte[10_000];
             new Random(7).NextBytes(payload);
             using var stream = new MemoryStream(payload);
 
-            await WebSocketManager.SendLocalAsync(
-                stream, WebSocketMessageType.Binary, CancellationToken.None,
-                timeout: TimeSpan.FromSeconds(30), sendAtOnce: false, sendBufferSize: Chunk, sockets: socket);
+            await SendStreamAsync(stream, socket);
 
             Assert.Equal(payload, Assert.Single(socket.CompletedMessages()));
             Assert.False(socket.Aborted);
@@ -147,32 +275,27 @@ namespace Cyaim.WebSocketServer.Tests
         // ------------------------------------------------------------------ fakes
 
         /// <summary>
-        /// 记录分帧、可按需让发送失败或让收尾帧卡住，并记录 Abort。
-        /// 共享的 TestWebSocket 观察不到这些：它不理会取消、也从不 Abort。
-        /// Records framing, can fail a send or wedge the terminator on demand, and records Abort. The shared
-        /// TestWebSocket cannot observe any of that — it ignores cancellation and never aborts.
+        /// 记录分帧与关闭方式的假 socket。共享的 TestWebSocket 观察不到 Abort / CloseOutput，
+        /// 用它写的测试会「全绿但什么都没证明」。
+        /// A fake that records framing and how the connection was closed. The shared TestWebSocket sees
+        /// neither Abort nor CloseOutput, so tests built on it go green without proving anything.
         /// </summary>
         private sealed class RecordingWebSocket : WebSocket
         {
             private readonly object _sync = new object();
             private readonly List<(byte[] Payload, bool EndOfMessage)> _frames = new List<(byte[], bool)>();
             private WebSocketState _state = WebSocketState.Open;
-            private int _sends;
 
-            /// <summary>Fail the Nth non-terminating send (1-based). 0 = never.</summary>
-            public int FailSendAfter { get; set; }
-
-            /// <summary>Make the terminating frame block until cancelled.</summary>
-            public bool BlockTerminator { get; set; }
-
-            /// <summary>Move to this state once the first frame has gone out.</summary>
+            public bool FailCloseOutput { get; set; }
             public WebSocketState? StateAfterFirstSend { get; set; }
 
             public bool Aborted { get; private set; }
+            public bool CloseOutputCalled { get; private set; }
+            public WebSocketCloseStatus? CloseStatusSent { get; private set; }
 
-            public bool LastFrameEndsMessage
+            public IReadOnlyList<(byte[] Payload, bool EndOfMessage)> Frames
             {
-                get { lock (_sync) { return _frames.Count > 0 && _frames[_frames.Count - 1].EndOfMessage; } }
+                get { lock (_sync) { return _frames.ToArray(); } }
             }
 
             public List<byte[]> CompletedMessages()
@@ -190,19 +313,8 @@ namespace Cyaim.WebSocketServer.Tests
                 }
             }
 
-            public override async Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
+            public override Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
             {
-                if (endOfMessage && BlockTerminator)
-                {
-                    // 无限阻塞，只有取消才能解开 —— 正是对端不排空时真实 socket 的行为。
-                    await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
-                }
-
-                if (!endOfMessage && FailSendAfter > 0 && ++_sends >= FailSendAfter)
-                {
-                    throw new WebSocketException(WebSocketError.ConnectionClosedPrematurely);
-                }
-
                 lock (_sync) { _frames.Add((buffer.ToArray(), endOfMessage)); }
 
                 if (StateAfterFirstSend.HasValue)
@@ -210,6 +322,21 @@ namespace Cyaim.WebSocketServer.Tests
                     _state = StateAfterFirstSend.Value;
                     StateAfterFirstSend = null;
                 }
+
+                return Task.CompletedTask;
+            }
+
+            public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string statusDescription, CancellationToken cancellationToken)
+            {
+                CloseOutputCalled = true;
+                if (FailCloseOutput)
+                {
+                    throw new WebSocketException(WebSocketError.ConnectionClosedPrematurely);
+                }
+
+                CloseStatusSent = closeStatus;
+                _state = WebSocketState.CloseSent;
+                return Task.CompletedTask;
             }
 
             public override void Abort()
@@ -223,7 +350,6 @@ namespace Cyaim.WebSocketServer.Tests
             public override WebSocketState State => _state;
             public override string SubProtocol => null;
             public override Task CloseAsync(WebSocketCloseStatus s, string d, CancellationToken c) { _state = WebSocketState.Closed; return Task.CompletedTask; }
-            public override Task CloseOutputAsync(WebSocketCloseStatus s, string d, CancellationToken c) { _state = WebSocketState.CloseSent; return Task.CompletedTask; }
             public override void Dispose() { }
             public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken) => throw new NotSupportedException();
         }
@@ -232,9 +358,18 @@ namespace Cyaim.WebSocketServer.Tests
         private sealed class FailsAfterFirstReadStream : ReadOnlyStream
         {
             private readonly int _chunk;
+            private readonly bool _seekable;
             private int _reads;
 
-            public FailsAfterFirstReadStream(int chunk) => _chunk = chunk;
+            public FailsAfterFirstReadStream(int chunk, bool seekable = true)
+            {
+                _chunk = chunk;
+                _seekable = seekable;
+            }
+
+            public override bool CanSeek => _seekable;
+            public override long Length => _seekable ? _chunk * 4L : throw new NotSupportedException();
+            public override long Position { get => 0; set { } }
 
             public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
             {
@@ -249,26 +384,40 @@ namespace Cyaim.WebSocketServer.Tests
             }
         }
 
-        /// <summary>Yields a fixed number of full chunks, then ends cleanly.</summary>
-        private sealed class FixedChunksStream : ReadOnlyStream
+        /// <summary>Declares a length but quietly stops early — without throwing.</summary>
+        private sealed class ShortReadStream : ReadOnlyStream
         {
-            private readonly int _chunk;
-            private int _remaining;
+            private readonly long _declared;
+            private readonly int _actual;
+            private int _served;
 
-            public FixedChunksStream(int chunk, int chunks) { _chunk = chunk; _remaining = chunks; }
+            public ShortReadStream(long declaredLength, int actualBytes)
+            {
+                _declared = declaredLength;
+                _actual = actualBytes;
+            }
+
+            public override bool CanSeek => true;
+            public override long Length => _declared;
+            public override long Position { get => 0; set { } }
 
             public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
             {
-                if (_remaining-- <= 0) return Task.FromResult(0);
-                int n = Math.Min(count, _chunk);
+                int remaining = _actual - _served;
+                if (remaining <= 0)
+                {
+                    return Task.FromResult(0);   // 静默结束，不抛 / stops quietly, never throws
+                }
+
+                int n = Math.Min(Math.Min(count, remaining), 4096);
                 Fill(buffer, offset, n);
+                _served += n;
                 return Task.FromResult(n);
             }
         }
 
         private abstract class ReadOnlyStream : Stream
         {
-            /// <summary>Writes into the caller's buffer — a Span.ToArray() copy would fill nothing.</summary>
             protected static void Fill(byte[] buffer, int offset, int count)
             {
                 for (int i = 0; i < count; i++)

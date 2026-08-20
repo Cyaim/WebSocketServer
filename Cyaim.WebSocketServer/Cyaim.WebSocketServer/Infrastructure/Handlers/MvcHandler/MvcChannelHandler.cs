@@ -319,6 +319,13 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 // 应用全局接收内存预算（进程级、幂等）。
                 // Apply the process-wide receive-memory budget (idempotent).
                 WebSocketReceiveMemoryGovernor.MaxBytes = webSocketOptions.MaxTotalReceiveBufferBytes ?? 0;
+                // 发送侧上限与接收侧同样由通道入口镜像进静态字段（WebSocketManager 是静态类，拿不到 options）。
+                // The send-side limits are mirrored in at the channel entry just like the receive-side ones
+                // (WebSocketManager is static and cannot see options).
+                WebSocketManager.MaxSendMaterializeBytes = webSocketOptions.MaxSendMaterializeBytes ?? 0;
+                WebSocketManager.MaxSendFrameBytes = webSocketOptions.MaxSendFrameBytes;
+                WebSocketManager.AllowChunkedSendAboveMaterializeLimit = webSocketOptions.AllowChunkedSendAboveMaterializeLimit;
+                WebSocketSendMemoryGovernor.MaxBytes = webSocketOptions.MaxTotalSendMaterializeBytes ?? 0;
                 // 初始容量 0：单帧消息走快路径、根本不写这个流，因此绝大多数连接不会分配接收缓冲。
                 // 多帧消息首次写入时才按需增长；处理后在 finally 里收缩大尖峰（见下）。
                 // Zero initial capacity: single-frame messages take the fast path and never write this
@@ -1411,7 +1418,14 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
             }
             var resp = new MvcResponseScheme { Id = outcome.Id, Target = outcome.Target, Status = outcome.Result.Status, Body = outcome.Result.Body, Msg = outcome.Result.Msg, RequestTime = requestTime, CompleteTime = DateTime.UtcNow.Ticks };
             var bytes = JsonSerializer.SerializeToUtf8Bytes(resp, webSocketOptions.DefaultResponseJsonSerializerOptions);
-            await webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+            // 必须走 WebSocketManager：直接 SendAsync 会绕过 per-socket 发送门闩，插进别人正在发的多帧消息中间，
+            // 造出一条带结束标志、内容却是别人前半截的消息——正是发送不变式要消灭的东西。
+            // Must go through WebSocketManager: a raw SendAsync bypasses the per-socket send gate and can inject
+            // itself into someone else's multi-frame message, producing one that carries the end flag while holding
+            // another message's opening bytes — exactly what the send invariant exists to prevent.
+            await WebSocketManager.SendLocalAsync(
+                bytes.AsMemory(), WebSocketMessageType.Text, sendAtOnce: true,
+                CancellationToken.None, timeout: null, sockets: webSocket);
         }
 
         /// <summary>

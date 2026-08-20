@@ -432,6 +432,13 @@ namespace Cyaim.WebSocketServer.MessagePack
                 string wsCloseDesc = string.Empty;
                 // 应用全局接收内存预算（进程级、幂等）。
                 Cyaim.WebSocketServer.Infrastructure.WebSocketReceiveMemoryGovernor.MaxBytes = webSocketOption.MaxTotalReceiveBufferBytes ?? 0;
+                // 发送侧上限与接收侧同样由通道入口镜像进静态字段（WebSocketManager 是静态类，拿不到 options）。
+                // The send-side limits are mirrored in at the channel entry just like the receive-side ones
+                // (WebSocketManager is static and cannot see options).
+                Cyaim.WebSocketServer.Infrastructure.WebSocketManager.MaxSendMaterializeBytes = webSocketOption.MaxSendMaterializeBytes ?? 0;
+                Cyaim.WebSocketServer.Infrastructure.WebSocketManager.MaxSendFrameBytes = webSocketOption.MaxSendFrameBytes;
+                Cyaim.WebSocketServer.Infrastructure.WebSocketManager.AllowChunkedSendAboveMaterializeLimit = webSocketOption.AllowChunkedSendAboveMaterializeLimit;
+                Cyaim.WebSocketServer.Infrastructure.WebSocketSendMemoryGovernor.MaxBytes = webSocketOption.MaxTotalSendMaterializeBytes ?? 0;
                 // 初始容量 0：单帧走快路径不写此流，绝大多数连接不分配接收缓冲；多帧首次写入才增长。
                 // Zero initial capacity: single-frame fast path never writes it, so most connections allocate none.
                 using MemoryStream wsReceiveReader = new MemoryStream();
@@ -722,7 +729,14 @@ namespace Cyaim.WebSocketServer.MessagePack
 
                             // 发送错误响应 - 使用 MessagePack
                             var responseBytes = MessagePackSerializer.Serialize(errorResponse);
-                            await webSocket.SendAsync(new ArraySegment<byte>(responseBytes), WebSocketMessageType.Binary, true, CancellationToken.None);
+                            // 必须走 WebSocketManager：直接 SendAsync 会绕过 per-socket 发送门闩，插进别人正在发的多帧消息中间，
+                            // 造出一条带结束标志、内容却是别人前半截的消息——正是发送不变式要消灭的东西。
+                            // Must go through WebSocketManager: a raw SendAsync bypasses the per-socket send gate and can inject
+                            // itself into someone else's multi-frame message, producing one that carries the end flag while holding
+                            // another message's opening bytes — exactly what the send invariant exists to prevent.
+                            await Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendLocalAsync(
+                                responseBytes.AsMemory(), WebSocketMessageType.Binary, sendAtOnce: true,
+                                CancellationToken.None, timeout: null, sockets: webSocket);
 
                             logger.LogInformation(string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcForwardSendData_RequestIdRequired));
 
@@ -848,7 +862,14 @@ namespace Cyaim.WebSocketServer.MessagePack
             }
             var resp = new MessagePackResponseScheme { Id = outcome.Id, Target = outcome.Target, Status = outcome.Result.Status, Body = outcome.Result.Body, Msg = outcome.Result.Msg, RequestTime = requestTime, CompleteTime = DateTime.Now.Ticks };
             var responseBytes = MessagePackSerializer.Serialize(resp);
-            await webSocket.SendAsync(new ArraySegment<byte>(responseBytes), WebSocketMessageType.Binary, true, CancellationToken.None);
+            // 必须走 WebSocketManager：直接 SendAsync 会绕过 per-socket 发送门闩，插进别人正在发的多帧消息中间，
+            // 造出一条带结束标志、内容却是别人前半截的消息——正是发送不变式要消灭的东西。
+            // Must go through WebSocketManager: a raw SendAsync bypasses the per-socket send gate and can inject
+            // itself into someone else's multi-frame message, producing one that carries the end flag while holding
+            // another message's opening bytes — exactly what the send invariant exists to prevent.
+            await Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendLocalAsync(
+                responseBytes.AsMemory(), WebSocketMessageType.Binary, sendAtOnce: true,
+                CancellationToken.None, timeout: null, sockets: webSocket);
             var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
             _metricsCollector?.RecordMessageSent(responseBytes.Length, currentNodeId, context.Request.Path);
             Infrastructure.Cluster.GlobalClusterCenter.StatisticsRecorder?.RecordBytesSent(context.Connection.Id, responseBytes.Length);
@@ -908,7 +929,14 @@ namespace Cyaim.WebSocketServer.MessagePack
                 };
 
                 var responseBytes = MessagePackSerializer.Serialize(messagePackResponse);
-                await ctx.WebSocket.SendAsync(new ArraySegment<byte>(responseBytes), WebSocketMessageType.Binary, true, CancellationToken.None);
+                // 必须走 WebSocketManager：直接 SendAsync 会绕过 per-socket 发送门闩，插进别人正在发的多帧消息中间，
+                // 造出一条带结束标志、内容却是别人前半截的消息——正是发送不变式要消灭的东西。
+                // Must go through WebSocketManager: a raw SendAsync bypasses the per-socket send gate and can inject
+                // itself into someone else's multi-frame message, producing one that carries the end flag while holding
+                // another message's opening bytes — exactly what the send invariant exists to prevent.
+                await Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendLocalAsync(
+                    responseBytes.AsMemory(), WebSocketMessageType.Binary, sendAtOnce: true,
+                    CancellationToken.None, timeout: null, sockets: ctx.WebSocket);
 
                 var currentNodeId = Infrastructure.Cluster.GlobalClusterCenter.ClusterContext?.NodeId;
                 _metricsCollector?.RecordMessageSent(responseBytes.Length, currentNodeId, ctx.HttpContext.Request.Path);
@@ -930,7 +958,14 @@ namespace Cyaim.WebSocketServer.MessagePack
                 try
                 {
                     var responseBytes = MessagePackSerializer.Serialize(errorResponse);
-                    await ctx.WebSocket.SendAsync(new ArraySegment<byte>(responseBytes), WebSocketMessageType.Binary, true, CancellationToken.None);
+                    // 必须走 WebSocketManager：直接 SendAsync 会绕过 per-socket 发送门闩，插进别人正在发的多帧消息中间，
+                // 造出一条带结束标志、内容却是别人前半截的消息——正是发送不变式要消灭的东西。
+                // Must go through WebSocketManager: a raw SendAsync bypasses the per-socket send gate and can inject
+                // itself into someone else's multi-frame message, producing one that carries the end flag while holding
+                // another message's opening bytes — exactly what the send invariant exists to prevent.
+                await Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendLocalAsync(
+                    responseBytes.AsMemory(), WebSocketMessageType.Binary, sendAtOnce: true,
+                    CancellationToken.None, timeout: null, sockets: ctx.WebSocket);
                 }
                 catch
                 {

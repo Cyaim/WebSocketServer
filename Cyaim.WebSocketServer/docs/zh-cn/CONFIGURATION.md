@@ -56,6 +56,54 @@ builder.Services.AddWebSocketServer(x =>
 
 > ⚠️ **2.0 行为变更**：`MaxRequestReceiveDataLimit` 默认从"不限"改为 **4 MiB**。若现有业务经普通端点收发大于 4 MiB 的单条消息，请显式调大或设 `null`，或改用流式端点。详见 [流式上传与内存控制](./STREAMING_UPLOAD.md)。
 
+### 发送完整性与内存控制
+
+**不变式：只要一条消息带着 `endOfMessage` 标志发出，它的内容就一定完整。**
+
+客户端判断「消息到齐了」的唯一依据就是这个 WebSocket 层的结束标志。如果服务端可能发出一条带着该标志、
+内容却少了一截的消息，那么**每一个**客户端都得自己去实现截断检测——这是把服务端的正确性问题变成所有
+接入方的负担。所以本库宁可终结连接，也绝不发出这样的消息。
+
+失败只有两种收场，没有第三种：
+
+| 情形 | 收场 | 对端看到 |
+|---|---|---|
+| 载荷在物化上限内，读源失败 | **一帧未发**，异常抛给调用方 | 什么都没收到，连接照常可用 |
+| 载荷超过上限走流式，中途失败 | **终结连接**（Close 1011，Abort 兜底） | 协议错误 / 连接关闭，绝不是一条「完整」消息 |
+
+| 选项 | 默认 | 说明 |
+|---|---|---|
+| `MaxSendMaterializeBytes` | **4 MiB** | 发送前先读进内存的最大载荷；`null` = 不限。**只作用于 Stream 重载**，调用方直接交进来的 buffer 不受约束。 |
+| `MaxSendFrameBytes` | **256 KiB − 16** | 单个 WebSocket 帧的最大字节；`0` = 不切分。 |
+| `MaxTotalSendMaterializeBytes` | `null`（禁用） | 所有连接同时物化的进程级总预算。超预算**降级流式而不排队**。 |
+| `AllowChunkedSendAboveMaterializeLimit` | `true` | 超过物化上限时降级流式（默认），还是直接抛 `WebSocketMessageTooLargeException`。 |
+
+```csharp
+builder.Services.AddWebSocketServer(x =>
+{
+    x.MaxSendMaterializeBytes = 4L * 1024 * 1024;   // 默认 4 MiB，与接收侧对称
+    x.MaxSendFrameBytes = 256 * 1024 - 16;          // 减 16 是为了对齐 ArrayPool 分桶
+    x.MaxTotalSendMaterializeBytes = 512L * 1024 * 1024;  // 可选
+});
+```
+
+**为什么 `MaxSendFrameBytes` 要减 16**：底层按「载荷 + 帧头（最多 14 字节）」向 `ArrayPool` 租借，
+取整 2^n 会让租借落进 2^(n+1) 的桶里白占一倍。
+
+**切帧与消息完整性无关**。已在内存里的载荷，多帧发送唯一可能的失败就是写失败，而写失败一律终结连接，
+产生不了带结束标志的短消息。帧上限守的是另外三件事：扇出时的峰值内存、带外控制帧（如 Close）的排队
+延迟、以及取消所暴露的窗口。
+
+**池滞留（反直觉的代价）**：物化用的是 `ArrayPool`，所以「历史峰值并发物化字节」会长期驻留在进程里。
+这是刻意的取舍——改用裸分配会带来数量级更高的 GC 停顿。注意接收侧的 4 MiB 走的是普通 `MemoryStream`，
+没有这条成本：**两侧数值对称，但内存画像并不对称**。
+
+> ⚠️ **行为变更**：多帧消息不再发送末尾那个多余的空收尾帧（最后一帧自带结束标志），因此**帧数变了**——
+> 按帧计费的带宽统计需要重新核对。`sendAtOnce` 与 `sendBufferSize` 不再影响 buffer 的分帧
+> （分帧只由 `MaxSendFrameBytes` 决定）；`sendBufferSize` 在 Stream 路径上现在表示「读块大小」。
+> 可 Seek 的流若发生静默短读（`Read` 返回 0 但源未读完），现在会抛 `EndOfStreamException` 且一帧未发，
+> 而不是像以前那样静默发出一条截断消息。
+
 ## WebSocket 配置
 
 ### WebSocketOptions
