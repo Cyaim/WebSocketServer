@@ -270,6 +270,31 @@ namespace Cyaim.WebSocketServer.Tests
             await host.StopAsync();
         }
 
+        /// <summary>
+        /// 节点满了要**说出来**：503 + Retry-After，而不是一个静默的 200。
+        /// </summary>
+        /// <remarks>
+        /// 这条断言来自一次实测：两个网关各配 10 万条上限、压到 20 万条之后，压力机收到十二万次
+        /// `upgrade refused: HTTP/1.1 200 OK`，而服务端日志里一个字都没有。
+        /// 200 是"请求成功了但不是 WebSocket"，它和网关坏掉长得完全一样——
+        /// 而真相是这个节点满了、换一个节点立刻就能连上，这恰恰是负载均衡器需要知道的事。
+        /// MaxConnectionLimit = 0 让每一次连接都落进这条分支，不必真的开十万条。
+        /// A node at capacity must say so. Measured: 120k refusals answered 200 OK with nothing logged.
+        /// </remarks>
+        [Fact]
+        public async Task AtConnectionLimit_Refuses_With_503_And_RetryAfter()
+        {
+            using var host = await StartHostAsync(CreateOption(o => o.MaxConnectionLimit = 0));
+
+            // TestServer 的 WebSocketClient 在握手不是 101 时抛出，异常消息里带着真实状态码——
+            // 这里断言的正是"客户端能从失败里读出原因"，而 200 的那一版给不出任何原因。
+            // TestServer's WebSocket client throws on a non-101 handshake and names the status.
+            var failure = await Assert.ThrowsAnyAsync<Exception>(() => ConnectAsync(host));
+            Assert.Contains("503", failure.Message);
+
+            await host.StopAsync();
+        }
+
         [Fact]
         public async Task BeforeConnectionEvent_Throws_OuterCatchHandlesIt()
         {

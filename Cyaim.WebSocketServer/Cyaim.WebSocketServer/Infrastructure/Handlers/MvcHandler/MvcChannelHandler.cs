@@ -217,6 +217,27 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     // Use Count instead of LongCount: O(lock buckets) vs O(n) snapshot enumeration at 1M+ connections
                     if ((ulong)Clients.Count >= webSocketOptions.MaxConnectionLimit)
                     {
+                        // **必须带上状态码和一行日志。** 这里以前是裸 return：管道走完没人写过状态，
+                        // 于是响应是 `200 OK`，没有升级、没有理由、没有日志。客户端看到的是
+                        // 「请求成功了，但不是 WebSocket」——和网关坏掉长得一模一样，
+                        // 而真相是这个节点满了、换一个节点立刻就能连上。
+                        // 实测：两个网关各 10 万条封顶时，压力机看到十二万次 `upgrade refused: HTTP/1.1 200 OK`，
+                        // 而服务端日志里一个字都没有——判断"是我满了还是它坏了"完全无从下手。
+                        // 503 + Retry-After 才是负载均衡器和客户端重连逻辑真正能用的答案。
+                        //
+                        // A bare return left the pipeline to finish with nobody writing a status, so a node at
+                        // capacity answered 200 OK: no upgrade, no reason, no log line. To the client that is
+                        // indistinguishable from a broken gateway, when in fact another node would have taken
+                        // it immediately. Measured at 120k such refusals with nothing on the server side.
+                        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                        context.Response.Headers.RetryAfter = "1";
+                        logger.LogWarning(
+                            "WebSocket connection from {RemoteIp}:{RemotePort} refused: this node holds "
+                            + "{Held} connections and MaxConnectionLimit is {Limit}",
+                            context.Connection.RemoteIpAddress,
+                            context.Connection.RemotePort,
+                            Clients.Count,
+                            webSocketOptions.MaxConnectionLimit);
                         return;
                     }
 
