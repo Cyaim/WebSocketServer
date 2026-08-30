@@ -230,7 +230,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                         // indistinguishable from a broken gateway, when in fact another node would have taken
                         // it immediately. Measured at 120k such refusals with nothing on the server side.
                         context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-                        context.Response.Headers.RetryAfter = "1";
+                        // 用索引器而不是 Headers.RetryAfter：那个强类型属性是 net6+ 才有的，
+                        // 而本库还编 netstandard2.1——写成强类型时 net10 的测试工程照样过，
+                        // 只有把库按全部 TFM 编一遍才会红。
+                        // The typed accessor is net6+, and this library still targets netstandard2.1.
+                        context.Response.Headers["Retry-After"] = "1";
                         logger.LogWarning(
                             "WebSocket connection from {RemoteIp}:{RemotePort} refused: this node holds "
                             + "{Held} connections and MaxConnectionLimit is {Limit}",

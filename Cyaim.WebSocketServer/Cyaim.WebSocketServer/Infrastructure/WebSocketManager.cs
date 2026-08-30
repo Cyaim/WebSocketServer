@@ -305,40 +305,89 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 return;
             }
 
-            // 超时用一个链接 CTS，而不是把调用方的 token 直接交给 Task.Delay：发送先完成时那条 delay
-            // 不会被取消，它的定时器和 token 注册要一直挂到超时才落地。发送侧每帧都走这里，
-            // 于是「已经发完的帧」在堆上留下的定时器数量等于最近一个超时窗口内的发送量。
-            // 取消链接 CTS 会立刻拆掉定时器与注册；Dispose 再把它从调用方 token 上摘掉。
-            // A linked CTS instead of handing the caller's token to Task.Delay: when the send wins the race
-            // the delay is never cancelled, so its timer and token registration stay live until the timeout
-            // elapses. This runs on every frame sent, so the heap carries one armed timer per frame sent
-            // within the last timeout window. Cancelling tears both down at once.
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var completed = await Task.WhenAny(sendTask, Task.Delay(timeout.Value, timeoutCts.Token)).ConfigureAwait(false);
-            timeoutCts.Cancel();
-            if (completed == sendTask)
+            // **发送已经完成时，这一段必须一个字节都不分配。** 它跑在每一帧发送上：
+            // 网关每条消息回一次，十万条连接的心跳就是每秒几万次。
+            //
+            // `Task.WhenAny(sendTask, Task.Delay(timeout, token))` 做不到——即使 sendTask 已经完成，
+            // 它仍然要建一条 delay（定时器）、一个 WhenAny 的组合任务、以及一个用来在赢了之后
+            // 拆掉定时器的链接 CTS。实测这一整套 **528 字节/次发送**（同线程分配量口径）。
+            // `Task.WaitAsync(TimeSpan, CancellationToken)` 对已完成的任务直接短路返回，
+            // 实测 **0 字节**；只有真的要等的时候才去拿一个（池化的）定时器。
+            //
+            // 语义逐条对齐，不是「差不多」：
+            //   · 发送成功          → WaitAsync 正常返回，与原来 completed == sendTask 且无异常一致
+            //   · 发送抛载荷过大    → WaitAsync 原样抛出，与原来一致（这是唯一不吞的异常）
+            //   · 发送抛其它异常    → 吞掉，与原来一致
+            //   · 超时              → TimeoutException，走脱离分支，与原来 completed != sendTask 一致
+            //   · 调用方 token 取消 → OperationCanceledException，同样走脱离分支，与原来一致
+            //
+            // This runs on every frame sent, so it must not allocate when the send has already
+            // completed. WhenAny+Delay cannot do that (timer + combinator + linked CTS = 528 bytes
+            // measured); WaitAsync short-circuits a completed task at zero. Every branch below maps
+            // one-to-one onto the previous WhenAny shape.
+#if NET6_0_OR_GREATER
+            try
             {
-                try
-                {
-                    await sendTask.ConfigureAwait(false);
-                }
-                catch (WebSocketMessageTooLargeException)
-                {
-                    // 唯一不吞的异常。传超时的调用方接受「发送失败也不告诉我」，但「载荷太大所以一个字节
-                    // 都没发」不是发送失败——它是调用方用法问题，吞掉就等于让消息凭空消失且无从排查。
-                    // The one exception not swallowed. A caller passing a timeout accepts not hearing about
-                    // send failures, but "the payload was too large so nothing was sent" is not a send
-                    // failure — it is a usage error, and swallowing it makes messages vanish undiagnosably.
-                    throw;
-                }
-                catch { }
+                await sendTask.WaitAsync(timeout.Value, cancellationToken).ConfigureAwait(false);
             }
-            else
+            catch (WebSocketMessageTooLargeException)
             {
-                // Detached: observe faults to avoid unobserved task exceptions
-                _ = sendTask.ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+                // 唯一不吞的异常。传超时的调用方接受「发送失败也不告诉我」，但「载荷太大所以一个字节
+                // 都没发」不是发送失败——它是调用方用法问题，吞掉就等于让消息凭空消失且无从排查。
+                // The one exception not swallowed: "the payload was too large so nothing was sent" is a
+                // usage error, and swallowing it makes messages vanish undiagnosably.
+                throw;
             }
+            catch (TimeoutException)
+            {
+                Detach(sendTask);
+            }
+            catch (OperationCanceledException)
+            {
+                // 调用方取消：与超时同样处理——发送已经脱离等待，它的异常还是要观察掉。
+                Detach(sendTask);
+            }
+            catch
+            {
+            }
+#else
+            // netstandard2.1 没有 Task.WaitAsync，保留原来的形状。链接 CTS 在这里仍然必要：
+            // 少了它，发送先完成时那条 delay 的定时器要一直挂到超时才落地。
+            using (var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                var completed = await Task.WhenAny(sendTask, Task.Delay(timeout.Value, timeoutCts.Token)).ConfigureAwait(false);
+                timeoutCts.Cancel();
+                if (completed == sendTask)
+                {
+                    try
+                    {
+                        await sendTask.ConfigureAwait(false);
+                    }
+                    catch (WebSocketMessageTooLargeException)
+                    {
+                        throw;
+                    }
+                    catch { }
+                }
+                else
+                {
+                    Detach(sendTask);
+                }
+            }
+#endif
         }
+
+        /// <summary>
+        /// 发送已经脱离等待但仍在后台跑：把它的异常观察掉，免得进程被未观察异常打死。
+        /// The send outlived the wait and keeps running; observe its faults so nothing goes unobserved.
+        /// </summary>
+        private static void Detach(Task sendTask)
+        {
+            _ = sendTask.ContinueWith(
+                static t => _ = t.Exception,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+        }
+
 
         /// <summary>
         /// Send data from the stream (all at once)
