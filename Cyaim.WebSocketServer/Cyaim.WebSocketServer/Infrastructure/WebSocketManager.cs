@@ -292,7 +292,12 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// <paramref name="timeout"/> is null or <see cref="Timeout.InfiniteTimeSpan"/> is the send
         /// guaranteed to be finished on return, which is the only case where lending is safe.
         /// </remarks>
-        private static async Task AwaitWithTimeoutAsync(Task sendTask, TimeSpan? timeout, CancellationToken cancellationToken)
+        // internal 而不是 private：这段的性质是"发送已经完成时一个字节都不分配"，
+        // 而那只能在**不经过 socket、不让出线程**的前提下量准（见 Tests/MessageAllocationTests）。
+        // 经由 SendLocalAsync 去量的话，真正的发送会异步让出，同线程分配读数就掺进别的测试。
+        // Internal so the "allocates nothing when the send has already completed" property can be
+        // measured without a socket and without yielding, which is the only way to measure it.
+        internal static async Task AwaitWithTimeoutAsync(Task sendTask, TimeSpan? timeout, CancellationToken cancellationToken)
         {
             if (timeout == null || timeout.Value == Timeout.InfiniteTimeSpan)
             {

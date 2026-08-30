@@ -124,60 +124,67 @@ namespace Cyaim.WebSocketServer.Tests
         }
 
         /// <summary>
-        /// 带超时的发送，在发送**已经同步完成**时不能有每次分配。
+        /// 等待一个**已经完成**的发送时，超时机制本身不能有每次分配。
         /// </summary>
         /// <remarks>
-        /// 网关每条消息回一帧，而每一帧都过这条路。原来的写法是
-        /// <c>Task.WhenAny(sendTask, Task.Delay(timeout, linkedCts.Token))</c>——即使 sendTask
-        /// 已经完成，它仍然要建一条 delay（定时器）、一个 WhenAny 组合任务，以及一个用来在赢了之后
-        /// 拆掉定时器的链接 CTS，实测 **528 字节/次发送**。
-        /// <c>Task.WaitAsync</c> 对已完成的任务直接短路，实测 0 字节。
-        ///
-        /// 阈值给 512 字节是**留给发送本身**（帧头、状态机）的，不是留给等待机制的：
-        /// 一旦有人把等待改回 WhenAny+Delay，这条就会跨过去。
-        /// The budget is for the send itself, not for the waiting mechanism: putting WhenAny+Delay
-        /// back pushes it over.
+        /// <para>
+        /// 网关每条消息回一帧，每一帧都过这条等待。原来的写法是
+        /// <c>Task.WhenAny(sendTask, Task.Delay(timeout, linkedCts.Token))</c>——
+        /// 即使 sendTask 已经完成，它仍然要建一条 delay（定时器）、一个 WhenAny 组合任务，
+        /// 以及一个用来在赢了之后拆掉定时器的链接 CTS。<c>Task.WaitAsync</c> 对已完成的任务直接短路。
+        /// </para>
+        /// <para>
+        /// <b>为什么不经过 SendLocalAsync 去量。</b> 试过，量不准：真正的发送会异步让出，
+        /// 而 <see cref="GC.GetAllocatedBytesForCurrentThread"/> 只数当前线程，
+        /// xunit 又会在同一批线程上跑别的用例——同一份代码量出过 56 / 247 / 934 / 4,390 四个数，
+        /// **变的是测量不是代码**。所以这里直接量那段等待，并且断言它整段同步完成：
+        /// 哪天它开始让出，断言先红，而不是让读数悄悄变成别人的。
+        /// Measuring through SendLocalAsync does not work: the real send yields, and a per-thread
+        /// reading then includes whatever else xunit scheduled on that thread.
+        /// </para>
         /// </remarks>
         [Fact]
-        public async Task Sending_with_a_timeout_does_not_allocate_per_send_for_the_wait()
+        public void Waiting_on_a_completed_send_does_not_allocate()
         {
-            // **发送路径的配置是进程级静态字段**（MvcForward 在通道入口把 options 镜像进来），
-            // 别的用例改过它们之后留在那里。不重设的话这条用例单跑 56 字节、跟全套一起跑 934 字节——
-            // 而"单跑能过"不算过。这里显式钉住它测的那套配置：不物化上限、不切帧、不走流式降级。
-            // The send path is configured through process-wide statics that other tests leave behind:
-            // measured 56 bytes alone and 934 in the full suite before this reset.
-            using var _ = new SendConfiguration(
-                materializeBytes: 4L * 1024 * 1024,
-                frameBytes: 256 * 1024 - 16,
-                allowChunked: true,
-                governorBytes: 0);
-
-            var socket = new TestWebSocket();
-            var payload = Encoding.UTF8.GetBytes("{\"id\":\"1\",\"status\":0}");
+            var timeout = TimeSpan.FromSeconds(5);
 
             for (var i = 0; i < 64; i++)
             {
-                await Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendLocalAsync(
-                    payload.AsMemory(), WebSocketMessageType.Text, true, CancellationToken.None,
-                    timeout: TimeSpan.FromSeconds(5), sockets: socket);
+                AwaitCompleted(timeout);
             }
 
-            const int Sends = 512;
+            const int Waits = 512;
             var before = GC.GetAllocatedBytesForCurrentThread();
-            for (var i = 0; i < Sends; i++)
+            for (var i = 0; i < Waits; i++)
             {
-                await Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendLocalAsync(
-                    payload.AsMemory(), WebSocketMessageType.Text, true, CancellationToken.None,
-                    timeout: TimeSpan.FromSeconds(5), sockets: socket);
+                AwaitCompleted(timeout);
             }
-            var perSend = (GC.GetAllocatedBytesForCurrentThread() - before) / (double)Sends;
+            var perWait = (GC.GetAllocatedBytesForCurrentThread() - before) / (double)Waits;
 
-            _output.WriteLine($"allocated {perSend:N0} bytes per timed send");
-            Assert.InRange(perSend, 0, 512);
+            _output.WriteLine($"allocated {perWait:N0} bytes waiting on an already-completed send");
+
+            // 实测稳定在 **80 字节**，三次运行一模一样。这 80 不是等待机制的——
+            // 等待机制本身是 0（`Task.WaitAsync` 对已完成的任务直接返回它自己），
+            // 80 是 `AwaitWithTimeoutAsync` 作为一个 `async Task` 方法自己的状态机盒子加返回的 Task，
+            // 不写成 async 就没有它，而写成 async 是这段代码本来的形状。
+            //
+            // 上限给 192：够容下状态机那 80 字节和一点点抖动，而**换回 WhenAny+Delay 要再加 528**
+            // （定时器 + 组合任务 + 链接 CTS），落在 600 上下，隔着三倍多，不会被噪声蒙混过去。
+            // The 80 is the async state machine, not the waiting: WaitAsync on a completed task returns
+            // it unchanged. Going back to WhenAny+Delay adds 528 on top, which 192 cannot hide.
+            Assert.InRange(perWait, 0, 192);
+        }
+
+        private static void AwaitCompleted(TimeSpan timeout)
+        {
+            var task = Cyaim.WebSocketServer.Infrastructure.WebSocketManager.AwaitWithTimeoutAsync(
+                Task.CompletedTask, timeout, CancellationToken.None);
+            Assert.True(task.IsCompleted, "waiting on an already-completed send went asynchronous");
+            task.GetAwaiter().GetResult();
         }
 
         /// <summary>
-        /// 换掉等待机制之后，超时那条分支还必须照旧：发送脱离、调用方不被挂住。
+        /// 换掉等待机制之后，超时那条分支还必须照旧：发送脱离，调用方不被挂住。
         /// </summary>
         /// <remarks>
         /// 这一条和上面那条是一对。只测"不分配"会让人可以把整段删掉换成 <c>await sendTask</c>——
@@ -188,17 +195,23 @@ namespace Cyaim.WebSocketServer.Tests
         [Fact]
         public async Task A_send_that_outlives_its_timeout_is_detached_rather_than_awaited()
         {
-            var socket = new TestWebSocket { SendDelay = TimeSpan.FromSeconds(30) };
-            var payload = Encoding.UTF8.GetBytes("{\"id\":\"1\"}");
+            var never = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             var started = DateTime.UtcNow;
-            await Cyaim.WebSocketServer.Infrastructure.WebSocketManager.SendLocalAsync(
-                payload.AsMemory(), WebSocketMessageType.Text, true, CancellationToken.None,
-                timeout: TimeSpan.FromMilliseconds(200), sockets: socket);
+            await Cyaim.WebSocketServer.Infrastructure.WebSocketManager.AwaitWithTimeoutAsync(
+                never.Task, TimeSpan.FromMilliseconds(200), CancellationToken.None);
             var waited = DateTime.UtcNow - started;
 
             Assert.True(waited < TimeSpan.FromSeconds(5),
                 $"the caller waited {waited.TotalSeconds:N1}s for a send it should have detached from");
+
+            // 脱离之后那条发送仍然在跑；让它以异常收尾，确认脱离分支把异常观察掉了
+            // （没观察的话，终结器线程上的未观察异常会在下一次 GC 时打死进程）。
+            // The detached send keeps running; fault it and confirm the branch observed the exception.
+            never.SetException(new InvalidOperationException("detached send failed"));
+            await Task.Delay(50);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
         }
 
         /// <summary>
