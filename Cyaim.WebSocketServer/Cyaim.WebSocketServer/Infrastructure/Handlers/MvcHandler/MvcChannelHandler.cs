@@ -1329,7 +1329,26 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 // Async api support
                 if (invokeResult is Task task)
                 {
-                    await Task.WhenAny(task, Task.Delay(Timeout.Infinite, appLifetime.ApplicationStopping));
+                    // 这条等待要么等端点跑完，要么等进程开始停机。
+                    //
+                    // **不能直接把 ApplicationStopping 交给 Task.Delay。** Task.Delay(Infinite, token) 会在那个
+                    // token 上注册一条回调，而 WhenAny 先完成**不会**把它解绑——ApplicationStopping 的 CTS 活到
+                    // 进程结束，于是每处理一条消息就在它上面永久多留一个 CallbackNode + DelayPromise。
+                    // 实测（gcdump，20,000 条连接跑四分钟）：CallbackNode 379,969 个、
+                    // DelayPromiseWithCancellation 339,862 个，合计约 60 MB，而且**只随处理过的消息数增长，
+                    // 连接关掉也不还**。这不是「每条连接贵一点」，是一条随消息量单调上涨的泄漏。
+                    //
+                    // Task.Delay(Infinite, token) registers a callback on that token, and WhenAny completing on
+                    // the other task does not unregister it. ApplicationStopping's CTS lives as long as the
+                    // process, so every message handled leaves one CallbackNode + DelayPromise on it forever —
+                    // measured at 380k / 340k live nodes (~60 MB) after four minutes at 20k connections, and it
+                    // grows with messages handled, not with connections held.
+                    //
+                    // 用一个链接 CTS 代替：等待一结束就取消它，注册随之解绑；Dispose 再把它自己从
+                    // ApplicationStopping 上摘掉。停机语义不变——父 token 一取消，链接 token 同时取消。
+                    using var stopWaiter = CancellationTokenSource.CreateLinkedTokenSource(appLifetime.ApplicationStopping);
+                    await Task.WhenAny(task, Task.Delay(Timeout.Infinite, stopWaiter.Token));
+                    stopWaiter.Cancel();
 
                     if (task.IsCanceled || task.IsFaulted)
                     {

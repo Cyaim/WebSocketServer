@@ -305,7 +305,17 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 return;
             }
 
-            var completed = await Task.WhenAny(sendTask, Task.Delay(timeout.Value, cancellationToken)).ConfigureAwait(false);
+            // 超时用一个链接 CTS，而不是把调用方的 token 直接交给 Task.Delay：发送先完成时那条 delay
+            // 不会被取消，它的定时器和 token 注册要一直挂到超时才落地。发送侧每帧都走这里，
+            // 于是「已经发完的帧」在堆上留下的定时器数量等于最近一个超时窗口内的发送量。
+            // 取消链接 CTS 会立刻拆掉定时器与注册；Dispose 再把它从调用方 token 上摘掉。
+            // A linked CTS instead of handing the caller's token to Task.Delay: when the send wins the race
+            // the delay is never cancelled, so its timer and token registration stay live until the timeout
+            // elapses. This runs on every frame sent, so the heap carries one armed timer per frame sent
+            // within the last timeout window. Cancelling tears both down at once.
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var completed = await Task.WhenAny(sendTask, Task.Delay(timeout.Value, timeoutCts.Token)).ConfigureAwait(false);
+            timeoutCts.Cancel();
             if (completed == sendTask)
             {
                 try
