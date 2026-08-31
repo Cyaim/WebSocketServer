@@ -179,6 +179,31 @@ namespace Cyaim.WebSocketServer.Tests
         /// static field. Tests that swap WebSocketRouteOption.ApplicationServices must reset
         /// it, otherwise a later test can end up using a disposed provider.
         /// </summary>
+        /// <summary>
+        /// 把一条线上 JSON 解析成分发路径要的两样东西，**用的就是收发循环里那段代码的形状**：
+        /// JsonDocument 解析一次，body 用 JsonObject.Create(Clone()) 脱离文档的池化缓冲区。
+        /// 测分配量时这一点很重要——换成 GetRawText + 再解析一次，量到的就不是生产路径的数了。
+        /// Mirrors what the receive loop does, which matters when the caller is measuring allocations.
+        /// </summary>
+        public static (Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcRequestScheme Scheme, System.Text.Json.Nodes.JsonObject Body) ParseRequest(string json, System.Text.Json.JsonSerializerOptions options)
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            System.Text.Json.JsonElement body = default;
+            var hasBody = false;
+            foreach (var name in Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcRequestScheme.BODY_NAMES)
+            {
+                hasBody = root.TryGetProperty(name, out body);
+                if (hasBody) break;
+            }
+
+            var scheme = System.Text.Json.JsonSerializer.Deserialize<Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler.MvcRequestScheme>(root, options);
+            var bodyObject = !hasBody || body.ValueKind != System.Text.Json.JsonValueKind.Object
+                ? null
+                : System.Text.Json.Nodes.JsonObject.Create(body.Clone());
+            return (scheme, bodyObject);
+        }
+
         public static void ResetCachedScopeFactory()
         {
             var field = typeof(Infrastructure.Handlers.MvcHandler.MvcChannelHandler)

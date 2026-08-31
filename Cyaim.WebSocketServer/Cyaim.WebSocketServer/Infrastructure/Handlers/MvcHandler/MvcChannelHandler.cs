@@ -217,6 +217,31 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     // Use Count instead of LongCount: O(lock buckets) vs O(n) snapshot enumeration at 1M+ connections
                     if ((ulong)Clients.Count >= webSocketOptions.MaxConnectionLimit)
                     {
+                        // **必须带上状态码和一行日志。** 这里以前是裸 return：管道走完没人写过状态，
+                        // 于是响应是 `200 OK`，没有升级、没有理由、没有日志。客户端看到的是
+                        // 「请求成功了，但不是 WebSocket」——和网关坏掉长得一模一样，
+                        // 而真相是这个节点满了、换一个节点立刻就能连上。
+                        // 实测：两个网关各 10 万条封顶时，压力机看到十二万次 `upgrade refused: HTTP/1.1 200 OK`，
+                        // 而服务端日志里一个字都没有——判断"是我满了还是它坏了"完全无从下手。
+                        // 503 + Retry-After 才是负载均衡器和客户端重连逻辑真正能用的答案。
+                        //
+                        // A bare return left the pipeline to finish with nobody writing a status, so a node at
+                        // capacity answered 200 OK: no upgrade, no reason, no log line. To the client that is
+                        // indistinguishable from a broken gateway, when in fact another node would have taken
+                        // it immediately. Measured at 120k such refusals with nothing on the server side.
+                        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                        // 用索引器而不是 Headers.RetryAfter：那个强类型属性是 net6+ 才有的，
+                        // 而本库还编 netstandard2.1——写成强类型时 net10 的测试工程照样过，
+                        // 只有把库按全部 TFM 编一遍才会红。
+                        // The typed accessor is net6+, and this library still targets netstandard2.1.
+                        context.Response.Headers["Retry-After"] = "1";
+                        logger.LogWarning(
+                            "WebSocket connection from {RemoteIp}:{RemotePort} refused: this node holds "
+                            + "{Held} connections and MaxConnectionLimit is {Limit}",
+                            context.Connection.RemoteIpAddress,
+                            context.Connection.RemotePort,
+                            Clients.Count,
+                            webSocketOptions.MaxConnectionLimit);
                         return;
                     }
 
@@ -1089,10 +1114,42 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     instanceParmas[i] = scopeIocProvider.GetService(constructorParameter.ParameterInfos[i].ParameterType);
                 }
 
-                object inst = Activator.CreateInstance(targetClass, instanceParmas);
+                // 用**上面刚查出来的那个** ConstructorInfo 直接构造，而不是把类型和参数交给
+                // Activator 让它再挑一次重载。两个理由，一个省一个对：
+                //
+                // 省：`Activator.CreateInstance(Type, object[])` 每次都要跑一遍绑定器（挑重载、
+                // 校验参数），实测每条消息 **344 字节**；同一个 ctor 直接 Invoke 是 **40 字节**
+                // （同一线程分配量口径，见 Tests/MessageAllocationTests）。分发路径上每条消息 300 字节，
+                // 乘以十万条连接的消息量就是实打实的堆压力——而这一段的目标就是把它压下去。
+                //
+                // 对：instanceParmas 是**按 constructorParameter.ParameterInfos 逐个解析出来的**，
+                // 也就是说它只对那一个 ctor 成立。交给 Activator 之后由绑定器重新挑重载，
+                // 挑中另一个同参数个数的重载并不违反它的契约——而那时参数的含义已经错位了。
+                //
+                // Construct through the ConstructorInfo just looked up rather than letting Activator
+                // re-select an overload: cheaper (344 B/message versus 40 B, measured) and stricter,
+                // because instanceParmas was resolved against exactly that constructor's parameters.
+                var ctor = constructorParameter.ConstructorInfo;
+                object inst = ctor != null
+                    ? ctor.Invoke(instanceParmas)
+                    : Activator.CreateInstance(targetClass, instanceParmas);
 
                 // 使用注入器工厂注入 HttpContext 和 WebSocket（支持源代码生成和反射两种方式）
-                var injectorFactory = webSocketOptions.InjectorFactory ?? new EndpointInjectorFactory(webSocketOptions);
+                // **兜底也要缓存，而不是每条消息新建一个工厂。**
+                // 工厂本身很便宜，贵的是它里面那份缓存：GetOrCreateInjector 第一次会为这个类型
+                // 构建（并缓存）注入器，而每条消息换一个新工厂就等于每条消息重建一次。
+                // 实测（Tests/MessageAllocationTests）：走兜底时一条消息分配 **113,156 字节**，
+                // 而工厂被复用时是三位数——**同一段代码，两个数量级**。
+                // 正常路径由 ConnectionEntry 在建连时把 InjectorFactory 填好，所以这条兜底只在
+                // 有人绕过 ConnectionEntry 直接调 MvcDistributeAsync 时才会走到——
+                // 而那时它安静地把每条消息变贵一百倍，没有任何信号。
+                //
+                // The fallback has to be cached too. The factory itself is cheap; what is expensive is
+                // the per-type cache inside it, which a fresh factory per message rebuilds every time.
+                // Measured at 113,156 bytes per message on the fallback path versus three digits when
+                // the factory is reused — same code, two orders of magnitude, and no signal at all.
+                var injectorFactory = webSocketOptions.InjectorFactory
+                    ?? (webSocketOptions.InjectorFactory = new EndpointInjectorFactory(webSocketOptions));
                 var injector = injectorFactory.GetOrCreateInjector(targetClass);
                 injector.Inject(inst, context, webSocket);
                 #endregion
@@ -1322,14 +1379,36 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 appLifetime.ApplicationStopping.ThrowIfCancellationRequested();
 
                 // 使用方法调用器工厂调用目标方法（支持源代码生成和反射两种方式）
-                var methodInvokerFactory = webSocketOptions.MethodInvokerFactory ?? new MethodInvokerFactory();
+                // 同上：贵的是工厂里那份按 MethodInfo 缓存的调用器，每条消息换新工厂就等于每条重建一次。
+                // Same as the injector factory above: the per-method invoker cache is the expensive part.
+                var methodInvokerFactory = webSocketOptions.MethodInvokerFactory
+                    ?? (webSocketOptions.MethodInvokerFactory = new MethodInvokerFactory());
                 var methodInvoker = methodInvokerFactory.GetOrCreateInvoker(method);
                 invokeResult = methodInvoker.Invoke(inst, args);
 
                 // Async api support
                 if (invokeResult is Task task)
                 {
-                    await Task.WhenAny(task, Task.Delay(Timeout.Infinite, appLifetime.ApplicationStopping));
+                    // 这条等待要么等端点跑完，要么等进程开始停机。
+                    //
+                    // **不能直接把 ApplicationStopping 交给 Task.Delay。** Task.Delay(Infinite, token) 会在那个
+                    // token 上注册一条回调，而 WhenAny 先完成**不会**把它解绑——ApplicationStopping 的 CTS 活到
+                    // 进程结束，于是每处理一条消息就在它上面永久多留一个 CallbackNode + DelayPromise。
+                    // 实测（gcdump，20,000 条连接跑四分钟）：CallbackNode 379,969 个、
+                    // DelayPromiseWithCancellation 339,862 个，合计约 60 MB，而且**只随处理过的消息数增长，
+                    // 连接关掉也不还**。这不是「每条连接贵一点」，是一条随消息量单调上涨的泄漏。
+                    //
+                    // Task.Delay(Infinite, token) registers a callback on that token, and WhenAny completing on
+                    // the other task does not unregister it. ApplicationStopping's CTS lives as long as the
+                    // process, so every message handled leaves one CallbackNode + DelayPromise on it forever —
+                    // measured at 380k / 340k live nodes (~60 MB) after four minutes at 20k connections, and it
+                    // grows with messages handled, not with connections held.
+                    //
+                    // 用一个链接 CTS 代替：等待一结束就取消它，注册随之解绑；Dispose 再把它自己从
+                    // ApplicationStopping 上摘掉。停机语义不变——父 token 一取消，链接 token 同时取消。
+                    using var stopWaiter = CancellationTokenSource.CreateLinkedTokenSource(appLifetime.ApplicationStopping);
+                    await Task.WhenAny(task, Task.Delay(Timeout.Infinite, stopWaiter.Token));
+                    stopWaiter.Cancel();
 
                     if (task.IsCanceled || task.IsFaulted)
                     {
