@@ -113,6 +113,53 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
         private const int MaxRetainedReceiveCapacity = 64 * 1024;
 
         /// <summary>
+        /// Total bytes the header probe may scan for one message, however many frames it arrives in.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The probe resolves <c>target</c> out of the accumulated buffer, and it re-runs on every
+        /// receive iteration until it succeeds. On the success path that is one scan. On the failure
+        /// path — a message that simply never contains <c>target</c> — it is one scan of the whole
+        /// accumulated buffer per iteration, which is O(n²) in the message size and is reachable by
+        /// any client that has completed the handshake.
+        /// </para>
+        /// <para>
+        /// With a 4 KiB receive buffer and a 1 MiB message cap, unbounded costs 256 iterations and
+        /// ~134 MB scanned for 1 MiB delivered: a 128× amplification, and 512× if the client sends
+        /// 1 KiB chunks. This budget makes the total independent of both the message size and the
+        /// number of frames it is split into.
+        /// </para>
+        /// <para>
+        /// A prefix cap alone would not do it — "only scan the first 64 KiB" still allows 65,536
+        /// one-byte frames each triggering a 64 KiB scan. The bound has to be cumulative.
+        /// </para>
+        /// <para>
+        /// 一条消息的头部探测总共可以扫描的字节数，与它分成几帧无关。
+        /// 探测在每次接收迭代上重跑，直到解析出 target。成功路径上只扫一次；
+        /// **失败路径**——消息里压根没有 target——是每次迭代全量重扫一遍已累积缓冲区，
+        /// 开销是消息大小的平方级，而且任何完成握手的客户端都能触发。
+        /// 按 4 KiB 接收缓冲 + 1 MiB 消息上限：不设界是 256 次迭代、为 1 MiB 的流量扫描约 134 MB，
+        /// 放大 128 倍；客户端改用 1 KiB 分块则是 512 倍。
+        /// 只设「前缀上限」不够：65536 个一字节帧，每个都触发一次 64 KiB 扫描。界必须是累计的。
+        /// </para>
+        /// </remarks>
+        internal const int HeaderProbeBudgetBytes = 256 * 1024;
+
+        /// <summary>
+        /// Whether the header probe may run again for this message.
+        /// </summary>
+        /// <remarks>
+        /// Split out so the bound can be asserted without driving a socket: the property that matters
+        /// is that the total scanned bytes stay under <see cref="HeaderProbeBudgetBytes"/> no matter
+        /// how the client chunks the message, and that is a statement about this predicate and the
+        /// caller's subtraction, not about the receive loop.
+        /// 拆出来，是为了不架 socket 也能断言那条界：真正要紧的性质是「无论客户端怎么分块，
+        /// 累计扫描字节数不超过预算」，而那是关于这个判断和调用方那次扣减的陈述，与接收循环无关。
+        /// </remarks>
+        internal static bool ShouldProbeHeader(bool alreadyResolved, long remainingBudget) =>
+            !alreadyResolved && remainingBudget > 0;
+
+        /// <summary>
         /// Cached scope factory (singleton) to avoid a service lookup per request.
         /// 缓存的 ScopeFactory（单例），避免每次请求做一次服务查找。
         /// </summary>
@@ -378,6 +425,11 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     // Per-endpoint cap: once the target is parsed from the header, switch the effective cap from the
                     // global default to this endpoint's MaxBytes (0 = keep global).
                     long effectiveReceiveLimit = webSocketOption.MaxRequestReceiveDataLimit ?? 0;
+
+                    // Budget for the header probe below, per message. Without it the probe is O(n²)
+                    // in the message size — see HeaderProbeBudgetBytes for the arithmetic.
+                    // 头部探测的每消息扫描预算。没有它，探测的开销是消息大小的平方级。
+                    long headerScanBudget = HeaderProbeBudgetBytes;
                     bool endpointPolicyResolved = false;
                     // 从头部解析出的 target，解析一次后供端点大小策略、逐帧带宽限速和端点并发限流共用。
                     // 头部只在第一帧里，而第一帧时数据还在 buffer 中（尚未写入 wsReceiveReader）。
@@ -494,11 +546,18 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                 // Resolve the header once and share it: the size policy and the bandwidth throttle both
                                 // need the target. They used to parse separately, and the throttle re-scanned the whole
                                 // accumulated buffer on every frame — 100 frames meant 100 full scans.
-                                if (!endpointPolicyResolved && (webSocketOption.WatchAssemblyContext != null || bandwidthLimitManager != null))
+                                if (ShouldProbeHeader(endpointPolicyResolved, headerScanBudget)
+                                    && (webSocketOption.WatchAssemblyContext != null || bandwidthLimitManager != null))
                                 {
                                     ReadOnlySpan<byte> headerSpan = wsReceiveReader.Length > 0
                                         ? wsReceiveReader.GetBuffer().AsSpan(0, (int)wsReceiveReader.Length)
                                         : buffer.AsSpan(0, result?.Count ?? 0);
+
+                                    // Charged before the scan, not after: a scan that throws must still cost its
+                                    // budget, or malformed JSON becomes a way to scan for free.
+                                    // 先扣再扫：抛异常的那次扫描也必须计费，否则畸形 JSON 就成了免费扫描的入口。
+                                    headerScanBudget -= headerSpan.Length;
+
                                     string tgt = null;
                                     try { tgt = FindJsonPropertyValue(headerSpan); } catch { /* header not complete yet */ }
                                     if (tgt != null)
@@ -509,6 +568,16 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                                         {
                                             effectiveReceiveLimit = pol.MaxBytes;
                                         }
+                                        endpointPolicyResolved = true;
+                                    }
+                                    else if (headerScanBudget <= 0)
+                                    {
+                                        // Give up probing for this message. The global MaxRequestReceiveDataLimit
+                                        // still applies — giving up costs a per-endpoint cap that would have been
+                                        // *larger*, never a cap that would have been smaller, so the conservative
+                                        // outcome is the one that survives.
+                                        // 放弃对这条消息的探测。全局上限依然生效：放弃只会丢掉一个**更宽**的端点上限，
+                                        // 不会丢掉更严的那个，所以留下来的是保守的那一侧。
                                         endpointPolicyResolved = true;
                                     }
                                 }
