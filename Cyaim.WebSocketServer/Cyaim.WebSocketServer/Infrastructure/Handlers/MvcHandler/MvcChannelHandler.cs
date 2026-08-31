@@ -99,10 +99,54 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
 
 
         /// <summary>
-        /// Associated with the connection, limit the total number of forwarding requests being processed by the connection.
-        /// WebSocketRouteOption.MaxParallelForwardLimit
+        /// Process-wide, despite the name — kept only so existing code compiles.
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This field said "associated with the connection" and was not: <c>AddMvcChannel</c> builds
+        /// <b>one handler per channel</b> (<c>new MvcChannelHandler(...).ConnectionEntry</c>) and hands the
+        /// same delegate to every connection, so every connection on the channel shared this one
+        /// semaphore. Setting <c>MaxConnectionParallelForwardLimit</c> to a small number in the belief
+        /// that it was per-connection therefore serialised the whole process — the opposite of what the
+        /// name promised, and worse the more connections the server carried.
+        /// </para>
+        /// <para>
+        /// The per-connection gate is now a local in <c>MvcForward</c>. Nothing reads this field any
+        /// more; it stays for one release so a downstream that assigns it still compiles.
+        /// </para>
+        /// <para>
+        /// 名字说「与连接关联」，而它不是：AddMvcChannel 每个通道只建**一个** handler，
+        /// 把同一个委托交给每一条连接，于是整条通道上所有连接共用这一个信号量。
+        /// 有人以为它是每连接的、把上限设成一个小数字，实际效果是把整个进程串行化——
+        /// 与名字承诺的正好相反，而且服务器扛的连接越多越糟。
+        /// 真正的每连接闸门现在是 MvcForward 里的局部变量。这个字段已无人读取，
+        /// 保留一个版本，只为让下游赋值它的代码还能编译。
+        /// </para>
+        /// </remarks>
+        [Obsolete("This was process-wide, not per-connection. The gate is now a per-connection local; this field is no longer read.")]
         public SemaphoreSlim ParallelForwardLimitSlim = null;
+
+        /// <summary>
+        /// In-flight requests allowed per connection when <c>MaxConnectionParallelForwardLimit</c> is unset.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Unset used to mean "no gate at all", and the gate that existed released at <i>dispatch</i>
+        /// rather than at <i>completion</i>, so neither setting it nor leaving it bounded the number of
+        /// requests actually in flight. A client that pipelines without waiting for responses therefore
+        /// held one DI scope, one controller instance and one parsed body per request, with nothing
+        /// counting them: in-flight ≈ attacker bandwidth × backend latency, and it is a positive
+        /// feedback loop, because the memory and thread-pool pressure slow the backend further.
+        /// </para>
+        /// <para>
+        /// 16 is far above what a real client pipelines and far below what an attacker needs. The
+        /// aggregate is bounded too: this cap times <c>MaxConnectionLimit</c>.
+        /// 不设它曾经等于「完全没有闸门」，而存在的那个闸门是在**派发**处释放而不是**完成**处，
+        /// 所以设不设都没有约束住真正在途的请求数。16 远高于真实客户端的流水线深度，
+        /// 远低于攻击者需要的量；总量也有界：这个上限乘以 MaxConnectionLimit。
+        /// </para>
+        /// </remarks>
+        internal const int DefaultConnectionInflightLimit = 16;
 
         /// <summary>
         /// After processing a message, the per-connection receive stream keeps at most this capacity;
@@ -236,12 +280,10 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 bandwidthLimitManager = new BandwidthLimitManager(bandwidthLogger, policy, qpsPriorityManager);
             }
 
-            // 配置并行转发上限（初始许可数必须等于上限，否则首个 WaitAsync 将永久阻塞）
-            // Initial permit count must equal the limit, otherwise the first WaitAsync blocks forever
-            if (ParallelForwardLimitSlim == null && webSocketOptions.MaxConnectionParallelForwardLimit != null)
-            {
-                ParallelForwardLimitSlim = new SemaphoreSlim((int)webSocketOptions.MaxConnectionParallelForwardLimit, (int)webSocketOptions.MaxConnectionParallelForwardLimit);
-            }
+            // The in-flight gate used to be built here, on the handler — which is shared by every
+            // connection on the channel. It is now built per connection inside MvcForward.
+            // 在途闸门原本建在这里、挂在 handler 上，而 handler 是整条通道共用的。
+            // 现在它建在 MvcForward 里，每条连接一个。
 
             WebSocketCloseStatus? webSocketCloseStatus = null;
             try
@@ -404,12 +446,32 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                 // stream, so the vast majority of connections allocate no receive buffer. Multi-frame
                 // messages grow it on first write; large spikes are shrunk in the finally below.
                 using MemoryStream wsReceiveReader = new MemoryStream();
+
+                // Per connection, and deliberately not disposed: a request still in flight when the
+                // connection ends will Release() this from its continuation, and disposing it here
+                // would turn a normal disconnect into an ObjectDisposedException on the thread pool.
+                // SemaphoreSlim only needs disposal once AvailableWaitHandle has been touched, and
+                // nothing here touches it.
+                // 每连接一个，且**刻意不释放**：连接结束时仍在途的请求会在它的续体里 Release 它，
+                // 在这里 Dispose 会把一次正常断连变成线程池上的 ObjectDisposedException。
+                // SemaphoreSlim 只有在碰过 AvailableWaitHandle 之后才需要 Dispose，这里没有碰它。
+                SemaphoreSlim connectionInflight = new SemaphoreSlim(
+                    (int)(webSocketOption.MaxConnectionParallelForwardLimit ?? DefaultConnectionInflightLimit),
+                    (int)(webSocketOption.MaxConnectionParallelForwardLimit ?? DefaultConnectionInflightLimit));
+
                 bool connectionClosed = false;
                 do
                 {
                     long requestTime = DateTime.UtcNow.Ticks;
                     WebSocketReceiveResult result = null;
                     SemaphoreSlim endPointSlim = null;
+
+                    // Set once the gates below have been handed to the dispatched task, which then owns
+                    // releasing them. Until then this iteration's finally owns them — the `goto
+                    // CONTINUE_RECEIVE` paths never dispatch and must not leak a permit.
+                    // 一旦下面那两个闸门被交给派发出去的任务，就由那个任务负责释放；在此之前归本轮的 finally。
+                    // goto CONTINUE_RECEIVE 的那几条路径根本不派发，绝不能把票漏掉。
+                    bool gatesOwnedByTask = false;
                     bool receivedClose = false;
                     // 单帧快路径：整条消息一次 ReceiveAsync 收全时借用的租用缓冲区（所有权从接收循环转移到本迭代，
                     // 在同步解析完成后于外层 finally 归还）。为 null 表示走多帧 MemoryStream 重组路径。
@@ -447,11 +509,12 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     long endpointUnattributedBytes = 0;
                     try
                     {
-                        // Connection level restrictions
-                        if (ParallelForwardLimitSlim != null)
-                        {
-                            await ParallelForwardLimitSlim.WaitAsync().ConfigureAwait(false);
-                        }
+                        // The connection-level gate is taken just before dispatch, not here. Taken here it
+                        // covered "block waiting for the client's next message", which a single receive
+                        // loop can never contend with — one connection reads one message at a time, so the
+                        // gate was never actually held by two iterations at once.
+                        // 连接级闸门改在派发前获取，不在这里。放在这里覆盖的是「阻塞等客户端的下一条消息」，
+                        // 而单条连接的接收循环本来就是串行的一条，两轮迭代永远不会同时持票——它拦不住任何东西。
 
                         if (!(webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseSent))
                         {
@@ -836,19 +899,80 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             RequestBody = requestBody,
                         };
 
-                        Task processTask = ProcessMessageAsync(GetCompiledPipeline(webSocketOption, appLifetime), messageContext);
+                        // Taken here and released when the request *finishes* — not when it is dispatched.
+                        // Releasing at dispatch (which is what the iteration's finally used to do) leaves
+                        // the number of requests actually in flight unbounded: each one holds a DI scope, a
+                        // controller instance and a parsed body, and nothing counts them.
+                        // 在这里取票，在请求**完成**时还票——而不是在派发时。
+                        // 在派发处还票（此前迭代 finally 干的事）等于对真正在途的请求数不设界：
+                        // 每一条在途都持有一个 DI Scope、一个控制器实例和一份解析好的请求体，而没有任何东西在数它们。
+                        await connectionInflight.WaitAsync().ConfigureAwait(false);
+
+                        Task processTask;
+                        try
+                        {
+                            processTask = ProcessMessageAsync(GetCompiledPipeline(webSocketOption, appLifetime), messageContext);
+                        }
+                        catch
+                        {
+                            // Never dispatched, so nobody downstream will give the permits back.
+                            // 没派发出去，下游不会有人还票。
+                            connectionInflight.Release();
+                            throw;
+                        }
+
+                        // From here the task owns both gates; this iteration's finally must not touch them.
+                        // 从这里起两个闸门归那个任务；本轮的 finally 不能再碰它们。
+                        gatesOwnedByTask = true;
+
                         // 是否串行
                         if (webSocketOption.EnableForwardTaskSyncProcessingMode)
                         {
-                            await processTask;
+                            try
+                            {
+                                await processTask;
+                            }
+                            finally
+                            {
+                                connectionInflight.Release();
+                                endPointSlim?.Release();
+                            }
                         }
                         else
                         {
-                            // 处理 Task 异常，避免未观察到的异常（静态委托 + state 避免闭包分配）。
+                            // Runs on every outcome, not just faults: this continuation is what returns the
+                            // permits, so an OnlyOnFaulted one would return them only when the request threw.
+                            // Static delegate + tuple state keeps the no-closure-allocation property the
+                            // original had.
+                            // 这个续体在**任何**结局上都要跑，不只是出错时：还票靠的就是它，
+                            // 而 OnlyOnFaulted 的续体只会在请求抛异常时还票。
+                            // 静态委托 + 元组 state，保持原来「不分配闭包」的性质。
                             _ = processTask.ContinueWith(static (t, state) =>
                             {
-                                ((ILogger)state).LogInformation(t.Exception, I18nText.ConnectionEntry_DisconnectedInternalExceptions);
-                            }, logger, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+                                (ILogger log, SemaphoreSlim inflight, SemaphoreSlim endpoint) s =
+                                    ((ILogger, SemaphoreSlim, SemaphoreSlim))state;
+
+                                if (t.IsFaulted)
+                                {
+                                    s.log.LogInformation(t.Exception, I18nText.ConnectionEntry_DisconnectedInternalExceptions);
+                                }
+
+                                s.inflight.Release();
+                                s.endpoint?.Release();
+                            //
+                            // The ILogger cast is not cosmetic. `logger` is ILogger<WebSocketRouteMiddleware>,
+                            // so `(logger, ...)` boxes a ValueTuple<ILogger<WebSocketRouteMiddleware>, ...>,
+                            // and unboxing a value tuple demands the *exact* type — the cast inside the
+                            // continuation would throw InvalidCastException, which a continuation swallows.
+                            // The permits would then never come back and the connection would wedge at the
+                            // cap: a security fix that silently turns into a deadlock. Caught by
+                            // InflightRequestLimitTests.Finished_requests_give_their_permit_back.
+                            // 这个 ILogger 转型不是修饰。logger 的静态类型是 ILogger<WebSocketRouteMiddleware>，
+                            // 于是 (logger, ...) 装箱的是 ValueTuple<ILogger<WebSocketRouteMiddleware>, ...>，
+                            // 而值元组拆箱要求类型**完全一致**——续体里那次强转会抛 InvalidCastException，
+                            // 而续体会把它吞掉。票于是一张都还不回来，连接卡死在上限上：
+                            // 一个悄悄变成死锁的安全修复。由 Finished_requests_give_their_permit_back 抓到。
+                            }, ((ILogger)logger, connectionInflight, endPointSlim), TaskContinuationOptions.ExecuteSynchronously);
                         }
 
                     CONTINUE_RECEIVE:;
@@ -897,12 +1021,9 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                             reservedReceiveBytes = 0;
                         }
 
-                        // 释放信号量
-                        if (ParallelForwardLimitSlim != null)
-                        {
-                            ParallelForwardLimitSlim.Release();
-                        }
-                        if (endPointSlim != null)
+                        // 释放信号量——只有在闸门还没交给任务时才归本轮所有。
+                        // Release the gates only while this iteration still owns them.
+                        if (!gatesOwnedByTask && endPointSlim != null)
                         {
                             endPointSlim.Release();
                         }
@@ -1666,8 +1787,19 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     }
                 }
 
+                // Still cleaned up, still wrong, and both on purpose. This handler is shared by every
+                // connection on the channel, so disposing here on *one* connection's teardown pulled the
+                // semaphore out from under all the others — which is the same confusion that made the
+                // field process-wide in the first place. Nothing reads it now, so the only thing this
+                // disposes is a value a downstream assigned; it goes away with the field next release.
+                // 仍然清理、仍然是错的，两者都是刻意的：handler 由整条通道共用，
+                // 在**一条**连接断开时 Dispose 它，等于把信号量从其余所有连接脚下抽走——
+                // 正是同一个混淆当初把这个字段做成了进程级。现在没人读它，
+                // 这里 Dispose 掉的只可能是下游赋进来的值；它会随字段在下个版本一起消失。
+#pragma warning disable CS0618 // deliberately touching the obsolete field, to clean up what a caller may have assigned
                 ParallelForwardLimitSlim?.Dispose();
                 ParallelForwardLimitSlim = null;
+#pragma warning restore CS0618
             }
         }
 
