@@ -306,13 +306,29 @@ namespace Cyaim.WebSocketServer.Tests
             typeof(WebSocketRouteOption).GetProperty("MethodInvokerFactory", BindingFlags.NonPublic | BindingFlags.Instance)
                 .SetValue(options, factory);
 
+            // Observed through ExceptionEvent rather than through Msg. Reading it out of the response
+            // only worked while the response carried ex.Message and the stack trace back to the caller,
+            // so this assertion was quietly holding that leak in place. The property under test is the
+            // AggregateException unwrapping, and the hook is where the unwrapped exception belongs.
+            // 经 ExceptionEvent 观察，而不是读 Msg：从响应里取只有在响应把 ex.Message 与堆栈
+            // 一路带回调用方时才成立，于是这条断言一直在替那个泄漏站台。
+            // 被测的性质是「AggregateException 被剥开」，而钩子才是剥开后的异常该出现的地方。
+            Exception observed = null;
+            options.ExceptionEvent += (ex, request, resp, ctx, opt, channel, logger) =>
+            {
+                observed = ex;
+                return Task.FromResult(resp);
+            };
+
             var response = await MvcChannelHandler.MvcDistributeAsync(
                 options, new DefaultHttpContext(), new TestWebSocket(),
                 new MvcRequestScheme { Id = "r", Target = "fmt.noop" },
                 null, NullLogger<WebSocketRouteMiddleware>.Instance, new MvcTestSupport.StubLifetime());
 
             Assert.Equal(1, response.Status);
-            Assert.Contains("inner-boom", response.Msg);
+            Assert.NotNull(observed);
+            Assert.Contains("inner-boom", observed.Message);
+            Assert.DoesNotContain("inner-boom", response.Msg);
         }
 
         private sealed class AggregateThrowingInvoker : Cyaim.WebSocketServer.Infrastructure.Injectors.IMethodInvoker
