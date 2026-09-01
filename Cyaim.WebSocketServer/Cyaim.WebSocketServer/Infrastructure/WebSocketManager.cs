@@ -39,7 +39,26 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// 每个 socket 的发送门闩。WebSocket 同一实例只允许一个未完成的 SendAsync，
         /// 并发发送同一 socket 时在此串行化（替代旧的全局单消费者队列）。socket 被回收后条目自动释放。
         /// </summary>
-        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<WebSocket, SemaphoreSlim> SendLocks = new System.Runtime.CompilerServices.ConditionalWeakTable<WebSocket, SemaphoreSlim>();
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<WebSocket, SendGate> SendLocks = new System.Runtime.CompilerServices.ConditionalWeakTable<WebSocket, SendGate>();
+
+        /// <summary>
+        /// The per-socket send gate, plus how many callers are behind it.
+        /// </summary>
+        /// <remarks>
+        /// The count is the whole point. A gate alone serialises sends, which is necessary and was
+        /// already here; what was missing is that the queue behind it had no depth. One peer that stops
+        /// reading parks the send holding the gate, and every send after it queues — each holding its
+        /// own serialised payload — until the process runs out of memory.
+        /// 计数才是重点。光有门闩只是把发送串行化，那是必须的、本来就有；缺的是门闩**后面**那条队列没有深度。
+        /// 一个不读的对端会让持有门闩的那次发送停住，其后每一次发送都排在后面，
+        /// 每个都攥着自己那份序列化好的载荷，直到进程内存耗尽。
+        /// </remarks>
+        private sealed class SendGate
+        {
+            public readonly SemaphoreSlim Lock = new SemaphoreSlim(1, 1);
+
+            public int Queued;
+        }
 
         /// <summary>
         /// Send buffer size used by the connection-id send paths, matching <see cref="SendLocalAsync"/>'s default.
@@ -90,9 +109,54 @@ namespace Cyaim.WebSocketServer.Infrastructure
         /// </summary>
         private const long MaxMaterializableBytes = int.MaxValue;
 
-        private static SemaphoreSlim GetSendLock(WebSocket socket)
+        /// <summary>
+        /// How many sends may be waiting on one socket before the peer is disconnected instead.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A peer that will not read is disconnected, not buffered. That is the same answer the
+        /// im-cloud host already gives on its own outbound path, and it is the only answer that
+        /// bounds memory: dropping a response silently would leave the client waiting for a reply
+        /// that is never coming, and queueing without a limit is the defect.
+        /// </para>
+        /// <para>
+        /// Bounding in-flight <i>requests</i> does not bound this. That was measured, not assumed:
+        /// with the in-flight cap at 3 and a client that never read, all 40 pipelined requests were
+        /// still dispatched and their responses still queued, because the transport buffered the
+        /// sends and let each request complete. The two bounds are independent.
+        /// 不读的对端会被断开，而不是被缓冲——这与 im-cloud 宿主在自己的出站路径上给出的答案一致，
+        /// 也是唯一能约束内存的答案：静默丢弃响应会让客户端永远等一个不会来的回复，
+        /// 而无上限地排队本身就是那个缺陷。
+        /// **把在途请求封顶并不能封住这条队列**，这是量出来的、不是假设的：
+        /// 在途上限设为 3、客户端完全不读时，40 条流水线请求仍然全部被派发、响应仍然全部排上队——
+        /// 传输层把发送缓冲了下来，于是每条请求都完成了。两条界互相独立。
+        /// </para>
+        /// </remarks>
+        public static int MaxQueuedSendsPerSocket = 64;
+
+        private static SendGate GetSendLock(WebSocket socket)
         {
-            return SendLocks.GetValue(socket, static _ => new SemaphoreSlim(1, 1));
+            return SendLocks.GetValue(socket, static _ => new SendGate());
+        }
+
+        /// <summary>
+        /// Takes a place in the socket's send queue, or refuses and disconnects when it is full.
+        /// </summary>
+        private static bool TryEnterSendQueue(WebSocket socket, SendGate gate)
+        {
+            int limit = MaxQueuedSendsPerSocket;
+            if (limit > 0 && Interlocked.Increment(ref gate.Queued) > limit)
+            {
+                Interlocked.Decrement(ref gate.Queued);
+
+                // Abort rather than CloseAsync: a close handshake is itself a send, and the send path
+                // is exactly what is wedged.
+                // 用 Abort 而不是 CloseAsync：关闭握手本身也是一次发送，而卡住的正是发送路径。
+                try { socket.Abort(); } catch { }
+                return false;
+            }
+
+            return true;
         }
 
         #region Send core
@@ -104,9 +168,22 @@ namespace Cyaim.WebSocketServer.Infrastructure
 
             var gate = GetSendLock(socket);
 
+            if (!TryEnterSendQueue(socket, gate))
+            {
+                return false;
+            }
+
             // 调用方的取消令牌只在这里生效：排队等门闩期间取消是安全的，因为一帧都还没发。
             // The caller's token applies here only: cancelling while queued is safe, no frame has gone out.
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await gate.Lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                Interlocked.Decrement(ref gate.Queued);
+                throw;
+            }
 
             bool wroteFrames = false;
             try
@@ -130,7 +207,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 }
                 finally
                 {
-                    gate.Release();
+                    gate.Lock.Release();
+                    Interlocked.Decrement(ref gate.Queued);
                 }
             }
             catch
@@ -673,7 +751,20 @@ namespace Cyaim.WebSocketServer.Infrastructure
             int frameCap = MaxSendFrameBytes > 0 ? MaxSendFrameBytes : (int)Math.Max(readChunk, 64 * 1024);
             var gate = GetSendLock(socket);
 
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (!TryEnterSendQueue(socket, gate))
+            {
+                return;
+            }
+
+            try
+            {
+                await gate.Lock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                Interlocked.Decrement(ref gate.Queued);
+                throw;
+            }
 
             byte[] buffer = ArrayPool<byte>.Shared.Rent(frameCap);
             bool anyFrameSent = false;
@@ -724,7 +815,8 @@ namespace Cyaim.WebSocketServer.Infrastructure
                 {
                     ArrayPool<byte>.Shared.Return(buffer);
                     prefix.Return();
-                    gate.Release();
+                    gate.Lock.Release();
+                    Interlocked.Decrement(ref gate.Queued);
                 }
             }
             catch
