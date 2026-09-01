@@ -58,6 +58,20 @@ namespace Cyaim.WebSocketServer.Tests
 
             // Streaming endpoint — receives the payload as a Stream (fed frame-by-frame), never fully
             // buffered. Cap 1 MiB. Returns the total bytes read.
+            /// <summary>
+            /// A streaming endpoint that rejects the upload without reading a byte of it.
+            /// </summary>
+            /// <remarks>
+            /// The ordinary way to refuse an upload — check something, return — and the case that used
+            /// to wedge the whole connection: nobody reads the pipe after the endpoint returns, so the
+            /// feed loop blocks at PauseWriterThreshold for ever and the receive loop never comes back.
+            /// 拒绝上传的常规写法——检查一下、返回——也正是曾经会把整条连接焊死的那个情形：
+            /// 端点返回后没人再读 pipe，喂数据循环卡死在 PauseWriterThreshold 上，接收循环再也回不来。
+            /// </remarks>
+            [Infrastructure.Attributes.WebSocket(Stream = true, MaxBytes = 1024 * 1024)]
+            public Task<string> UploadRejected(System.IO.Stream body, System.Threading.CancellationToken ct)
+                => Task.FromResult("rejected");
+
             [Infrastructure.Attributes.WebSocket(Stream = true, MaxBytes = 1024 * 1024)]
             public async Task<string> Upload(System.IO.Stream body, System.Threading.CancellationToken ct)
             {

@@ -527,6 +527,70 @@ namespace Cyaim.WebSocketServer.Tests
             return msg;
         }
 
+        /// <summary>
+        /// An upload the endpoint refuses without reading still answers, and the connection survives.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Refusing an upload by checking a header and returning is the ordinary way to reject one. It
+        /// used to wedge the connection permanently: nothing completes the pipe reader when the endpoint
+        /// returns, so the feed loop blocked at <c>PauseWriterThreshold</c> (64 KiB) for ever,
+        /// <c>CompleteAsync</c> was never reached, <c>await invokeTask</c> was never reached, and the
+        /// receive loop never returned. <c>Abort()</c> could not break it either — the block is on the
+        /// pipe, not on the socket.
+        /// 用「检查一下、返回」来拒绝上传，本是常规写法，而它曾经会把连接永久焊死：
+        /// 端点返回时没有任何东西 Complete 掉 pipe 的 reader，喂数据循环卡在 PauseWriterThreshold（64 KiB）
+        /// 上再也回不来，CompleteAsync 到不了、await invokeTask 到不了、接收循环不返回。
+        /// Abort() 也解不开——阻塞在 pipe 上，不在 socket 上。
+        /// </para>
+        /// <para>
+        /// The payload is 256 KiB deliberately: anything under the 64 KiB threshold fits in the pipe and
+        /// the bug never shows. And it needs no attacker — this is what a legitimate large upload does
+        /// when it fails validation.
+        /// 载荷刻意取 256 KiB：低于 64 KiB 阈值的量能整个装进 pipe，缺陷根本不会显形。
+        /// 而且它不需要攻击者——一次正常的大上传在校验失败时走的就是这条路。
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public async Task StreamingEndpoint_ThatReturnsWithoutReading_DoesNotWedgeTheConnection()
+        {
+            using var host = await StartHostAsync(CreateOption(o => o.MaxRequestReceiveDataLimit = 4096));
+            var socket = await ConnectAsync(host);
+            using var cts = new CancellationTokenSource(TestTimeout);
+
+            byte[] payload = new byte[256 * 1024];
+            byte[] msg = BuildUploadMessage("{\"id\":\"u-reject\",\"target\":\"wstest.uploadrejected\"}", payload);
+
+            for (int off = 0; off < msg.Length; off += 8192)
+            {
+                int len = Math.Min(8192, msg.Length - off);
+                await socket.SendAsync(new ArraySegment<byte>(msg, off, len), WebSocketMessageType.Binary, off + len >= msg.Length, cts.Token);
+            }
+
+            string resp = await ReceiveFullMessageAsync(socket, cts.Token);
+            using (var doc = JsonDocument.Parse(resp))
+            {
+                Assert.Equal("u-reject", doc.RootElement.GetProperty("Id").GetString());
+                Assert.Equal("rejected", doc.RootElement.GetProperty("Body").GetString());
+            }
+
+            // The connection has to still work afterwards. A receive loop that came back only because
+            // the socket was torn down would satisfy the assertion above and nothing else.
+            // 之后连接必须还能用。一个「靠 socket 被拆掉才回来」的接收循环，
+            // 能满足上面那条断言，别的什么都满足不了。
+            string echo = JsonSerializer.Serialize(new { Id = "after", Target = "wstest.echo", Body = new { text = "still here" } });
+            await socket.SendAsync(Encoding.UTF8.GetBytes(echo), WebSocketMessageType.Text, true, cts.Token);
+
+            string resp2 = await ReceiveFullMessageAsync(socket, cts.Token);
+            using (var doc = JsonDocument.Parse(resp2))
+            {
+                Assert.Equal("after", doc.RootElement.GetProperty("Id").GetString());
+            }
+
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+            await host.StopAsync();
+        }
+
         [Fact]
         public async Task StreamingEndpoint_ReceivesUpload_BypassingBufferedGlobalLimit()
         {

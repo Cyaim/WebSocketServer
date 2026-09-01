@@ -979,7 +979,29 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     }
                     catch (Exception ex)
                     {
-                        logger.LogInformation(ex, ex.Message, Encoding.UTF8.GetString(wsReceiveReader.GetBuffer(), 0, (int)wsReceiveReader.Length));
+                        // Two problems in one line, and both are paid on every failed message.
+                        //
+                        // The buffer was materialised into a UTF-16 string that no sink would ever
+                        // render: `ex.Message` was the message *template*, and a template with no
+                        // placeholder discards its arguments. LogInformation is an extension method,
+                        // so the argument is evaluated before IsEnabled is consulted — raising the log
+                        // level did not switch the allocation off. Any message past the receive buffer
+                        // size takes this path (4 KiB here), so a stream of oversized non-JSON is a 2×
+                        // allocation amplifier that a caller controls.
+                        //
+                        // And `ex.Message` as a template is a hazard by itself: an exception whose text
+                        // contains `{` is parsed as a placeholder and the logging call throws — inside
+                        // the outermost catch of the receive loop, which is the worst place for it.
+                        //
+                        // 一行里两个问题，而且每条失败消息都要付一次。
+                        // 缓冲区被物化成一份没有任何 sink 会渲染的 UTF-16 字符串：ex.Message 是消息**模板**，
+                        // 而没有占位符的模板会丢弃它的参数。LogInformation 是扩展方法，
+                        // 实参在 IsEnabled 之前就求值——调高日志级别关不掉这次分配。
+                        // 任何超过接收缓冲大小（这里 4 KiB）的消息都走这条路径，
+                        // 于是持续发送超大的非 JSON 就是一个调用方可控的 2× 分配放大器。
+                        // 而 ex.Message 当模板本身也是个雷：异常文本里出现 `{` 会被当占位符解析、
+                        // 日志调用自身抛异常——发生在接收循环的最外层 catch 里，是最糟的位置。
+                        logger.LogInformation(ex, "Message dispatch failed; {Bytes} bytes were buffered", wsReceiveReader.Length);
                     }
                     finally
                     {
