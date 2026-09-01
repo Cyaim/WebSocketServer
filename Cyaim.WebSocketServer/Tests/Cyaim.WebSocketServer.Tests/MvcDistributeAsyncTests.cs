@@ -278,13 +278,38 @@ namespace Cyaim.WebSocketServer.Tests
             Assert.Contains("wstest.throw", response.Msg);
         }
 
+        /// <remarks>
+        /// Observed through <c>ExceptionEvent</c>, not through <c>Msg</c>. It used to read the message
+        /// out of the response, which worked only because the response carried <c>ex.Message</c> and
+        /// the stack trace back to the caller — this test was quietly holding that leak in place.
+        /// The property it protects is the unwrapping, and the hook is where the unwrapped exception
+        /// is legitimately visible.
+        /// 改为经 ExceptionEvent 观察，而不是读 Msg。它原本从响应里取异常消息，
+        /// 而那只有在响应把 ex.Message 与堆栈一路带回调用方时才成立——
+        /// 这条测试一直在悄悄替那个泄漏站台。它要保护的性质是「剥开包装」，
+        /// 而钩子正是剥开后的异常本该可见的地方。
+        /// </remarks>
         [Fact]
         public async Task AsyncEndpointThrows_ReturnsStatus1_InnerExceptionUnwrapped()
         {
-            var response = await DistributeAsync(CreateOptions(), "wstest.throwasync", null);
+            var options = CreateOptions();
+            Exception observed = null;
+            options.ExceptionEvent += (ex, request, resp, ctx, opt, channel, logger) =>
+            {
+                observed = ex;
+                return Task.FromResult(resp);
+            };
+
+            var response = await DistributeAsync(options, "wstest.throwasync", null);
 
             Assert.Equal(1, response.Status);
-            Assert.Contains("boom-async-endpoint", response.Msg);
+            Assert.NotNull(observed);
+            Assert.Contains("boom-async-endpoint", observed.Message);
+
+            // And the caller is still told which target failed, without being told anything about us.
+            // 同时调用方仍然知道是哪个 target 失败了，而不会知道任何关于我们的事。
+            Assert.Contains("wstest.throwasync", response.Msg);
+            Assert.DoesNotContain("boom-async-endpoint", response.Msg);
         }
 
         [Fact]

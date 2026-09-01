@@ -1651,8 +1651,31 @@ namespace Cyaim.WebSocketServer.Infrastructure.Handlers.MvcHandler
                     ex = tiEx.InnerException;
                 }
 
-                resp.Msg = string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcDistributeAsync_Target + requestPath + Environment.NewLine + ex.Message + Environment.NewLine + ex.StackTrace);
-                logger.LogInformation(resp.Msg);
+                // The exception detail goes to the log, not to the socket.
+                //
+                // This used to put `ex.Message` and the full stack trace into resp.Msg, and resp is what
+                // goes back to the caller: any client that could make an endpoint throw got assembly
+                // names, file paths, internal type names and framework versions out of a server it had
+                // only just connected to. A handler registered on ExceptionEvent could overwrite Msg —
+                // im-cloud's does, and its comment says why — but a default that leaks unless the host
+                // knows to override it is a default that leaks.
+                //
+                // Msg still names the target, which the client supplied and already knows, so a
+                // developer reading a response can still tell *which* endpoint failed. Everything that
+                // identifies the server stays on this side of the wire. Whoever wants the detail on the
+                // wire can put it back in an ExceptionEvent handler — that hook receives `ex` itself.
+                //
+                // 异常细节进日志，不进 socket。
+                // 这里原本把 ex.Message 和完整堆栈写进 resp.Msg，而 resp 正是回给调用方的东西：
+                // 任何能让端点抛异常的客户端，都能从一台它刚连上的服务器拿到程序集名、文件路径、
+                // 内部类型名和框架版本。注册在 ExceptionEvent 上的处理器可以覆盖 Msg——
+                // im-cloud 的就这么做了，注释里写明了理由——但一个「宿主不知道要覆盖就会泄」的默认值，
+                // 就是一个会泄的默认值。
+                // Msg 仍然点名 target：那是客户端自己传上来的、它本来就知道，
+                // 于是读响应的开发者仍能知道是**哪个**端点失败了。能标识服务器的东西全部留在这一侧。
+                // 想让细节上线的人可以在 ExceptionEvent 处理器里放回去——那个钩子拿得到 ex 本身。
+                resp.Msg = string.Format(I18nText.WS_INTERACTIVE_TEXT_TEMPALTE, context.Connection.RemoteIpAddress, context.Connection.RemotePort, context.Connection.Id, I18nText.MvcDistributeAsync_Target + requestPath);
+                logger.LogInformation(ex, resp.Msg);
 
                 MvcResponseScheme customResp = await webSocketOptions.OnException(ex, request, resp, context, webSocketOptions, context.Request.Path, logger).ConfigureAwait(false);
 
